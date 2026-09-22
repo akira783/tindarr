@@ -126,7 +126,17 @@ def test_error_codes_are_documented() -> None:
     description = contract()["components"]["schemas"]["Problem"]["properties"]["code"][
         "description"
     ]
-    for code in ("validation_error", "not_found", "method_not_allowed", "internal_error"):
+    for code in (
+        "validation_error",
+        "unauthorized",
+        "forbidden",
+        "not_found",
+        "method_not_allowed",
+        "rate_limited",
+        "setting_locked",
+        "bad_request",
+        "internal_error",
+    ):
         assert code in description
 
 

@@ -11,14 +11,16 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from http import HTTPStatus
 from typing import Final, Literal
 
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from tindeerr.core.config import read_env
+from tindeerr.core.config import env_var_name, read_env
 from tindeerr.core.crypto import SecretCipher
+from tindeerr.core.errors import ProblemError
 from tindeerr.core.logs import register_secret
 from tindeerr.storage.db import write_transaction
 from tindeerr.storage.tables import settings as settings_table
@@ -64,8 +66,16 @@ class UnknownSettingError(LookupError):
     """No setting with that name is declared."""
 
 
-class SettingLockedError(Exception):
-    """The setting is set by an environment variable (problem ``code`` ``setting_locked``)."""
+class SettingLockedError(ProblemError):
+    """The setting is set by an environment variable (409, ``setting_locked``)."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            HTTPStatus.CONFLICT,
+            "setting_locked",
+            f"{name} is set by {env_var_name(name)} and cannot be changed here",
+        )
+        self.name = name
 
 
 def environment_overrides(

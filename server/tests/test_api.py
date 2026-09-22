@@ -1,18 +1,24 @@
 import logging
 import sqlite3
 import time
+from collections.abc import AsyncIterator
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from tindeerr import __version__
 from tindeerr.core.config import ServerConfig
+from tindeerr.core.crypto import DecryptionError
+from tindeerr.core.errors import ProblemError
 from tindeerr.main.app import create_app
 from tindeerr.storage.db import database_path
+from tindeerr.storage.settings import SettingLockedError
 
 SECURITY_HEADERS = {
     "cache-control": "no-store",
@@ -33,9 +39,39 @@ def add_test_routes(app: FastAPI) -> None:
     async def whoami(request: Request) -> dict[str, str | None]:
         return {"client": request.client.host if request.client else None}
 
+    async def locked() -> None:
+        raise SettingLockedError("server_name")
+
+    async def undecryptable() -> None:
+        msg = "encrypted with another key (id 0a1b2c3d); was the secret key changed?"
+        raise DecryptionError(msg)
+
+    async def limited() -> None:
+        raise ProblemError(429, "rate_limited", "Too many attempts.", {"Retry-After": "3"})
+
+    async def unavailable() -> None:
+        raise ProblemError(503, "media_server_unreachable", "at http://10.0.0.5:8096 (secret)")
+
+    async def framework(status: int) -> None:
+        raise StarletteHTTPException(status)
+
+    async def streaming() -> StreamingResponse:
+        async def chunks() -> AsyncIterator[bytes]:
+            yield b"first chunk"
+            msg = "failed mid-stream"
+            raise RuntimeError(msg)
+
+        return StreamingResponse(chunks())
+
     app.add_api_route("/test/items", items)
     app.add_api_route("/test/boom", boom)
     app.add_api_route("/test/whoami", whoami)
+    app.add_api_route("/test/locked", locked)
+    app.add_api_route("/test/undecryptable", undecryptable)
+    app.add_api_route("/test/limited", limited)
+    app.add_api_route("/test/unavailable", unavailable)
+    app.add_api_route("/test/framework/{status}", framework)
+    app.add_api_route("/test/streaming", streaming)
 
 
 @pytest.fixture
@@ -230,3 +266,82 @@ def test_huge_hyphenated_path_does_not_block_the_server(client: TestClient) -> N
     response = client.get("/" + "a-" * 8192)
     assert response.status_code == 404
     assert time.perf_counter() - started < 1
+
+
+def test_setting_locked_is_a_409_problem(test_client: TestClient) -> None:
+    with test_client:
+        response = test_client.get("/test/locked")
+    assert response.status_code == 409
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json() == {
+        "type": "about:blank",
+        "title": "Conflict",
+        "status": 409,
+        "code": "setting_locked",
+        "detail": "server_name is set by TINDEERR_SERVER_NAME and cannot be changed here",
+    }
+
+
+def test_decryption_error_is_a_generic_500_logged_distinctly(
+    test_client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    with test_client, caplog.at_level(logging.ERROR):
+        response = test_client.get("/test/undecryptable")
+    assert response.status_code == 500
+    assert response.json()["code"] == "internal_error"
+    assert "another key" not in response.text
+    (record,) = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert "secret key changed" in record.getMessage()
+    assert record.__dict__["problem"] == "decryption_failed"
+
+
+def test_problem_error_keeps_status_code_detail_and_headers(test_client: TestClient) -> None:
+    with test_client:
+        response = test_client.get("/test/limited")
+    assert response.status_code == 429
+    assert response.json()["code"] == "rate_limited"
+    assert response.json()["detail"] == "Too many attempts."
+    assert response.headers["retry-after"] == "3"
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_server_side_problem_details_are_logged_not_sent(
+    test_client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    with test_client, caplog.at_level(logging.ERROR):
+        response = test_client.get("/test/unavailable")
+    assert response.status_code == 503
+    assert response.json() == {
+        "type": "about:blank",
+        "title": "Service Unavailable",
+        "status": 503,
+        "code": "media_server_unreachable",
+    }
+    assert any(record.exc_info for record in caplog.records)
+
+
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [
+        (400, "validation_error"),
+        (401, "unauthorized"),
+        (403, "forbidden"),
+        (404, "not_found"),
+        (405, "method_not_allowed"),
+        (409, "bad_request"),
+        (429, "rate_limited"),
+        (502, "internal_error"),
+    ],
+)
+def test_framework_errors_get_a_code_from_their_status(
+    test_client: TestClient, status: int, code: str
+) -> None:
+    with test_client:
+        response = test_client.get(f"/test/framework/{status}")
+    assert response.status_code == status
+    assert response.json()["code"] == code
+
+
+def test_error_after_the_response_started_aborts_the_connection(test_client: TestClient) -> None:
+    with test_client, pytest.raises(RuntimeError, match="mid-stream"):
+        test_client.get("/test/streaming")

@@ -2,6 +2,14 @@
 
 Clients switch on ``code``, never on ``title`` or ``detail``. Exception messages and
 tracebacks are logged (redacted), never sent to the client.
+
+- ``ProblemError`` (``tindeerr.core.errors``), raised by any layer, keeps its status,
+  code, detail and headers; for a 5xx its detail is logged, not sent.
+- ``DecryptionError`` (a stored secret that no longer decrypts, usually after a change of
+  secret key) is logged with its own message and answered as a generic 500.
+- Framework errors (404, 405, 429...) get a code from their status; invalid input is a
+  400 ``validation_error`` listing fields and messages, never the rejected value.
+- Anything else is a generic 500 ``internal_error``.
 """
 
 import logging
@@ -16,12 +24,18 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from tindeerr.core.crypto import DecryptionError
+from tindeerr.core.errors import ProblemError
+
 PROBLEM_MEDIA_TYPE: Final = "application/problem+json"
 
 _CODES_BY_STATUS: Final[Mapping[int, str]] = {
     HTTPStatus.BAD_REQUEST: "validation_error",
+    HTTPStatus.UNAUTHORIZED: "unauthorized",
+    HTTPStatus.FORBIDDEN: "forbidden",
     HTTPStatus.NOT_FOUND: "not_found",
     HTTPStatus.METHOD_NOT_ALLOWED: "method_not_allowed",
+    HTTPStatus.TOO_MANY_REQUESTS: "rate_limited",
 }
 
 logger = logging.getLogger(__name__)
@@ -85,17 +99,38 @@ async def _validation_exception_handler(_request: Request, exc: Exception) -> JS
     return problem_response(HTTPStatus.BAD_REQUEST, "validation_error", errors=errors)
 
 
+async def _problem_error_handler(_request: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, ProblemError)  # noqa: S101 - registered for this type
+    if exc.status >= HTTPStatus.INTERNAL_SERVER_ERROR:
+        logger.error("request failed", exc_info=exc, extra={"problem": exc.code})
+        return problem_response(exc.status, exc.code, headers=exc.headers)
+    return problem_response(exc.status, exc.code, detail=exc.detail, headers=exc.headers)
+
+
+async def _decryption_error_handler(_request: Request, exc: Exception) -> JSONResponse:
+    logger.error(
+        "a stored secret cannot be decrypted; was the secret key changed?",
+        exc_info=exc,
+        extra={"problem": "decryption_failed"},
+    )
+    return problem_response(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error")
+
+
 def install_error_handlers(app: FastAPI) -> None:
-    """Render framework errors (404, 405, invalid input) as problem details."""
+    """Render domain errors, framework errors and invalid input as problem details."""
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     app.add_exception_handler(RequestValidationError, _validation_exception_handler)
+    app.add_exception_handler(ProblemError, _problem_error_handler)
+    app.add_exception_handler(DecryptionError, _decryption_error_handler)
 
 
 class UnhandledErrorMiddleware:
     """Turns any unhandled exception into a generic ``internal_error`` problem.
 
     Installed inside the other middlewares, so the 500 response still gets the request
-    id and security headers.
+    id and security headers. When the response has already started, a problem can no
+    longer be sent: the exception is re-raised so the server aborts the connection
+    instead of leaving the client with a truncated body that looks complete.
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -118,6 +153,7 @@ class UnhandledErrorMiddleware:
             await self.app(scope, receive, send_wrapper)
         except Exception:
             logger.exception("unhandled error")
-            if not response_started:
-                response = problem_response(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error")
-                await response(scope, receive, send)
+            if response_started:
+                raise
+            response = problem_response(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error")
+            await response(scope, receive, send)
