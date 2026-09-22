@@ -105,8 +105,10 @@ class PlexPinFlow:
 
     async def _require_plex(self, caller: Caller) -> None:
         await self._sign_in.require_open(caller)
-        settings = await self._sign_in.configured()
-        if settings.kind != "plex":
+        # A server that is not Plex and a server that is not configured at all answer
+        # the same here: the contract's 409 covers both ("while no Plex media server is
+        # configured"), and neither tells the caller anything they should not know.
+        if await self._sign_in.configured_kind() != "plex":
             raise errors.sign_in_method_unavailable("This server does not sign in with Plex.")
 
     async def status(self, handle_id: str, session_id: str) -> PinStatus:

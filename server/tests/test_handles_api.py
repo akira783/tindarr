@@ -421,6 +421,15 @@ def test_a_plex_pin_is_not_offered_when_the_server_is_jellyfin(app: FastAPI) -> 
     assert_is_problem(response, 409, "sign_in_method_unavailable")
 
 
+def test_a_sign_in_pin_before_any_media_server_says_the_method_is_unavailable(
+    app: FastAPI,
+) -> None:
+    with console_client(app) as client:
+        claim(client, app)
+        response = start_plex_pin(client)
+    assert_is_problem(response, 409, "sign_in_method_unavailable")
+
+
 def test_an_owner_token_pin_needs_a_session(app: FastAPI) -> None:
     with console_client(app) as client:
         response = client.post(

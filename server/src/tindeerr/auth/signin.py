@@ -40,7 +40,7 @@ from tindeerr.auth.tokens import token_hash
 from tindeerr.auth.users import link_user
 from tindeerr.core.clock import Clock
 from tindeerr.core.errors import ProblemError
-from tindeerr.ports.media_server import MediaServer, MediaUser
+from tindeerr.ports.media_server import MediaServer, MediaServerKind, MediaUser
 from tindeerr.storage.db import write_transaction
 from tindeerr.storage.server_state import ServerStateRepository
 from tindeerr.storage.sessions import NO_DEVICE, Device, Session
@@ -151,6 +151,11 @@ class SignInService:
         if settings is None:
             raise errors.setup_required()
         return settings
+
+    async def configured_kind(self) -> MediaServerKind | None:
+        """Return the configured media server's kind, or ``None`` when there is none."""
+        settings = await self._connector.configured()
+        return None if settings is None else settings.kind
 
     async def adapter(self) -> MediaServer:
         """Return the adapter, with its identity checked in the last five minutes."""
