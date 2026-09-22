@@ -3,9 +3,11 @@
 # filesystem, no capabilities, no privilege escalation, a fresh volume for /data.
 #
 # Usage: docker-smoke-test.sh <image>
-# Checks: /healthz and /api/v1/server/info answer; logs are JSON lines and never contain
-# the secret key; the in-image healthcheck passes; a restart on the same volume reuses
-# the key and does not migrate again.
+# Checks: /healthz and /api/v1/server/info answer; the built web console is in the
+# image and, once the server serves it (lot 2c), / answers with index.html under the
+# console CSP; logs are JSON lines and never contain the secret key; the in-image
+# healthcheck passes; a restart on the same volume reuses the key and does not migrate
+# again.
 set -euo pipefail
 
 image="${1:?usage: $0 <image>}"
@@ -75,6 +77,45 @@ rm -f headers.txt
 
 problem="$(curl -sS -o /dev/null -w '%{http_code} %{content_type}' "$base/api/v1/nope")"
 [ "$problem" = "404 application/problem+json" ] || fail "unexpected 404 response: $problem"
+
+# The Node build stage put the console in the image (docs/architecture.md: the runtime
+# stage copies web/dist to TINDEERR_WEB_DIR).
+docker exec "$name" test -f /app/web/index.html || fail "the console is missing from /app/web"
+docker exec "$name" sh -c 'ls /app/web/assets/*.js >/dev/null 2>&1' \
+  || fail "the console has no hashed asset in /app/web/assets"
+if docker exec "$name" sh -c 'command -v node >/dev/null 2>&1'; then
+  fail "the runtime image must not contain Node"
+fi
+
+# Serving it is lot 2c. While the server answers something else, say so and move on, so
+# this check turns itself on the day the server part lands.
+console_status="$(curl -sS -o console.html -D console-headers.txt -w '%{http_code}' "$base/")"
+if [ "$console_status" = "200" ]; then
+  grep -q '<div id="root"></div>' console.html || fail "/ did not serve the console index.html"
+  csp="$(grep -i '^content-security-policy:' console-headers.txt || true)"
+  [ -n "$csp" ] || fail "/ has no Content-Security-Policy"
+  for directive in "default-src 'self'" "script-src 'self'" "style-src 'self'" \
+      "object-src 'none'" "base-uri 'none'" "frame-ancestors 'none'" \
+      "require-trusted-types-for 'script'"; do
+    grep -qF "$directive" <<<"$csp" || fail "console CSP is missing: $directive"
+  done
+  grep -qi '^cache-control: no-store' console-headers.txt || fail "index.html must not be cached"
+  grep -qi '^cross-origin-opener-policy: same-origin' console-headers.txt \
+    || fail "index.html needs Cross-Origin-Opener-Policy: same-origin"
+  grep -qi '^x-frame-options: deny' console-headers.txt || fail "index.html needs X-Frame-Options: DENY"
+
+  asset="$(grep -o '/assets/[^"]*\.js' console.html | head -1)"
+  [ -n "$asset" ] || fail "index.html references no hashed asset"
+  curl -fsS -o /dev/null -D asset-headers.txt "$base$asset" || fail "$asset is not served"
+  grep -qi '^cache-control: public, max-age=31536000, immutable' asset-headers.txt \
+    || fail "hashed assets must be cached as immutable"
+  missing="$(curl -sS -o /dev/null -w '%{http_code}' "$base/assets/does-not-exist.js")"
+  [ "$missing" = "404" ] || fail "a missing asset must be a 404, not index.html (got $missing)"
+  echo "console served under the console CSP"
+else
+  echo "::notice::/ answered $console_status: the server does not serve the console yet (lot 2c)."
+fi
+rm -f console.html console-headers.txt asset-headers.txt
 
 docker exec "$name" tindeerr healthcheck || fail "in-image healthcheck failed"
 

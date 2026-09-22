@@ -291,8 +291,12 @@ Details in [the authentication reference](auth.md), with the reasons in
 - **Stack:** React, Vite, TypeScript `strict`, in `web/`
   ([ADR 0009](adr/0009-web-console-and-phone-pairing.md)). TanStack Query for server
   state, React Router for routes, i18next with react-i18next for translations. ESLint
-  (with `react/no-danger`), Vitest, Playwright for the end-to-end tests. Plain CSS files
-  (or CSS modules), no CSS-in-JS that injects `<style>` elements.
+  (type-aware, with `@eslint-react` — including its rule against
+  `dangerouslySetInnerHTML` — `eslint-plugin-react-hooks`, a11y rules, and a ban on
+  `innerHTML`, `eval` and browser storage outside the preferences module), Vitest with
+  Testing Library, Playwright for the end-to-end tests. Plain CSS files (or CSS
+  modules), no CSS-in-JS that injects `<style>` elements. The QR code comes from
+  `qrcode.react` (`QRCodeSVG`, React elements only).
 - **No npm workspaces.** `web/` has its own `package.json` and `package-lock.json`.
   `shared/i18n/` holds only JSON catalogs, imported through a Vite alias (`@i18n`,
   with `server.fs.allow` for the parent folder).
@@ -351,8 +355,10 @@ Details in [the authentication reference](auth.md), with the reasons in
 - **Workflows.**
   - `server.yml`: also triggered by `web/**` and `shared/**`, since the image contains
     the console.
-  - `web.yml` (step 2): `npm ci`, ESLint, `tsc --noEmit`, Vitest, `npm run build`, and
-    the generated-client check; triggered by `web/**`, `shared/**`, `api/openapi.yaml`.
+  - `web.yml` (step 2): `npm ci --ignore-scripts`, ESLint, `tsc --noEmit`, Vitest with
+    coverage, `npm run build` (Vite plus a check that the built page carries no inline
+    script or style, no `data:` URI and no third-party origin), the generated-client
+    check and `npm audit`; triggered by `web/**`, `shared/**`, `api/openapi.yaml`.
   - `e2e.yml` (step 2): the end-to-end suite against the built image, described in the
     [roadmap](roadmap.md#step-2-setup-authentication-and-web-console-shell). It runs in
     CI only.

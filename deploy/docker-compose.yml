@@ -1,6 +1,8 @@
 # Example deployment of the Tindeerr server.
 #
-# Until images are published (roadmap step 5), this builds the image from ../server:
+# Until images are published (roadmap step 5), this builds the image from the
+# repository root (the image contains the web console, so the build needs web/,
+# shared/i18n/ and api/openapi.yaml):
 #   docker compose -f deploy/docker-compose.yml up -d --build
 #
 # The first start generates /data/secret.key (mode 0600). Back up the volume and the key
@@ -10,7 +12,9 @@ name: tindeerr
 
 services:
   tindeerr:
-    build: ../server
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
     image: tindeerr-server:local
     restart: unless-stopped
     ports:
@@ -20,6 +24,10 @@ services:
       - "127.0.0.1:8787:8787"
     environment:
       TINDEERR_LOG_LEVEL: INFO
+      # The console is served under / from TINDEERR_WEB_DIR (default /app/web).
+      # Reach the server by a domain name? Set TINDEERR_PUBLIC_URL (or
+      # TINDEERR_ALLOWED_HOSTS), otherwise the Host header is refused.
+      # TINDEERR_PUBLIC_URL: https://tindeerr.example.com
       # Honour X-Forwarded-For/-Proto only from your reverse proxy (IPs or CIDRs).
       # TINDEERR_TRUSTED_PROXIES: 172.16.0.0/12
       # TINDEERR_SECRET_KEY_FILE: /run/secrets/tindeerr_secret_key

@@ -93,13 +93,16 @@ Deleting the file and restarting generates a new one. The whole flow is describe
 
 ## Container
 
+The image also contains the web console, so it is built from the repository root:
+
 ```sh
-docker build -t tindeerr-server server/
+docker build -f server/Dockerfile -t tindeerr-server .
 docker run -d --name tindeerr -p 8787:8787 -v tindeerr-data:/data \
   --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges \
   tindeerr-server
 ```
 
 The image runs as UID/GID 10001 and only writes to `/data` (a bind mount must be
-writable by that UID) and `/tmp`. See [`../deploy/docker-compose.yml`](../deploy/docker-compose.yml).
+writable by that UID) and `/tmp`. The console is built by a Node stage and copied to
+`/app/web` (`TINDEERR_WEB_DIR`); the runtime image has no Node. See [`../deploy/docker-compose.yml`](../deploy/docker-compose.yml).
 Back up the volume and the key separately.
