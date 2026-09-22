@@ -300,7 +300,8 @@ class FakePlexTv:
         for pin in self.pins.values():
             if pin.code == code:
                 pin.token = token
-                self.devices.setdefault(pin.client_id, f"device-{len(self.devices) + 1}")
+                # plex.tv device ids are numeric, as ``/devices.xml`` returns them.
+                self.devices.setdefault(pin.client_id, str(1000 + len(self.devices) + 1))
                 return
         raise KeyError(code)
 

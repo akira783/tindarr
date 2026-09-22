@@ -242,7 +242,7 @@ def test_an_account_id_that_is_not_a_number_is_refused() -> None:
 
 
 async def test_the_sign_in_device_is_deleted(plex_tv: FakePlexTv) -> None:
-    plex_tv.devices["client-1"] = "device-7"
+    plex_tv.devices["client-1"] = "1007"
     assert await client(plex_tv).delete_device(OWNER_TOKEN, "client-1") is True
     assert plex_tv.devices == {}
     assert plex_tv.requests[-1].method == "DELETE"
@@ -255,7 +255,7 @@ async def test_deleting_an_unknown_device_reports_failure(plex_tv: FakePlexTv) -
 async def test_a_failing_device_deletion_is_only_logged(
     plex_tv: FakePlexTv, log_stream: Any
 ) -> None:
-    plex_tv.devices["client-1"] = "device-7"
+    plex_tv.devices["client-1"] = "1007"
     plex_tv.device_deletion_fails = True
     assert await client(plex_tv).delete_device(OWNER_TOKEN, "client-1") is False
     assert "refused to remove the device" in log_stream.getvalue()
