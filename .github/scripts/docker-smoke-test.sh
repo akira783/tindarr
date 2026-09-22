@@ -11,8 +11,8 @@
 set -euo pipefail
 
 image="${1:?usage: $0 <image>}"
-name="tindeerr-smoke-$$"
-volume="tindeerr-smoke-data-$$"
+name="tindarr-smoke-$$"
+volume="tindarr-smoke-data-$$"
 port="${SMOKE_PORT:-18787}"
 base="http://127.0.0.1:${port}"
 
@@ -79,7 +79,7 @@ problem="$(curl -sS -o /dev/null -w '%{http_code} %{content_type}' "$base/api/v1
 [ "$problem" = "404 application/problem+json" ] || fail "unexpected 404 response: $problem"
 
 # The Node build stage put the console in the image (docs/architecture.md: the runtime
-# stage copies web/dist to TINDEERR_WEB_DIR).
+# stage copies web/dist to TINDARR_WEB_DIR).
 docker exec "$name" test -f /app/web/index.html || fail "the console is missing from /app/web"
 docker exec "$name" sh -c 'ls /app/web/assets/*.js >/dev/null 2>&1' \
   || fail "the console has no hashed asset in /app/web/assets"
@@ -117,7 +117,7 @@ else
 fi
 rm -f console.html console-headers.txt asset-headers.txt
 
-docker exec "$name" tindeerr healthcheck || fail "in-image healthcheck failed"
+docker exec "$name" tindarr healthcheck || fail "in-image healthcheck failed"
 
 key="$(docker exec "$name" cat /data/secret.key)"
 [ "${#key}" -ge 32 ] || fail "generated key too short"

@@ -105,7 +105,7 @@ jobs:
       - name: Build (no push)
         # From the repository root: the image contains the console.
         working-directory: .
-        run: docker build --pull --file server/Dockerfile --tag tindeerr-server:ci .
+        run: docker build --pull --file server/Dockerfile --tag tindarr-server:ci .
       - name: Smoke test (read-only, no capabilities)
         working-directory: .
-        run: .github/scripts/docker-smoke-test.sh tindeerr-server:ci
+        run: .github/scripts/docker-smoke-test.sh tindarr-server:ci

@@ -1,4 +1,4 @@
-# Example deployment of the Tindeerr server.
+# Example deployment of the Tindarr server.
 #
 # Until images are published (roadmap step 5), this builds the image from the
 # repository root (the image contains the web console, so the build needs web/,
@@ -8,14 +8,14 @@
 # The first start generates /data/secret.key (mode 0600). Back up the volume and the key
 # separately: a database copy is useless without the key. To manage the key yourself,
 # provide it as a Docker secret instead (see the commented lines below).
-name: tindeerr
+name: tindarr
 
 services:
-  tindeerr:
+  tindarr:
     build:
       context: ..
       dockerfile: server/Dockerfile
-    image: tindeerr-server:local
+    image: tindarr-server:local
     restart: unless-stopped
     ports:
       # Loopback only: Docker's published ports bypass host firewalls such as ufw.
@@ -23,18 +23,18 @@ services:
       # other devices directly, publish on a specific LAN address instead.
       - "127.0.0.1:8787:8787"
     environment:
-      TINDEERR_LOG_LEVEL: INFO
-      # The console is served under / from TINDEERR_WEB_DIR (default /app/web).
-      # Reach the server by a domain name? Set TINDEERR_PUBLIC_URL (or
-      # TINDEERR_ALLOWED_HOSTS), otherwise the Host header is refused.
-      # TINDEERR_PUBLIC_URL: https://tindeerr.example.com
+      TINDARR_LOG_LEVEL: INFO
+      # The console is served under / from TINDARR_WEB_DIR (default /app/web).
+      # Reach the server by a domain name? Set TINDARR_PUBLIC_URL (or
+      # TINDARR_ALLOWED_HOSTS), otherwise the Host header is refused.
+      # TINDARR_PUBLIC_URL: https://tindarr.example.com
       # Honour X-Forwarded-For/-Proto only from your reverse proxy (IPs or CIDRs).
-      # TINDEERR_TRUSTED_PROXIES: 172.16.0.0/12
-      # TINDEERR_SECRET_KEY_FILE: /run/secrets/tindeerr_secret_key
+      # TINDARR_TRUSTED_PROXIES: 172.16.0.0/12
+      # TINDARR_SECRET_KEY_FILE: /run/secrets/tindarr_secret_key
     # secrets:
-    #   - tindeerr_secret_key
+    #   - tindarr_secret_key
     volumes:
-      - tindeerr-data:/data
+      - tindarr-data:/data
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -48,8 +48,8 @@ services:
     mem_limit: 512m
 
 volumes:
-  tindeerr-data:
+  tindarr-data:
 
 # secrets:
-#   tindeerr_secret_key:
+#   tindarr_secret_key:
 #     file: ./secret_key.txt   # at least 32 characters, e.g. `openssl rand -base64 32`

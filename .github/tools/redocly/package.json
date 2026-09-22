@@ -1,5 +1,5 @@
 {
-  "name": "tindeerr-contract-tools",
+  "name": "tindarr-contract-tools",
   "private": true,
   "description": "Pinned tools for the contract workflow; the lockfile pins every transitive dependency.",
   "license": "MIT",
