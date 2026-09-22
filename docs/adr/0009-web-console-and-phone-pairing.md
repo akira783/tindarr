@@ -5,6 +5,26 @@
 - Amends: [0001](0001-self-hosted-server-and-mobile-app.md),
   [0003](0003-mobile-stack.md), [0004](0004-authentication.md),
   [0006](0006-api-contract-and-versioning.md)
+- Amended by: [0011](0011-hardening-after-the-pre-step-2-review.md)
+
+> **Note (2026-09-22, [ADR 0011](0011-hardening-after-the-pre-step-2-review.md)):**
+> - The setup session has its own cookie, `__Host-tindeerr_setup`; a new claim revokes
+>   the previous setup session, and completion requires that cookie and issues a new
+>   web session.
+> - The `Origin` must be the server's own origin, built from a `Host` that passed the
+>   allowed-hosts check; `public_url` is no longer a second accepted origin. "As seen
+>   after the trusted proxy headers" is defined: rightmost untrusted hop, scheme only
+>   from a trusted proxy, "private" decided on the resolved client IP.
+> - Quick Connect and Plex PIN handles are bound to a purpose and to their initiator
+>   (pre-auth cookie or PKCE verifier) and live in memory.
+> - Pairing gains a console approval step, with a confirmation code shown on both
+>   screens; the preview only returns what the app must display.
+> - `public_url` is verified before saving and only a media server administrator with a
+>   fresh re-authentication can change it.
+> - The SPA fallback never applies under `/api`; security headers depend on the path.
+>
+> Details in [the authentication reference](../auth.md). The text below is kept as
+> decided.
 
 ## Context
 

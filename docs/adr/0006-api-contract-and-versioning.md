@@ -2,11 +2,17 @@
 
 - Status: accepted
 - Date: 2026-09-22
-- Amended by: [0009](0009-web-console-and-phone-pairing.md)
+- Amended by: [0009](0009-web-console-and-phone-pairing.md),
+  [0011](0011-hardening-after-the-pre-step-2-review.md)
 
 > **Note (2026-09-22):** `auth_methods` also lists `quick_connect` and `pairing`, and
 > the API accepts a cookie session (with a CSRF token) from the web console besides
 > bearer tokens. See ADR 0009.
+>
+> **Note (2026-09-22, [ADR 0011](0011-hardening-after-the-pre-step-2-review.md)):**
+> `auth_methods` is empty while setup is pending, lists `quick_connect` from a cached
+> check of the Jellyfin server and `pairing` once `public_url` is set. Rules in
+> [the authentication reference](../auth.md#11-auth_methods-in-serverinfo).
 
 ## Context
 

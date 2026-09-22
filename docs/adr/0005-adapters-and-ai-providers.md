@@ -2,6 +2,15 @@
 
 - Status: accepted
 - Date: 2026-09-22
+- Amended by: [0011](0011-hardening-after-the-pre-step-2-review.md)
+
+> **Note (2026-09-22, [ADR 0011](0011-hardening-after-the-pre-step-2-review.md)):**
+> the request backend targets **Seerr v3.x**; Jellyseerr is accepted as a legacy
+> deployment and Overseerr for Plex only (it has no Jellyfin user ids). Backend users
+> are listed with the admin key **without** `X-API-User` (paged), and Jellyfin ids are
+> normalised (lowercase, no dashes) before comparing with `jellyfinUserId`; `plexId` is
+> the plex.tv account id. The `X-API-User` rule below is confirmed in Seerr's source.
+> Plex tokens travel in the `X-Plex-Token` header, never in a query string.
 
 ## Context
 

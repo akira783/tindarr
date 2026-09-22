@@ -3,6 +3,16 @@
 - Status: accepted
 - Date: 2026-09-22
 - Amends: [0004](0004-authentication.md)
+- Amended by: [0011](0011-hardening-after-the-pre-step-2-review.md)
+
+> **Note (2026-09-22, [ADR 0011](0011-hardening-after-the-pre-step-2-review.md)):**
+> - An hourly sync with the media server also **clears** `media_server_admin` when the
+>   flag was removed there (it never sets it, so a demotion done in Tindeerr still lasts
+>   until that user's next sign-in), and disables users removed or disabled there.
+> - Changing the media server connector or `public_url` needs a media server
+>   administrator with a fresh re-authentication, not just an admin.
+> - Refresh rotation is an atomic compare-and-set; a lost refresh response signs the
+>   user out (accepted). Sessions have absolute lifetimes (app 90 days, web 7 days).
 
 ## Context
 

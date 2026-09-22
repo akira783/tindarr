@@ -3,7 +3,8 @@
 - Status: accepted
 - Date: 2026-09-22
 - Amended by: [0009](0009-web-console-and-phone-pairing.md),
-  [0010](0010-roles-and-refresh-tokens.md)
+  [0010](0010-roles-and-refresh-tokens.md),
+  [0011](0011-hardening-after-the-pre-step-2-review.md)
 
 > **Note (2026-09-22):** superseded in part.
 > - First run happens in the web console, and the setup token became a setup session
@@ -14,6 +15,16 @@
 >   `media_server_admin` or `promoted`, and access tokens drop the `role` claim;
 >   refresh-token reuse has no grace period and the app must refresh single-flight
 >   ([ADR 0010](0010-roles-and-refresh-tokens.md)).
+> - **2026-09-22, [ADR 0011](0011-hardening-after-the-pre-step-2-review.md):** one
+>   active setup session, completion bound to the claiming browser, only the code's
+>   path is logged. Jellyfin/Emby calls use the `Authorization: MediaBrowser … Token=`
+>   header; users whose remote access is disabled are refused from outside the LAN;
+>   password failures forwarded to the media server are capped per username. Plex
+>   sign-in matches the stored `machineIdentifier`, users are keyed by plex.tv account
+>   id, and the sign-in's plex.tv device is deleted after the check, instead of the
+>   token being merely discarded. Every request re-checks its session and user;
+>   sessions get absolute lifetimes; an hourly sync with the media server disables
+>   removed users. Details in [the authentication reference](../auth.md).
 >
 > The text below is kept as decided.
 
