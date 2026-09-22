@@ -1,4 +1,10 @@
-# Tindeerr
+
+
+https://github.com/user-attachments/assets/9bfa0f7f-a31b-4c4f-9cb6-598901187cfb
+
+
+
+# Tindarr
 
 Swipe through AI-picked movies and series, one card at a time, and send the ones you
 like straight to your request queue.
