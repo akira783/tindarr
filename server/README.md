@@ -72,6 +72,17 @@ and the ones the swipe engine will use from step 4 (`TINDEERR_LANGUAGE`,
 (`true`/`false` for booleans, JSON for lists and objects); an invalid one stops the
 server at startup with a message naming the variable.
 
+## Recovery
+
+```sh
+tindeerr media-server reset --yes   # inside the container, e.g. docker exec
+```
+
+Clears the media server connector and its identity, revokes every session, unlinks
+every user (their data stays) and writes a new setup code, so the server can be set up
+again. It is the way back when the media server was replaced and nobody can
+re-authenticate on the old one.
+
 ## First run
 
 A server that has not been set up writes a one-time setup code to `<data>/setup-code`

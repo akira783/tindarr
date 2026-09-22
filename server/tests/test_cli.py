@@ -1,7 +1,10 @@
+import asyncio
+import logging
 import socket
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from typing import Any, override
 
 import pytest
@@ -151,3 +154,53 @@ def test_version(capsys: pytest.CaptureFixture[str]) -> None:
         cli.main(["--version"])
     assert caught.value.code == 0
     assert __version__ in capsys.readouterr().out
+
+
+def test_resetting_the_media_server_needs_a_confirmation(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("TINDEERR_DATA_DIR", str(data_dir))
+    monkeypatch.setattr(cli, "configure_logging", lambda _level: None)
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False)
+    with caplog.at_level(logging.ERROR):
+        assert cli.main(["media-server", "reset"]) == 2
+    assert "--yes" in caplog.text
+    assert not (data_dir / "tindeerr.db").exists()
+
+
+def test_resetting_the_media_server_starts_setup_again(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tindeerr.auth.setupcode import read_setup_code  # noqa: PLC0415
+    from tindeerr.core.config import ServerConfig  # noqa: PLC0415
+    from tindeerr.main.app import start  # noqa: PLC0415
+
+    monkeypatch.setenv("TINDEERR_DATA_DIR", str(data_dir))
+    monkeypatch.setattr(cli, "configure_logging", lambda _level: None)
+
+    async def prepare() -> str:
+        runtime = await start(ServerConfig(data_dir=data_dir))
+        try:
+            await runtime.services.settings.set("media_server_url", "http://jellyfin.lan:8096")
+            code = read_setup_code(runtime.services.setup.code_path)
+            assert code is not None
+            return code
+        finally:
+            await runtime.engine.dispose()
+
+    first_code = asyncio.run(prepare())
+
+    assert cli.main(["media-server", "reset", "--yes"]) == 0
+
+    async def check() -> None:
+        runtime = await start(ServerConfig(data_dir=data_dir))
+        try:
+            assert (await runtime.services.settings.get("media_server_url")).value is None
+            state = await runtime.services.server_state.read()
+            assert state.setup_completed_at is None
+            assert state.media_server_identity is None
+            assert read_setup_code(runtime.services.setup.code_path) != first_code
+        finally:
+            await runtime.engine.dispose()
+
+    asyncio.run(check())

@@ -20,6 +20,7 @@ from tindeerr.core.errors import ProblemError
 from tindeerr.core.keys import KeyMaterial
 from tindeerr.storage import server_state as state_repository
 from tindeerr.storage import sessions as session_repository
+from tindeerr.storage import users as users_repository
 from tindeerr.storage.db import write_transaction
 from tindeerr.storage.sessions import Device
 from tindeerr.storage.settings import SettingsStore
@@ -511,3 +512,65 @@ async def test_setup_cannot_be_completed_twice(
     with pytest.raises(ProblemError) as claimed:
         await setup_service.claim(code, client_key="10.0.0.1")
     assert claimed.value.code == "setup_completed"
+
+
+# --- the reset ----------------------------------------------------------------------
+
+
+async def test_the_reset_clears_the_media_server_and_starts_setup_again(
+    setup_service: SetupService,
+    engine: AsyncEngine,
+    sessions: SessionService,
+    settings_store: SettingsStore,
+) -> None:
+    await configure(setup_service, engine, sessions)
+    first_code = await code_of(setup_service)
+    claim = await setup_service.claim(first_code, client_key="10.0.0.1")
+    completed = await setup_service.complete_setup(claim.session, media_user())
+
+    path = await setup_service.reset()
+
+    assert path == setup_service.code_path
+    code = read_setup_code(path)
+    assert code is not None
+    assert code != first_code
+    # Every session is gone and every user unlinked, but their rows stay.
+    with pytest.raises(ProblemError):
+        await sessions.authenticate_cookie(completed.grant.token, ("web",))
+    async with engine.connect() as connection:
+        state = await state_repository.read(connection)
+        users = await users_repository.list_all(connection)
+    assert state.setup_completed_at is None
+    assert state.media_server_identity is None
+    assert state.setup_code_hash == setup_code_hash(code)
+    assert [user.disabled_reason for user in users] == ["unlinked"]
+    assert (await settings_store.get("media_server_url")).value is None
+    assert (await settings_store.get("media_server_api_key")).value is None
+    # The new code works, and the wizard starts from an empty media server step.
+    assert await setup_service.claim(code, client_key="10.0.0.1")
+    assert (await setup_service.state(client_is_private=True)).media_server is None
+
+
+async def test_the_reset_keeps_what_the_environment_forces(  # noqa: PLR0913, PLR0917
+    engine: AsyncEngine,
+    data_dir: Path,
+    clock: FakeClock,
+    sessions: SessionService,
+    keys: KeyMaterial,
+    media_servers: FakeMediaServers,
+    limits: RateLimits,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = SettingsStore(
+        engine,
+        SecretCipher.for_settings(keys),
+        {"media_server_url": "http://emby.lan:8096"},
+    )
+    connector = MediaServerConnector(engine, settings, media_servers)
+    service = SetupService(engine, data_dir, clock, sessions, connector, settings, limits)
+
+    with caplog.at_level(logging.WARNING):
+        await service.reset()
+
+    assert (await settings.get("media_server_url")).value == "http://emby.lan:8096"
+    assert "forced by the environment" in caplog.text

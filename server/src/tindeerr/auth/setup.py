@@ -13,12 +13,17 @@ without touching this file.
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tindeerr.auth import access, errors
 from tindeerr.auth.events import security_event
-from tindeerr.auth.mediaserver import MediaServerConnector, MediaServerInput
+from tindeerr.auth.mediaserver import (
+    SETTING_FOR_FIELD,
+    MediaServerConnector,
+    MediaServerInput,
+)
 from tindeerr.auth.methods import AuthMethod, sign_in_methods
 from tindeerr.auth.ratelimit import RateLimits
 from tindeerr.auth.sessions import CookieGrant, SessionService
@@ -36,10 +41,15 @@ from tindeerr.core.clock import Clock
 from tindeerr.ports.media_server import ConnectionCheck, MediaServerKind, MediaUser
 from tindeerr.storage import server_state as state_repository
 from tindeerr.storage import sessions as session_repository
+from tindeerr.storage import users as user_repository
 from tindeerr.storage.db import write_transaction
 from tindeerr.storage.sessions import NO_DEVICE, Device, Session
 from tindeerr.storage.settings import SettingsStore, as_password_sign_in
+from tindeerr.storage.tables import settings as settings_table
 from tindeerr.storage.users import User
+
+#: The settings that describe the media server connector, cleared by a reset.
+MEDIA_SERVER_SETTINGS: Final = tuple(SETTING_FOR_FIELD.values())
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +126,40 @@ class SetupService:
         write_setup_code(self._code_path, code)
         async with write_transaction(self._engine) as connection:
             await state_repository.set_setup_code_hash(connection, setup_code_hash(code))
+        self._log_code_path()
+        return self._code_path
+
+    async def reset(self) -> Path:
+        """Undo the media server configuration and put the server back in first-run state.
+
+        The recovery path of ``tindeerr media-server reset`` (docs/auth.md, section 3),
+        used when the media server was reinstalled or replaced and nobody can
+        re-authenticate on it any more. In one transaction it clears the connector
+        settings and the stored identity, revokes every session, unlinks every user and
+        clears ``setup_completed_at``; a new setup code is written first, so a crash in
+        between only costs a code.
+
+        Settings the environment forces cannot be cleared: they are reported and left.
+        """
+        code = generate_setup_code()
+        write_setup_code(self._code_path, code)
+        now = self._clock.now()
+        locked = [name for name in MEDIA_SERVER_SETTINGS if self._settings.is_locked(name)]
+        async with write_transaction(self._engine) as connection:
+            await connection.execute(
+                settings_table.delete().where(
+                    settings_table.c.name.in_(set(MEDIA_SERVER_SETTINGS) - set(locked))
+                )
+            )
+            revoked = await session_repository.revoke_all(connection, "server_changed", now)
+            unlinked = await user_repository.unlink_all(connection)
+            await state_repository.reopen_setup(connection, setup_code_hash(code))
+        security_event("media_server_reset", sessions=revoked, users=unlinked, locked=len(locked))
+        if locked:
+            logger.warning(
+                "some media server settings are forced by the environment and were kept",
+                extra={"settings": sorted(locked)},
+            )
         self._log_code_path()
         return self._code_path
 
