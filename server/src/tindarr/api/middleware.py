@@ -100,10 +100,12 @@ class SecurityHeadersMiddleware:
     """Adds conservative security headers to every HTTP response.
 
     Responses are never framed, and not cached unless the route says otherwise
-    (``Cache-Control`` is only a default). The strict Content-Security-Policy is skipped
-    on ``csp_exempt_paths`` (the optional interactive docs, which load scripts).
-    ``Strict-Transport-Security`` is sent only when ``hsts`` is set
-    (``TINDARR_HSTS``), for deployments that are only ever reached over HTTPS.
+    (``Cache-Control`` is only a default). The strict Content-Security-Policy is a
+    default too: the web console sets its own, looser one on ``index.html``
+    (``tindarr.api.console``), and it is skipped entirely on ``csp_exempt_paths`` (the
+    optional interactive docs, which load scripts). ``Strict-Transport-Security`` is
+    sent only when ``hsts`` is set (``TINDARR_HSTS``), for deployments that are only
+    ever reached over HTTPS.
     """
 
     def __init__(
@@ -129,7 +131,7 @@ class SecurityHeadersMiddleware:
                 if self.hsts:
                     headers["Strict-Transport-Security"] = STRICT_TRANSPORT_SECURITY
                 if apply_csp:
-                    headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
+                    headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
             await send(message)
 
         await self.app(scope, receive, send_wrapper)

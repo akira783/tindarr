@@ -13,6 +13,7 @@ from tindarr import __version__
 from tindarr.adapters.factory import media_server_factory
 from tindarr.adapters.plextv import PlexTvClient
 from tindarr.api import health, v1
+from tindarr.api.console import ConsoleMiddleware, WebConsole
 from tindarr.api.context import AllowedHostMiddleware, HostPolicy, RequestContextMiddleware
 from tindarr.api.deps import AppServices
 from tindarr.api.errors import UnhandledErrorMiddleware, install_error_handlers
@@ -201,6 +202,9 @@ def create_app(config: ServerConfig, wiring: Wiring | None = None) -> FastAPI:
     app.include_router(v1.router)
 
     # Starlette wraps in reverse order: the last middleware added is the outermost.
+    # Innermost: the console, so an unknown API path keeps the router's own 404 problem
+    # and a wrong method its 405 (tindarr.api.console).
+    app.add_middleware(ConsoleMiddleware, console=WebConsole(config.web_dir))
     app.add_middleware(UnhandledErrorMiddleware)
     app.add_middleware(AllowedHostMiddleware)
     app.add_middleware(SecurityHeadersMiddleware, csp_exempt_paths={DOCS_URL}, hsts=config.hsts)

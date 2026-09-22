@@ -60,6 +60,7 @@ values count as unset.
 | `TINDARR_API_DOCS` | `false` | Serve interactive docs at `/api/docs` (and `/api/openapi.json`). |
 | `TINDARR_HSTS` | `false` | Send `Strict-Transport-Security: max-age=31536000`. Only enable it when the server is always reached over HTTPS. |
 | `TINDARR_DB_BACKUPS_KEEP` | `5` | Pre-migration backups to keep. |
+| `TINDARR_WEB_DIR` | `/app/web` | Directory holding the built web console, served under `/`. When it holds no `index.html` (development without a build), every console path answers `404` and only the API is served. |
 
 Settings stored in the database can be forced the same way; they then show as locked
 in the web console. Today: `TINDARR_SERVER_NAME`, `TINDARR_MEDIA_SERVER_KIND`

@@ -23,6 +23,8 @@ from tindarr.core.net import parse_host
 ENV_PREFIX = "TINDARR_"
 FILE_SUFFIX = "_FILE"
 DEFAULT_PORT = 8787
+#: Where the runtime image copies the built web console (docs/architecture.md).
+DEFAULT_WEB_DIR = Path("/app/web")
 
 type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
 
@@ -98,6 +100,10 @@ class ServerConfig(BaseModel):
     )
     db_backups_keep: int = Field(
         default=5, ge=1, le=100, description="Pre-migration database backups to keep."
+    )
+    web_dir: Path = Field(
+        default=DEFAULT_WEB_DIR,
+        description="Directory holding the built web console, served under /.",
     )
 
     @field_validator("log_level", mode="before")
