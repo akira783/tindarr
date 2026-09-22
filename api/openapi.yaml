@@ -14,17 +14,53 @@ info:
       unknown enum values as "other".
     - Errors are `application/problem+json` with a stable `code`.
     - Slow work answers `202` with `retry_after_ms`; the client polls.
-    - Authentication (see docs/adr/0009):
-      - The app sends a bearer access token. When an `Authorization` header is
-        present, the session cookie is ignored.
-      - The console sends the `__Host-tindeerr_session` cookie. On `POST`, `PUT`,
-        `PATCH` and `DELETE` it must also send `X-CSRF-Token` (the `csrfToken`
-        scheme, never checked on `GET`), and the `Origin` header must be the
-        server's own origin (`code` = `csrf_failed` otherwise).
-      - Endpoints without their own `security` accept either. Endpoints tagged
-        `console` accept only a web session (or the setup session for `setup`).
-        `security: []` marks public endpoints.
+    - Every `429` carries `retry_after_ms` and a `Retry-After` header.
     - CORS is disabled: the console is same-origin.
+
+    Every request (docs/auth.md, sections 1 and 2):
+    - The `Host` header must be an IP literal, `localhost`, a name in
+      `TINDEERR_ALLOWED_HOSTS` or the host of `public_url`; anything else gets
+      `400` `host_not_allowed` before routing, on every path but `/healthz`.
+    - The client IP and scheme come from `X-Forwarded-For` and
+      `X-Forwarded-Proto` only when the peer is in `TINDEERR_TRUSTED_PROXIES`.
+      The server's origin is `<scheme>://<Host>`.
+    - Codes, handles and tokens travel in bodies, cookies or headers, never in a
+      path or query string.
+
+    Authentication (docs/adr/0009, docs/auth.md section 2), in this order:
+    1. The app sends a bearer access token. When an `Authorization` header is
+       present it is the only credential considered: every cookie is ignored and
+       no CSRF check applies. An operation that does not list `bearer` then
+       answers `401` `unauthorized`, as if nothing had been sent.
+    2. Otherwise the cookie of the kind the operation accepts is used:
+       `__Host-tindeerr_session` (`cookieSession`, web session),
+       `__Host-tindeerr_setup` (`setupSession`, setup session) or
+       `__Host-tindeerr_preauth` (`preAuth`, binds console sign-in handles). A
+       cookie of another kind is never accepted in its place (`401`).
+    3. Every authenticated request loads its session and its user: a revoked or
+       expired session, or a disabled or unlinked user, gets `401`
+       `unauthorized` at once.
+    4. CSRF: on `POST`, `PUT`, `PATCH` and `DELETE` authenticated by a cookie,
+       `X-CSRF-Token` (the `csrfToken` scheme) must equal the session's CSRF token
+       and `Origin` must equal the server's origin; a missing `Origin` is refused.
+       Failure: `403` `csrf_failed`. `GET` is never checked and never changes
+       state, so `GET` operations list `cookieSession` without `csrfToken`.
+    5. Login CSRF: operations that set a cookie without a session (the setup
+       claim, the web sign-ins, and Plex PIN and Quick Connect creation by the
+       console) check `Origin` the same way. They also answer `403`
+       `https_required` over plain HTTP, except from loopback to `localhost` or
+       when `TINDEERR_ALLOW_HTTP_CONSOLE` applies to a private client IP (the
+       cookies are then named without the `__Host-` prefix and `Secure`).
+    6. Operations tagged `admin` need the effective role `admin` (`403`
+       `admin_required`); some need a media server administrator
+       (`media_server_admin_required`) with a re-authentication less than
+       5 minutes old (`reauth_required`).
+    7. A user whose media server policy forbids remote access gets `403`
+       `remote_access_denied` on every request from a non-private client IP.
+
+    Operations without their own `security` accept a bearer token or a web
+    session. Operations tagged `console` never accept a bearer token.
+    `security: []` marks public operations.
   license:
     name: MIT
     identifier: MIT
@@ -45,16 +81,27 @@ tags:
     description: Health and public server information.
   - name: console
     description: |
-      Web console only. Requires the session cookie (plus `X-CSRF-Token` on unsafe
-      methods); bearer tokens are refused.
+      Called by the web console only. A request carrying an `Authorization` header
+      gets `401` `unauthorized`. The others take the cookies their `security`
+      lists: a web session (plus `X-CSRF-Token` on unsafe methods), the setup
+      session for `setup` operations, or none for the sign-ins that set the cookie
+      (these check `Origin` instead).
   - name: setup
-    description: First-run claim and media server configuration, from the console.
+    description: |
+      First-run claim and media server configuration, from the console, with the
+      setup session (docs/auth.md, section 3).
   - name: auth
-    description: Sign-in through the media server, phone pairing, token rotation, sign-out.
+    description: |
+      Sign-in through the media server, re-authentication, phone pairing, token
+      rotation, sign-out (docs/auth.md, sections 4, 5, 7 and 9).
   - name: me
-    description: The signed-in user's account and sessions.
+    description: |
+      The signed-in user's account and sessions. Reading is open to both clients;
+      deleting the account's data and revoking a session are console only.
   - name: pairing
-    description: Connecting a phone by QR code from the console.
+    description: |
+      Connecting a phone by QR code from the console: the app asks with a PKCE
+      challenge, the user approves in the console, the app collects its tokens.
   - name: swipe
     description: Deck, votes, requests, likes, taste profile and preferences.
   - name: admin
@@ -82,16 +129,30 @@ paths:
     get:
       tags: [server]
       summary: Server identity, version and capabilities
-      description: Public. Returns no user data and no internal URL.
+      description: |
+        Public. Returns no user data and no internal URL. `auth_methods` depends on
+        the caller's client IP (`password_sign_in = lan_only`), so the response is
+        never cached. Never calls the media server.
       operationId: getServerInfo
       security: []
+      parameters:
+        - name: Tindeerr-Verify-Nonce
+          in: header
+          required: false
+          description: |
+            Sent only by this server to itself while it verifies a new `public_url`
+            (docs/auth.md, section 10). When the nonce is one the server is waiting
+            for, the response carries `public_url_proof`; otherwise the header is
+            ignored.
+          schema: { type: string, maxLength: 64 }
       responses:
         "200":
           description: Server information.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ServerInfo" }
-        "429": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   # ---------------------------------------------------------------- setup
   /api/v1/setup/claim:
@@ -99,9 +160,11 @@ paths:
       tags: [setup, console]
       summary: Exchange the one-time setup code for a setup session
       description: |
-        Called by the console. Sets the session cookie with a setup session
-        (`kind` = `setup`, valid 30 minutes, no user), accepted only by the setup
-        endpoints. The `Origin` header must be the server's own origin.
+        Called by the console. Opens a setup session (`kind` = `setup`, 30 minutes,
+        no user) in the `__Host-tindeerr_setup` cookie and revokes every earlier
+        setup session: only the newest claim stays valid. The code stays usable until
+        setup completes. `Origin` must be the server's origin, and plain HTTP is
+        refused as for the web sign-ins (docs/auth.md, sections 2 and 3).
       operationId: claimServer
       security: []
       requestBody:
@@ -117,12 +180,13 @@ paths:
         "200":
           description: Setup session opened.
           headers:
-            Set-Cookie: { $ref: "#/components/headers/SetSessionCookie" }
+            Set-Cookie: { $ref: "#/components/headers/SetSetupCookie" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/WebSession" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401":
-          description: "`invalid_setup_code`."
+          description: "`invalid_setup_code`, or `unauthorized` when an `Authorization` header is sent."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -133,19 +197,51 @@ paths:
               schema: { $ref: "#/components/schemas/Problem" }
         "409":
           description: Setup already completed (`code` = `setup_completed`).
+        # The claim is limited per client IP (5 failures per 15 minutes), with a
+        # global slowdown above 20 failures per hour (docs/auth.md, section 8).
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
-        "429": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/v1/setup/state:
+    get:
+      tags: [setup, console]
+      summary: What the setup wizard still has to do
+      description: |
+        Whether the media server is configured or locked by environment variables
+        (the wizard then skips that step), and which sign-in methods the configured
+        server offers for the administrator sign-in that completes setup. After
+        completion the setup session no longer exists (`401`).
+      operationId: getSetupState
+      security:
+        - setupSession: []
+      responses:
+        "200":
+          description: Setup state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SetupState" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/v1/setup/media-server:
     put:
       tags: [setup, console]
       summary: Configure the media server during setup
       description: |
-        The connection is tested before saving. For Plex, obtain the owner token
-        through the Plex PIN endpoints first. After this call, the first media
-        server administrator who signs in on the console completes the setup.
+        The connection is tested before saving, and the server's identity (Jellyfin
+        or Emby server id, Plex `machineIdentifier` from the server's own
+        `/identity`) is stored (docs/auth.md, section 6). Can be called again while
+        setup is pending. For Plex, first obtain the owner token with a Plex PIN of
+        purpose `owner_token` (`POST /auth/plex/pins`, then
+        `POST /auth/plex/pins/status`); the token must come from the account that
+        owns this server. A failed connection test does not consume `plex_pin_id`.
+        When `TINDEERR_MEDIA_SERVER_KIND`, `_URL` and `_API_KEY` are all set, the
+        wizard skips this step (`SetupState.media_server_locked`); a field set by an
+        environment variable cannot be given another value (`setting_locked`).
+        Connection tests are limited to 10 per minute per session. After this call, a media server administrator signs in on the console, from
+        the browser holding the setup session, to complete setup.
       operationId: setupMediaServer
       security:
         - setupSession: []
@@ -161,16 +257,26 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ConnectorStatus" }
-        "400": { $ref: "#/components/responses/Problem" }
-        "401": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403":
-          description: "`csrf_failed`."
+          description: "`csrf_failed`, or `plex_owner_required` (the PIN's account does not own that Plex server)."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
+        "409":
+          description: "`setting_locked` (a field set by an environment variable), `secret_required` (URL changed and no `api_key` or `plex_pin_id` given) or `plex_pin_pending` (the owner-token PIN is not approved yet)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "410":
+          description: "`pin_expired`: `plex_pin_id` is unknown, expired, used, or not an `owner_token` PIN of this setup session."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "502":
-          description: Connection test failed (`code` = `connector_unreachable` or `connector_unauthorized`).
+          description: "Connection test failed: `connector_unreachable`, `connector_unauthorized`, `connector_unexpected_response` or `media_server_unsupported` (another product than `server_type`, or Jellyfin older than 10.10). Nothing is saved."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -182,7 +288,10 @@ paths:
       summary: Sign the app in with Jellyfin or Emby credentials
       description: |
         The password is checked with the media server and never stored. The
-        administrator flag is re-read from the media server (docs/adr/0010).
+        administrator and remote-access flags are re-read from the media server
+        (docs/adr/0010, docs/auth.md section 4). At most 2 failures per case-folded
+        username per 15 minutes are forwarded to the media server; beyond that the
+        answer is `429` without contacting it.
       operationId: login
       security: []
       requestBody:
@@ -202,19 +311,25 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AuthResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401":
           description: "`invalid_credentials` (same answer for unknown user and wrong password)."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
         "403":
-          description: "`account_disabled` or `not_a_server_user`."
+          description: "`account_disabled`, `remote_access_denied` or `password_sign_in_disabled`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
-        "429": { $ref: "#/components/responses/Problem" }
+        "409":
+          description: "`sign_in_method_unavailable` (the media server is Plex)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "503":
-          description: "`setup_required` (setup is done in the console) or `media_server_unreachable`."
+          description: "`setup_required` (setup is done in the console), `media_server_unreachable` or `media_server_changed`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -222,20 +337,43 @@ paths:
   /api/v1/auth/plex/pins:
     post:
       tags: [auth]
-      summary: Start a Plex PIN sign-in
+      summary: Start a Plex PIN (sign-in, re-authentication or owner token)
       description: |
-        The server creates a strong plex.tv PIN. The client opens `auth_url` in a
-        browser, then calls `POST /auth/plex/login` (app) or
-        `POST /auth/web/plex/login` (console) until it succeeds or the PIN expires.
-        The same PIN flow gives the owner token for the media server connector,
-        during setup (`PUT /setup/media-server`) or later by an admin
-        (`PUT /admin/connectors/media_server`). A PIN is consumed by the first call
-        that uses it.
+        The server creates a strong plex.tv PIN and returns a random handle bound to
+        its purpose and to the caller (docs/auth.md, section 5). The client opens
+        `auth_url` in a browser, then:
+        - `sign_in` from the app: send `code_challenge` (PKCE S256), then poll
+          `POST /auth/plex/login` with the `code_verifier`;
+        - `sign_in` from the console: no `code_challenge`; the response sets the
+          pre-auth cookie and `Origin` is checked; poll `POST /auth/web/plex/login`.
+          While setup is pending, only the console can start one (the app gets
+          `503 setup_required`);
+        - `reauth`: web session and CSRF token; poll `POST /auth/web/reauth`;
+        - `owner_token`: setup session, or web session of a media server
+          administrator, and CSRF token. Works before any media server is
+          configured. Poll `POST /auth/plex/pins/status`, then pass the handle as
+          `plex_pin_id` to `PUT /setup/media-server` or
+          `PUT /admin/connectors/media_server` (or its `test`).
+        `code_challenge` is only accepted with `sign_in`. A bearer token is never
+        enough for `reauth` or `owner_token`. At most 5 outstanding handles per
+        client IP and 200 in total, and 10 creations per 15 minutes per client IP.
       operationId: createPlexPin
-      security: []
+      security:
+        - {}
+        - cookieSession: []
+          csrfToken: []
+        - setupSession: []
+          csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PlexPinRequest" }
       responses:
         "201":
           description: PIN created.
+          headers:
+            Set-Cookie: { $ref: "#/components/headers/SetPreAuthCookie" }
           content:
             application/json:
               schema:
@@ -244,16 +382,96 @@ paths:
                 properties:
                   pin_id:
                     type: string
-                    description: Random single-use handle (at least 128 bits), not the plex.tv PIN id.
+                    description: Random handle (at least 128 bits), not the plex.tv PIN id.
                   auth_url: { type: string, format: uri }
                   expires_at: { type: string, format: date-time }
-        "429": { $ref: "#/components/responses/Problem" }
-        "503": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401":
+          description: "`unauthorized`: `reauth` or `owner_token` without the session it needs, or an `Authorization` header with those purposes."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "403":
+          description: "`csrf_failed` (console: wrong or missing `Origin` or CSRF token), `https_required` (console over plain HTTP), `remote_access_denied`, or `media_server_admin_required` (`owner_token` after setup)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "409":
+          description: "`sign_in_method_unavailable` (`sign_in` or `reauth` while no Plex media server is configured)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503":
+          description: "`setup_required` (app `sign_in` during setup) or `plex_tv_unreachable`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /api/v1/auth/plex/pins/status:
+    post:
+      tags: [auth, console]
+      summary: Status of an owner-token Plex PIN, without using it
+      description: |
+        For PINs of purpose `owner_token` only, by the session that created them.
+        Read-only: the handle stays usable for `PUT /setup/media-server`,
+        `PUT /admin/connectors/media_server` and its `test`. A `POST` so that the
+        handle never appears in a URL. Checks plex.tv at most once per second per
+        handle.
+      operationId: getPlexPinStatus
+      security:
+        - setupSession: []
+          csrfToken: []
+        - cookieSession: []
+          csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pin_id]
+              properties:
+                pin_id: { $ref: "#/components/schemas/Handle" }
+      responses:
+        "200":
+          description: PIN status.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, expires_at]
+                properties:
+                  status: { type: string, enum: [pending, authorized] }
+                  expires_at: { type: string, format: date-time }
+                  account_name:
+                    type: [string, "null"]
+                    description: The plex.tv account that approved the PIN, once `authorized`.
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "410":
+          description: "`pin_expired` (also for an unknown handle, another purpose or another session)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503":
+          description: "`plex_tv_unreachable`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
 
   /api/v1/auth/plex/login:
     post:
       tags: [auth]
       summary: Complete a Plex PIN sign-in (app)
+      description: |
+        Each call polls plex.tv at most once per second. Once approved, the server
+        checks that the account can access the configured server (matched by
+        `machineIdentifier` only; administrator when `owned` there), then deletes the
+        plex.tv device the PIN created and keeps no Plex token (docs/auth.md,
+        section 4).
       operationId: loginWithPlex
       security: []
       requestBody:
@@ -262,9 +480,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [pin_id, device]
+              required: [pin_id, code_verifier, device]
               properties:
-                pin_id: { type: string, maxLength: 64 }
+                pin_id: { $ref: "#/components/schemas/Handle" }
+                code_verifier: { $ref: "#/components/schemas/CodeVerifier" }
                 device: { $ref: "#/components/schemas/DeviceInput" }
       responses:
         "200":
@@ -273,19 +492,20 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AuthResult" }
         "202": { $ref: "#/components/responses/Pending" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "403":
-          description: "`account_disabled` or `not_a_server_user`."
+          description: "`account_disabled`, `not_a_server_user` (no plex.tv resource with the configured `machineIdentifier`) or `remote_access_denied`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
         "410":
-          description: "`pin_expired` (also for an unknown or already used `pin_id`)."
+          description: "`pin_expired` (also for an unknown or used `pin_id`, another purpose or a wrong `code_verifier`)."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
-        "429": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "503":
-          description: "`setup_required` or `media_server_unreachable`."
+          description: "`setup_required`, `plex_tv_unreachable` or `media_server_changed`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -293,19 +513,34 @@ paths:
   /api/v1/auth/quick-connect:
     post:
       tags: [auth]
-      summary: Start a Jellyfin Quick Connect sign-in
+      summary: Start a Jellyfin Quick Connect sign-in or re-authentication
       description: |
         Jellyfin only (Emby has no Quick Connect). The server calls Jellyfin's
         `POST /QuickConnect/Initiate` and keeps the returned secret. The client
         shows `code`; the user approves it in any Jellyfin client where they are
-        signed in. The client then calls `POST /auth/quick-connect/login` (app) or
-        `POST /auth/web/quick-connect/login` (console) until it succeeds or the code
-        expires.
+        signed in. The handle is bound as for Plex PINs (docs/auth.md, section 5):
+        the app sends `code_challenge` and polls `POST /auth/quick-connect/login`;
+        the console gets the pre-auth cookie and polls
+        `POST /auth/web/quick-connect/login`; purpose `reauth` needs a web session
+        and is completed by `POST /auth/web/reauth`. `code_challenge` is only
+        accepted with `sign_in`. Same caps as Plex PINs. The handle expires after at
+        most 5 minutes; approvals nobody collects are cleaned up (docs/auth.md,
+        section 4).
       operationId: createQuickConnect
-      security: []
+      security:
+        - {}
+        - cookieSession: []
+          csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuickConnectRequest" }
       responses:
         "201":
           description: Quick Connect started.
+          headers:
+            Set-Cookie: { $ref: "#/components/headers/SetPreAuthCookie" }
           content:
             application/json:
               schema:
@@ -314,20 +549,31 @@ paths:
                 properties:
                   handle:
                     type: string
-                    description: Random single-use handle (at least 128 bits), not the Jellyfin secret.
+                    description: Random handle (at least 128 bits), not the Jellyfin secret.
                   code:
                     type: string
                     description: Code to enter in a signed-in Jellyfin client.
                     examples: ["123456"]
                   expires_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401":
+          description: "`unauthorized`: `reauth` without a web session, or with an `Authorization` header."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "403":
+          description: "`csrf_failed` (console: wrong or missing `Origin` or CSRF token), `https_required` (console over plain HTTP) or `remote_access_denied`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "409":
           description: "`quick_connect_unavailable` (not a Jellyfin server, or Quick Connect disabled there)."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
-        "429": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "503":
-          description: "`setup_required` or `media_server_unreachable`."
+          description: "`setup_required`, `media_server_unreachable` or `media_server_changed`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -337,9 +583,10 @@ paths:
       tags: [auth]
       summary: Complete a Quick Connect sign-in (app)
       description: |
-        Each call checks `GET /QuickConnect/Connect` once. When the code was
-        approved, the server calls `POST /Users/AuthenticateWithQuickConnect`,
-        reads the administrator flag and ends that Jellyfin session.
+        Each call checks `GET /QuickConnect/Connect` at most once per second. When
+        the code was approved, the server calls
+        `POST /Users/AuthenticateWithQuickConnect`, reads the administrator and
+        remote-access flags and ends that Jellyfin session.
       operationId: loginWithQuickConnect
       security: []
       requestBody:
@@ -348,9 +595,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [handle, device]
+              required: [handle, code_verifier, device]
               properties:
-                handle: { type: string, maxLength: 64 }
+                handle: { $ref: "#/components/schemas/Handle" }
+                code_verifier: { $ref: "#/components/schemas/CodeVerifier" }
                 device: { $ref: "#/components/schemas/DeviceInput" }
       responses:
         "200":
@@ -359,19 +607,20 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AuthResult" }
         "202": { $ref: "#/components/responses/Pending" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "403":
-          description: "`account_disabled` or `not_a_server_user`."
+          description: "`account_disabled` or `remote_access_denied`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
         "410":
-          description: "`quick_connect_expired` (also for an unknown or already used `handle`)."
+          description: "`quick_connect_expired` (also for an unknown or used `handle`, another purpose or a wrong `code_verifier`)."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
-        "429": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "503":
-          description: "`setup_required` or `media_server_unreachable`."
+          description: "`setup_required`, `media_server_unreachable` or `media_server_changed`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -381,9 +630,11 @@ paths:
       tags: [auth, pairing]
       summary: Show who a pairing code signs in, without using it
       description: |
-        The app calls this after scanning a QR code, shows the server URL and the
-        user name, and asks the user to confirm before calling `POST /auth/pair`.
-        The code is not consumed.
+        The app calls this after scanning a QR code, shows the host of the QR
+        link prominently (punycode for internationalised names) with the names
+        returned here, and asks the user to confirm before calling
+        `POST /auth/pair`. Returns only what the app must display, and only for a
+        `pending`, unexpired code.
       operationId: previewPairing
       security: []
       requestBody:
@@ -407,22 +658,25 @@ paths:
                   server_name: { type: string }
                   user_name: { type: string }
                   expires_at: { type: string, format: date-time }
-        "400": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "410":
-          description: "`pairing_expired` (also for an unknown, used or revoked code)."
+          description: "`pairing_expired` (also for an unknown, used, requested or revoked code)."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
-        "429": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /api/v1/auth/pair:
     post:
       tags: [auth, pairing]
-      summary: Sign the app in with a pairing code from the console
+      summary: Ask to pair the app with a code from the console
       description: |
-        Consumes the code and opens a `mobile` session for the user who created
-        it. Does not contact the media server, so the administrator flag is not
-        re-synced (docs/adr/0010).
+        Records the device and the PKCE `code_challenge`, and moves the pairing to
+        `awaiting_approval`; the code then stops working for preview and pair. The
+        app shows `confirmation_code`, which the console shows too, and polls
+        `POST /auth/pair/complete` until the user approves or rejects the request in
+        the console (docs/auth.md, section 9). Preview, pair and complete share a
+        limit of 10 calls per minute per client IP, with a global slowdown.
       operationId: pairDevice
       security: []
       requestBody:
@@ -431,28 +685,70 @@ paths:
           application/json:
             schema:
               type: object
-              required: [code, device]
+              required: [code, device, code_challenge]
               properties:
                 code: { $ref: "#/components/schemas/PairingCode" }
                 device: { $ref: "#/components/schemas/DeviceInput" }
+                code_challenge: { $ref: "#/components/schemas/CodeChallenge" }
+      responses:
+        "202":
+          description: Waiting for approval in the console.
+          headers:
+            Retry-After:
+              description: Seconds, rounded up.
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PairingRequested" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "410":
+          description: "`pairing_expired` (also for an unknown, used, requested or revoked code)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/v1/auth/pair/complete:
+    post:
+      tags: [auth, pairing]
+      summary: Get the tokens once the console approved the pairing
+      description: |
+        Polled by the app every 2 seconds after `POST /auth/pair`. Once the pairing
+        is approved, opens a `mobile` session for the user who created it and marks
+        the pairing `completed`. Applies the checks of any authenticated request
+        (user enabled, remote-access rule). Does not contact the media server, so
+        the administrator flag is not re-synced (docs/adr/0010).
+      operationId: completePairing
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, code_verifier]
+              properties:
+                code: { $ref: "#/components/schemas/PairingCode" }
+                code_verifier: { $ref: "#/components/schemas/CodeVerifier" }
       responses:
         "200":
           description: Signed in.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AuthResult" }
-        "400": { $ref: "#/components/responses/Problem" }
+        "202": { $ref: "#/components/responses/Pending" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "403":
-          description: "`account_disabled`."
+          description: "`pairing_rejected` (rejected in the console), `account_disabled` or `remote_access_denied`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
         "410":
-          description: "`pairing_expired` (also for an unknown, used or revoked code)."
+          description: "`pairing_expired` (also for an unknown, completed or revoked code, a code never requested, or a wrong `code_verifier`)."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
-        "429": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /api/v1/auth/refresh:
     post:
@@ -462,7 +758,9 @@ paths:
         Each refresh token works once, with no grace period: presenting a used one,
         even right after its rotation, revokes the whole session (`code` =
         `refresh_token_reused`). Clients must refresh single-flight: one refresh in
-        flight at a time, other requests wait for its result (docs/adr/0010).
+        flight at a time, other requests wait for its result (docs/adr/0010). If the
+        response is lost, retrying with the old token is a reuse and signs the user
+        out; clients do not retry a refresh blindly.
       operationId: refreshTokens
       security: []
       requestBody:
@@ -480,8 +778,18 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TokenPair" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "429": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401":
+          description: "`unauthorized` (unknown or expired refresh token, session revoked or past its absolute lifetime, user disabled) or `refresh_token_reused`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "403":
+          description: "`remote_access_denied`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /api/v1/auth/logout:
     post:
@@ -490,9 +798,13 @@ paths:
       description: For a web session, the response also clears the cookie.
       operationId: logout
       responses:
-        "204": { description: Signed out. }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
+        "204":
+          description: Signed out.
+          headers:
+            Set-Cookie: { $ref: "#/components/headers/ClearSessionCookie" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   # ---------------------------------------------------------------- auth (console)
   /api/v1/auth/web/login:
@@ -500,12 +812,18 @@ paths:
       tags: [auth, console]
       summary: Sign the console in with Jellyfin or Emby credentials
       description: |
-        Same checks as `POST /auth/login`, but opens a `web` session and sets the
-        session cookie. The `Origin` header must be the server's own origin.
-        While setup is pending, only a media server administrator can sign in, and
-        that sign-in completes the setup.
+        Same checks and limits as `POST /auth/login`, but opens a `web` session and
+        sets the session cookie. `Origin` must be the server's origin; plain HTTP is
+        refused (`https_required`) except as described in docs/auth.md, section 2.
+        While setup is pending, the request must carry the setup session cookie
+        (`setup_session_required`) and the user must be a media server administrator
+        (`admin_required`); that sign-in completes setup, revokes the setup session,
+        clears its cookie and opens a new web session with a new CSRF token. A web
+        sign-in also counts as a fresh re-authentication (`reauth_expires_at`).
       operationId: webLogin
-      security: []
+      security:
+        - {}
+        - setupSession: []
       requestBody:
         required: true
         content:
@@ -524,19 +842,25 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/WebSession" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401":
-          description: "`invalid_credentials` (same answer for unknown user and wrong password)."
+          description: "`invalid_credentials` (same answer for unknown user and wrong password), or `unauthorized` when an `Authorization` header is sent."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
         "403":
-          description: "`account_disabled`, `not_a_server_user`, `admin_required` while setup is pending, `csrf_failed` (wrong or missing `Origin`), `https_required`."
+          description: "`account_disabled`, `remote_access_denied`, `password_sign_in_disabled`, `admin_required` or `setup_session_required` while setup is pending, `csrf_failed` (wrong or missing `Origin`), `https_required`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
-        "429": { $ref: "#/components/responses/Problem" }
+        "409":
+          description: "`sign_in_method_unavailable` (the media server is Plex)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "503":
-          description: "`setup_required` (no media server configured yet) or `media_server_unreachable`."
+          description: "`setup_required` (no media server configured yet), `media_server_unreachable` or `media_server_changed`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -545,9 +869,16 @@ paths:
     post:
       tags: [auth, console]
       summary: Complete a Plex PIN sign-in (console)
-      description: Same as `POST /auth/plex/login`, ending in a web session. Same `Origin` check as `POST /auth/web/login`.
+      description: |
+        Same as `POST /auth/plex/login`, ending in a web session. The handle must
+        have been created by this browser: without the matching pre-auth cookie it
+        is treated as unknown (`410`). Same `Origin`, HTTPS and setup rules as
+        `POST /auth/web/login`.
       operationId: webLoginWithPlex
-      security: []
+      security:
+        - preAuth: []
+        - preAuth: []
+          setupSession: []
       requestBody:
         required: true
         content:
@@ -556,7 +887,7 @@ paths:
               type: object
               required: [pin_id]
               properties:
-                pin_id: { type: string, maxLength: 64 }
+                pin_id: { $ref: "#/components/schemas/Handle" }
       responses:
         "200":
           description: Signed in.
@@ -566,19 +897,25 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/WebSession" }
         "202": { $ref: "#/components/responses/Pending" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401":
+          description: "`unauthorized`: an `Authorization` header was sent."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "403":
-          description: "`account_disabled`, `not_a_server_user`, `admin_required` while setup is pending, `csrf_failed`, `https_required`."
+          description: "`account_disabled`, `not_a_server_user`, `remote_access_denied`, `admin_required` or `setup_session_required` while setup is pending, `csrf_failed`, `https_required`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
         "410":
-          description: "`pin_expired` (also for an unknown or already used `pin_id`)."
+          description: "`pin_expired` (also for an unknown or used `pin_id`, another purpose or another browser)."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
-        "429": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "503":
-          description: "`setup_required` or `media_server_unreachable`."
+          description: "`setup_required`, `plex_tv_unreachable` or `media_server_changed`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -587,9 +924,16 @@ paths:
     post:
       tags: [auth, console]
       summary: Complete a Quick Connect sign-in (console)
-      description: Same as `POST /auth/quick-connect/login`, ending in a web session. Same `Origin` check as `POST /auth/web/login`.
+      description: |
+        Same as `POST /auth/quick-connect/login`, ending in a web session. The handle
+        must have been created by this browser: without the matching pre-auth
+        cookie it is treated as unknown (`410`). Same `Origin`, HTTPS and setup
+        rules as `POST /auth/web/login`.
       operationId: webLoginWithQuickConnect
-      security: []
+      security:
+        - preAuth: []
+        - preAuth: []
+          setupSession: []
       requestBody:
         required: true
         content:
@@ -598,7 +942,7 @@ paths:
               type: object
               required: [handle]
               properties:
-                handle: { type: string, maxLength: 64 }
+                handle: { $ref: "#/components/schemas/Handle" }
       responses:
         "200":
           description: Signed in.
@@ -608,19 +952,88 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/WebSession" }
         "202": { $ref: "#/components/responses/Pending" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401":
+          description: "`unauthorized`: an `Authorization` header was sent."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "403":
-          description: "`account_disabled`, `not_a_server_user`, `admin_required` while setup is pending, `csrf_failed`, `https_required`."
+          description: "`account_disabled`, `remote_access_denied`, `admin_required` or `setup_session_required` while setup is pending, `csrf_failed`, `https_required`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
         "410":
-          description: "`quick_connect_expired` (also for an unknown or already used `handle`)."
+          description: "`quick_connect_expired` (also for an unknown or used `handle`, another purpose or another browser)."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
-        "429": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "503":
-          description: "`setup_required` or `media_server_unreachable`."
+          description: "`setup_required`, `media_server_unreachable` or `media_server_changed`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /api/v1/auth/web/reauth:
+    post:
+      tags: [auth, console]
+      summary: Re-authenticate on the current media server (step-up)
+      description: |
+        Proves again, on the currently configured media server, that the caller is
+        the session's user: a password, or a completed Plex PIN or Quick Connect
+        handle of purpose `reauth`. Refreshes the administrator and remote-access
+        flags and marks the session re-authenticated for 5 minutes, which changing
+        the media server connector and `public_url` require (docs/auth.md,
+        section 7). The account must be the session's user (same media server user
+        id). With a password, the session user's name is sent to the media server,
+        and the attempt counts toward the password limits and follows
+        `password_sign_in`. With a handle, the call answers `202` until the user
+        approves it, like the sign-in endpoints.
+      operationId: webReauth
+      security:
+        - cookieSession: []
+          csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReauthInput" }
+      responses:
+        "200":
+          description: Re-authenticated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reauth_expires_at]
+                properties:
+                  reauth_expires_at: { type: string, format: date-time }
+        "202": { $ref: "#/components/responses/Pending" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401":
+          description: "`unauthorized` (no valid web session, or an `Authorization` header) or `invalid_credentials` (wrong password, or another account than the session's user)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "403":
+          description: "`csrf_failed`, `remote_access_denied` or `password_sign_in_disabled`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "409":
+          description: "`sign_in_method_unavailable` (a password while the media server is Plex)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "410":
+          description: "`pin_expired` or `quick_connect_expired` (also for an unknown or used handle, another purpose or another session)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503":
+          description: "`media_server_unreachable`, `plex_tv_unreachable` or `media_server_changed`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -642,7 +1055,9 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/WebSession" }
-        "401": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   # ---------------------------------------------------------------- me
   /api/v1/me:
@@ -650,18 +1065,29 @@ paths:
       tags: [me]
       summary: The signed-in user
       operationId: getMe
+      security:
+        - bearer: []
+        - cookieSession: []
       responses:
         "200":
           description: Current user.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/User" }
-        "401": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
     delete:
-      tags: [me]
+      tags: [me, console]
       summary: Delete all of the caller's Tindeerr data and sign out everywhere
-      description: Votes, profile, preferences and sessions. Nothing is deleted on the media server or the request backend.
+      description: |
+        Votes, profile, preferences and sessions. Nothing is deleted on the media
+        server or the request backend. Console only: a phone's token cannot delete
+        the account.
       operationId: deleteMyData
+      security:
+        - cookieSession: []
+          csrfToken: []
       parameters:
         - name: confirm
           in: query
@@ -669,7 +1095,9 @@ paths:
           schema: { type: string, const: delete-my-data }
       responses:
         "204": { description: Deleted. }
-        "401": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "409":
           description: "`last_admin`: promote another admin first."
           content:
@@ -681,6 +1109,9 @@ paths:
       tags: [me]
       summary: The caller's sessions (one per device)
       operationId: listMySessions
+      security:
+        - bearer: []
+        - cookieSession: []
       responses:
         "200":
           description: Sessions, most recent first.
@@ -693,19 +1124,27 @@ paths:
                   sessions:
                     type: array
                     items: { $ref: "#/components/schemas/Session" }
-        "401": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/v1/me/sessions/{session_id}:
     delete:
-      tags: [me]
+      tags: [me, console]
       summary: Revoke one of the caller's sessions
+      description: Console only. The app signs itself out with `POST /auth/logout`.
       operationId: revokeMySession
+      security:
+        - cookieSession: []
+          csrfToken: []
       parameters:
         - $ref: "#/components/parameters/SessionId"
       responses:
         "204": { description: Revoked. }
-        "401": { $ref: "#/components/responses/Problem" }
-        "404": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   # ---------------------------------------------------------------- pairing
   /api/v1/pairings:
@@ -714,8 +1153,9 @@ paths:
       summary: Create a code to connect a phone (any signed-in user)
       description: |
         The code is bound to the caller, single-use, valid 5 minutes and stored
-        hashed; it is only returned here. The console renders `link` as a QR code.
-        At most 3 pending pairings per user (`rate_limited` beyond).
+        hashed; it is only returned here. The console renders `link` as a QR code
+        (SVG or canvas) with the host of `public_url` written next to it. At most 3
+        pending pairings per user (`rate_limited` beyond).
       operationId: createPairing
       security:
         - cookieSession: []
@@ -726,24 +1166,27 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/NewPairing" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "409":
-          description: "`public_url_not_set`: an admin must set `public_url` first."
+          description: "`public_url_not_set`: a media server administrator must set `public_url` first."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
-        "429": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /api/v1/pairings/{pairing_id}:
     get:
       tags: [pairing, console]
       summary: Status of one of the caller's pairings
-      description: Polled by the console to show "Pixel 9 connected".
+      description: |
+        Polled by the console. When `awaiting_approval`, shows the requesting
+        device, its IP and the confirmation code the phone displays, so the user
+        can approve or reject it; once `completed`, "Pixel 9 connected".
       operationId: getPairing
       security:
         - cookieSession: []
-          csrfToken: []
       parameters:
         - $ref: "#/components/parameters/PairingId"
       responses:
@@ -752,12 +1195,17 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Pairing" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "404": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
     delete:
       tags: [pairing, console]
-      summary: Cancel a pending pairing, or revoke the session it opened
+      summary: Cancel or reject a pairing, or revoke the session it opened
+      description: |
+        `pending` or `approved`: cancelled. `awaiting_approval`: rejected, and the
+        app's next `POST /auth/pair/complete` gets `403` `pairing_rejected`.
+        `completed`: the `mobile` session it opened is revoked.
       operationId: revokePairing
       security:
         - cookieSession: []
@@ -765,10 +1213,46 @@ paths:
       parameters:
         - $ref: "#/components/parameters/PairingId"
       responses:
-        "204": { description: Cancelled or revoked. }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "404": { $ref: "#/components/responses/Problem" }
+        "204": { description: "Cancelled, rejected or revoked." }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/pairings/{pairing_id}/approve:
+    post:
+      tags: [pairing, console]
+      summary: Approve the phone waiting on this pairing
+      description: |
+        Only for a pairing in `awaiting_approval`. The console asks the user to
+        check that the phone shows the same `confirmation_code` first. The app's
+        next `POST /auth/pair/complete` then gets the tokens.
+      operationId: approvePairing
+      security:
+        - cookieSession: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/PairingId"
+      responses:
+        "200":
+          description: Approved.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pairing" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`pairing_not_awaiting_approval` (no phone has asked yet, or already approved, completed or revoked)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "410":
+          description: "`pairing_expired`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
 
   # ---------------------------------------------------------------- swipe
   /api/v1/swipe/status:
@@ -776,13 +1260,18 @@ paths:
       tags: [swipe]
       summary: What the deck needs to know before showing cards
       operationId: getSwipeStatus
+      security:
+        - bearer: []
+        - cookieSession: []
       responses:
         "200":
           description: Status.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SwipeStatus" }
-        "401": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/v1/swipe/deck:
     get:
@@ -796,6 +1285,9 @@ paths:
         but empty batch answers `200` with no cards and does not start another one.
         The next batch is prepared in the background as the deck runs low.
       operationId: getDeck
+      security:
+        - bearer: []
+        - cookieSession: []
       parameters:
         - name: media_type
           in: query
@@ -820,8 +1312,9 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Deck" }
         "202": { $ref: "#/components/responses/Pending" }
-        "400": { $ref: "#/components/responses/Problem" }
-        "401": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "409":
           description: "`llm_not_configured` or `tmdb_not_configured`."
           content:
@@ -829,6 +1322,8 @@ paths:
               schema: { $ref: "#/components/schemas/Problem" }
         "429":
           description: "`rate_limited` or `daily_limit_reached`."
+          headers:
+            Retry-After: { $ref: "#/components/headers/RetryAfter" }
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -874,9 +1369,10 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/VoteResult" }
                   profile_refresh_started: { type: boolean }
-        "400": { $ref: "#/components/responses/Problem" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "429": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
     delete:
       tags: [swipe]
       summary: Delete all of the caller's votes (the profile text is kept)
@@ -896,7 +1392,9 @@ paths:
                 required: [deleted]
                 properties:
                   deleted: { type: integer, minimum: 0 }
-        "401": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/v1/swipe/votes/{media_type}/{tmdb_id}:
     delete:
@@ -912,8 +1410,10 @@ paths:
         - $ref: "#/components/parameters/TmdbIdPath"
       responses:
         "204": { description: Vote removed. }
-        "401": { $ref: "#/components/responses/Problem" }
-        "404": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/v1/swipe/requests:
     post:
@@ -942,7 +1442,8 @@ paths:
                 required: [request_status]
                 properties:
                   request_status: { $ref: "#/components/schemas/RequestStatus" }
-        "401": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403":
           description: "`title_not_offered`, `no_backend_user`, `request_not_allowed` (the backend user may not request this media type), `quota_exceeded`."
           content:
@@ -953,7 +1454,7 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
-        "429": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "502":
           description: "`request_backend_error`."
           content:
@@ -969,6 +1470,9 @@ paths:
         titles are not listed: they are already seen, so there is nothing to
         request; they only feed the taste profile.
       operationId: listLikes
+      security:
+        - bearer: []
+        - cookieSession: []
       parameters:
         - name: status
           in: query
@@ -991,20 +1495,27 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/Like" }
                   next_cursor: { type: [string, "null"] }
-        "401": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/v1/swipe/profile:
     get:
       tags: [swipe]
       summary: The caller's taste profile
       operationId: getProfile
+      security:
+        - bearer: []
+        - cookieSession: []
       responses:
         "200":
           description: Profile state.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ProfileState" }
-        "401": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
     put:
       tags: [swipe]
       summary: Replace the profile with text written by the user
@@ -1025,8 +1536,9 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ProfileState" }
-        "400": { $ref: "#/components/responses/Problem" }
-        "401": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/v1/swipe/profile/refresh:
     post:
@@ -1044,22 +1556,29 @@ paths:
                 required: [started]
                 properties:
                   started: { type: boolean }
-        "401": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Problem" }
-        "429": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /api/v1/swipe/preferences:
     get:
       tags: [swipe]
       summary: The caller's deck preferences
       operationId: getPreferences
+      security:
+        - bearer: []
+        - cookieSession: []
       responses:
         "200":
           description: Preferences.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Preferences" }
-        "401": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
     patch:
       tags: [swipe]
       summary: Change some preferences
@@ -1075,8 +1594,9 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Preferences" }
-        "400": { $ref: "#/components/responses/Problem" }
-        "401": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/v1/swipe/providers:
     get:
@@ -1087,6 +1607,9 @@ paths:
         `streaming_region`, cached by the server for 7 days. The user ticks the
         ones they subscribe to in `Preferences.streaming_services`.
       operationId: listStreamingProviders
+      security:
+        - bearer: []
+        - cookieSession: []
       responses:
         "200":
           description: Providers, in TMDb's display order.
@@ -1100,7 +1623,9 @@ paths:
                   providers:
                     type: array
                     items: { $ref: "#/components/schemas/ProviderOption" }
-        "401": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "409":
           description: "`streaming_region_not_set` or `tmdb_not_configured`."
           content:
@@ -1118,13 +1643,18 @@ paths:
       summary: Like and request rates, overall and per pick type
       description: Skipped titles are counted apart (`skips`) and left out of every rate.
       operationId: getStats
+      security:
+        - bearer: []
+        - cookieSession: []
       responses:
         "200":
           description: Statistics.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Stats" }
-        "401": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   # ---------------------------------------------------------------- admin
   /api/v1/admin/connectors:
@@ -1132,7 +1662,6 @@ paths:
       tags: [admin, console]
       security:
         - cookieSession: []
-          csrfToken: []
       summary: All connectors, secrets masked
       operationId: listConnectors
       responses:
@@ -1147,8 +1676,9 @@ paths:
                   connectors:
                     type: array
                     items: { $ref: "#/components/schemas/Connector" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/AdminForbidden" }
 
   /api/v1/admin/connectors/{kind}:
     put:
@@ -1158,9 +1688,23 @@ paths:
           csrfToken: []
       summary: Configure a connector
       description: |
-        Omitted secret fields keep their stored value, unless the URL changes
-        (`code` = `secret_required`). Fields locked by an environment variable are
-        rejected (`code` = `setting_locked`).
+        Tested before saving. Omitted secret fields keep their stored value, unless
+        the URL changes (`code` = `secret_required`). Fields locked by an
+        environment variable cannot be given another value (`code` =
+        `setting_locked`).
+
+        `media_server` (docs/auth.md, section 6) needs more than the admin role:
+        the caller must be a media server administrator
+        (`media_server_admin_required`: a promoted admin cannot repoint the media
+        server) with a re-authentication on the **currently configured** media
+        server less than 5 minutes old (`reauth_required`, see
+        `POST /auth/web/reauth`). No credential is sent to a new URL before it is
+        saved. For Plex, `plex_pin_id` is a completed `owner_token` PIN of this
+        session, from the account that owns the server; it is consumed only when
+        the connector is saved. When the saved server's identity or kind differs
+        from the stored one, the same transaction revokes every session, the
+        caller's included (the response clears the session cookie), and unlinks
+        every user.
       operationId: saveConnector
       parameters:
         - $ref: "#/components/parameters/ConnectorKind"
@@ -1172,13 +1716,39 @@ paths:
       responses:
         "200":
           description: Saved and tested.
+          headers:
+            Set-Cookie: { $ref: "#/components/headers/ClearSessionCookie" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Connector" }
-        "400": { $ref: "#/components/responses/Problem" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: "`admin_required`, `media_server_admin_required`, `reauth_required`, `plex_owner_required` (the PIN's account does not own that Plex server), `csrf_failed` or `remote_access_denied`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "404":
+          description: "`not_found`: a connector kind not implemented yet (step 2: every kind but `media_server`)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "409":
+          description: "`setting_locked`, `secret_required` or `plex_pin_pending`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "410":
+          description: "`pin_expired`: `plex_pin_id` is unknown, expired, used, or not an `owner_token` PIN of this session."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "502":
+          description: "Connection test failed: `connector_unreachable`, `connector_unauthorized`, `connector_unexpected_response` or `media_server_unsupported`. Nothing is saved."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
     delete:
       tags: [admin, console]
       security:
@@ -1190,9 +1760,14 @@ paths:
         - $ref: "#/components/parameters/ConnectorKind"
       responses:
         "204": { description: Removed. }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/AdminForbidden" }
+        "409":
+          description: "`setting_locked` (the connector is set by environment variables)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
 
   /api/v1/admin/connectors/{kind}/test:
     post:
@@ -1204,7 +1779,9 @@ paths:
       description: |
         Returns a coarse result only, never the remote response body. Omitted
         secrets fall back to the stored ones only when the URL is unchanged
-        (`code` = `secret_required` otherwise).
+        (`code` = `secret_required` otherwise). For a Plex media server,
+        `plex_pin_id` is an `owner_token` PIN of this session, which the test does
+        not consume. Limited to 10 tests per minute per session.
       operationId: testConnector
       parameters:
         - $ref: "#/components/parameters/ConnectorKind"
@@ -1219,9 +1796,25 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ConnectorStatus" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "429": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/AdminForbidden" }
+        "404":
+          description: "`not_found`: a connector kind not implemented yet (step 2: every kind but `media_server`)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "409":
+          description: "`secret_required` or `plex_pin_pending`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "410":
+          description: "`pin_expired`: `plex_pin_id` is unknown, expired, used, or not an `owner_token` PIN of this session."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /api/v1/admin/llm/models:
     post:
@@ -1252,8 +1845,14 @@ paths:
                   models:
                     type: array
                     items: { type: string }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/AdminForbidden" }
+        "409":
+          description: "`secret_required`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "502": { $ref: "#/components/responses/Problem" }
 
   /api/v1/admin/settings:
@@ -1261,7 +1860,6 @@ paths:
       tags: [admin, console]
       security:
         - cookieSession: []
-          csrfToken: []
       summary: General server settings
       operationId: getSettings
       responses:
@@ -1270,14 +1868,31 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ServerSettings" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/AdminForbidden" }
     patch:
       tags: [admin, console]
       security:
         - cookieSession: []
           csrfToken: []
       summary: Change general server settings
+      description: |
+        Fields locked by an environment variable cannot be given another value
+        (`setting_locked`). Some fields need more than the admin role
+        (docs/auth.md, section 7):
+        - `public_url` (set, changed or cleared): a media server administrator
+          (`media_server_admin_required`) with a re-authentication less than
+          5 minutes old (`reauth_required`). A new value is verified before it is
+          saved (docs/auth.md, section 10): the server requests
+          `GET <public_url>/api/v1/server/info` with a fresh nonce, without
+          following redirects, with TLS verification and a 5 s timeout, and expects
+          `public_url_proof`. Failure: `409` `public_url_unverified` with a coarse
+          `reason`. Limited to 10 checks per minute per session.
+        - `password_sign_in`: a media server administrator
+          (`media_server_admin_required`).
+        The patch is applied as a whole: when one field is refused, nothing is
+        saved.
       operationId: updateSettings
       requestBody:
         required: true
@@ -1290,17 +1905,25 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ServerSettings" }
-        "400": { $ref: "#/components/responses/Problem" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: "`admin_required`, `media_server_admin_required`, `reauth_required`, `csrf_failed` or `remote_access_denied`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "409":
+          description: "`setting_locked` or `public_url_unverified` (with `reason`)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /api/v1/admin/users:
     get:
       tags: [admin, console]
       security:
         - cookieSession: []
-          csrfToken: []
       summary: Users who signed in at least once
       operationId: listUsers
       responses:
@@ -1315,8 +1938,9 @@ paths:
                   users:
                     type: array
                     items: { $ref: "#/components/schemas/AdminUser" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/AdminForbidden" }
 
   /api/v1/admin/users/{user_id}:
     patch:
@@ -1332,7 +1956,7 @@ paths:
         server's flag is read again (a media server administrator is then admin
         again). Only a media server administrator can demote or disable another
         one (`forbidden`). The last enabled admin cannot be demoted or disabled
-        (`last_admin`).
+        (`last_admin`). Disabling sets `disabled_reason` = `admin`.
       operationId: updateUser
       parameters:
         - $ref: "#/components/parameters/UserId"
@@ -1356,11 +1980,19 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AdminUser" }
-        "400": { $ref: "#/components/responses/Problem" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "404": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: "`forbidden` (only a media server administrator can demote or disable another one), `admin_required`, `csrf_failed` or `remote_access_denied`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`last_admin`: the last enabled admin cannot be demoted or disabled."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
 
   /api/v1/admin/users/{user_id}/sessions:
     delete:
@@ -1374,16 +2006,16 @@ paths:
         - $ref: "#/components/parameters/UserId"
       responses:
         "204": { description: Revoked. }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "404": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/AdminForbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/v1/admin/usage:
     get:
       tags: [admin, console]
       security:
         - cookieSession: []
-          csrfToken: []
       summary: AI usage per user and per day
       operationId: getUsage
       parameters:
@@ -1402,8 +2034,9 @@ paths:
                   days:
                     type: array
                     items: { $ref: "#/components/schemas/UsageDay" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/AdminForbidden" }
 
 components:
   securitySchemes:
@@ -1417,23 +2050,42 @@ components:
       in: cookie
       name: __Host-tindeerr_session
       description: |
-        Web console session (`kind` = `web`): opaque, `HttpOnly`, `Secure`,
-        `SameSite=Strict`, `Path=/`. Expires after 24 h idle or 7 days. Named
-        `tindeerr_session`, without `Secure`, only when the operator allowed the
-        console over plain HTTP on a private network.
+        Web console session (`kind` = `web`): opaque 256-bit token, stored hashed,
+        `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, no `Domain`. Expires
+        after 24 h idle or 7 days after sign-in. Named `tindeerr_session`, without
+        `Secure`, only on requests from a private client IP when
+        `TINDEERR_ALLOW_HTTP_CONSOLE=true` (docs/auth.md, section 2).
     setupSession:
       type: apiKey
       in: cookie
-      name: __Host-tindeerr_session
-      description: Same cookie, holding the setup session from `POST /setup/claim` (`kind` = `setup`, 30 minutes). Setup endpoints only.
+      name: __Host-tindeerr_setup
+      description: |
+        Setup session from `POST /setup/claim` (`kind` = `setup`, no user,
+        30 minutes absolute, same attributes as the web session cookie; named
+        `tindeerr_setup` under the plain-HTTP opt-in). Only one is valid at a time.
+        Accepted by the setup operations, `GET /auth/web/session`, the web sign-ins
+        while setup is pending, and Plex PINs of purpose `owner_token`. Never
+        accepted where a web session is expected, and the reverse.
+    preAuth:
+      type: apiKey
+      in: cookie
+      name: __Host-tindeerr_preauth
+      description: |
+        Not a session: a random value that binds the console's Plex PIN and Quick
+        Connect sign-in handles to the browser that started them (docs/auth.md,
+        section 5). Set by `POST /auth/plex/pins` and `POST /auth/quick-connect`
+        when called by the console without `code_challenge`, if absent; 15 minutes;
+        cleared by a successful web sign-in. Named `tindeerr_preauth` under the
+        plain-HTTP opt-in.
     csrfToken:
       type: apiKey
       in: header
       name: X-CSRF-Token
       description: |
         The session's CSRF token, from the `WebSession` body. Required with a
-        cookie session on `POST`, `PUT`, `PATCH` and `DELETE`, together with an
-        `Origin` header equal to the server's origin; not checked on `GET`.
+        cookie session (web or setup) on `POST`, `PUT`, `PATCH` and `DELETE`,
+        compared in constant time, together with an `Origin` header equal to the
+        server's origin (`403` `csrf_failed` otherwise); never checked on `GET`.
 
   parameters:
     Cursor:
@@ -1477,8 +2129,26 @@ components:
 
   headers:
     SetSessionCookie:
-      description: "`__Host-tindeerr_session=<token>; Path=/; Secure; HttpOnly; SameSite=Strict`."
+      description: |
+        `__Host-tindeerr_session=<token>; Path=/; Secure; HttpOnly; SameSite=Strict`
+        (no `Max-Age`). A web sign-in also clears `__Host-tindeerr_preauth`, and the
+        sign-in that completes setup clears `__Host-tindeerr_setup`.
       schema: { type: string }
+    SetSetupCookie:
+      description: "`__Host-tindeerr_setup=<token>; Path=/; Secure; HttpOnly; SameSite=Strict`."
+      schema: { type: string }
+    SetPreAuthCookie:
+      description: |
+        `__Host-tindeerr_preauth=<value>; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=900`,
+        only for a console `sign_in` handle when the browser has no pre-auth cookie
+        yet.
+      schema: { type: string }
+    ClearSessionCookie:
+      description: "Clears `__Host-tindeerr_session` (`Max-Age=0`) when the caller's web session was revoked by this request."
+      schema: { type: string }
+    RetryAfter:
+      description: Seconds, rounded up.
+      schema: { type: integer, minimum: 0 }
 
   responses:
     Problem:
@@ -1486,12 +2156,57 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
+    BadRequest:
+      description: |
+        `validation_error` (with `errors`; input values are never echoed),
+        `bad_request` (malformed body), or `host_not_allowed` (the `Host` header is
+        not an allowed host; any path but `/healthz`).
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unauthorized:
+      description: |
+        `unauthorized`: no credential this operation accepts (an `Authorization`
+        header on an operation without `bearer`, or a cookie of another kind,
+        counts as none), a revoked, idle-expired or past-lifetime session, a
+        disabled or unlinked user. `token_expired`: the bearer access token is past
+        `exp`; refresh (single-flight) and retry.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Forbidden:
+      description: |
+        `csrf_failed` (cookie request with an unsafe method: wrong or missing
+        `X-CSRF-Token` or `Origin`) or `remote_access_denied` (the user's media
+        server policy forbids remote access and the client IP is not private).
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    AdminForbidden:
+      description: "`admin_required` (the effective role is not `admin`), `csrf_failed` or `remote_access_denied`."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: "`not_found`, also for another user's resource."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    RateLimited:
+      description: |
+        `rate_limited`, with `retry_after_ms`. Limits are per client IP (or per
+        username, session or user where docs/auth.md section 8 says so); global
+        thresholds only slow requests down, except the cap on outstanding sign-in
+        handles.
+      headers:
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
     Pending:
       description: Work in progress; ask again after `retry_after_ms`.
       headers:
-        Retry-After:
-          description: Seconds, rounded up.
-          schema: { type: integer }
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Pending" }
@@ -1509,23 +2224,43 @@ components:
         code:
           type: string
           description: |
-            Stable identifier. Known values: validation_error, unauthorized,
-            token_expired, refresh_token_reused, forbidden, admin_required,
-            not_found, rate_limited, setup_required, setup_completed,
-            invalid_setup_code, invalid_credentials, account_disabled,
-            not_a_server_user, pin_expired, quick_connect_unavailable,
-            quick_connect_expired, pairing_expired, public_url_not_set,
-            csrf_failed, https_required, media_server_unreachable,
-            connector_unreachable, connector_unauthorized, setting_locked,
-            secret_required, streaming_region_not_set, metadata_unreachable,
-            llm_not_configured, tmdb_not_configured, llm_auth_failed, llm_quota,
-            llm_model_not_found, llm_unreachable, llm_invalid_output,
-            daily_limit_reached, requests_not_configured, no_backend_user,
-            title_not_offered, request_not_allowed, quota_exceeded,
-            request_backend_error,
-            last_admin, bad_request, method_not_allowed, internal_error.
+            Stable identifier. Known values:
+            - request and credentials: validation_error, bad_request,
+              host_not_allowed, unauthorized, token_expired, refresh_token_reused,
+              csrf_failed, https_required, forbidden, admin_required,
+              media_server_admin_required, reauth_required, remote_access_denied,
+              not_found, method_not_allowed, rate_limited, internal_error;
+            - setup: setup_required, setup_completed, invalid_setup_code,
+              setup_session_required, setting_locked;
+            - sign-in: invalid_credentials, account_disabled, not_a_server_user,
+              password_sign_in_disabled, sign_in_method_unavailable, pin_expired,
+              plex_pin_pending, plex_owner_required, plex_tv_unreachable,
+              quick_connect_unavailable, quick_connect_expired,
+              media_server_unreachable, media_server_changed;
+            - pairing: pairing_expired, pairing_rejected,
+              pairing_not_awaiting_approval, public_url_not_set,
+              public_url_unverified;
+            - connectors: connector_unreachable, connector_unauthorized,
+              connector_unexpected_response, media_server_unsupported,
+              secret_required;
+            - swipe and admin: last_admin, streaming_region_not_set,
+              metadata_unreachable, llm_not_configured, tmdb_not_configured,
+              llm_auth_failed, llm_quota, llm_model_not_found, llm_unreachable,
+              llm_invalid_output, daily_limit_reached, requests_not_configured,
+              no_backend_user, title_not_offered, request_not_allowed,
+              quota_exceeded, request_backend_error.
           examples: [llm_quota]
-        retry_after_ms: { type: integer, minimum: 0 }
+        retry_after_ms:
+          type: integer
+          minimum: 0
+          description: Set on `rate_limited` and `daily_limit_reached`; the `Retry-After` header carries the same wait in seconds, rounded up.
+        reason:
+          type: string
+          description: |
+            Coarse cause for `public_url_unverified`, never a response body:
+            `unreachable`, `tls_error`, `redirected`, `unexpected_response` or
+            `proof_mismatch`.
+          examples: [proof_mismatch]
         errors:
           type: array
           description: Field errors for `validation_error`.
@@ -1563,12 +2298,17 @@ components:
         auth_methods:
           type: array
           description: |
-            Ways to sign in. `password` (Jellyfin, Emby), `plex_pin` (Plex),
-            `quick_connect` (Jellyfin with Quick Connect enabled), `pairing` (QR
-            code from the console; listed once `public_url` is set).
-          items:
-            type: string
-            enum: [password, plex_pin, quick_connect, pairing]
+            Ways to sign in for this caller (docs/auth.md, section 11). Empty while
+            `setup_required` is true, whatever is configured (the setup wizard
+            reads `GET /setup/state` instead). Otherwise:
+            - `password`: Jellyfin or Emby, unless `password_sign_in` is `disabled`,
+              or `lan_only` and the caller's client IP is not private;
+            - `quick_connect`: Jellyfin, when the cached `GET /QuickConnect/Enabled`
+              says so (left out while unknown);
+            - `plex_pin`: Plex;
+            - `pairing`: once `public_url` is set.
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/AuthMethod" }
         capabilities:
           type: array
           description: Feature flags the clients enable features on, e.g. `trailers`, `ratings`, `streaming_providers`, `requests`, `notifications`.
@@ -1578,6 +2318,150 @@ components:
           format: uri
           description: Base the app prepends to `*_path` image fields (size segment appended by the app).
           examples: ["https://image.tmdb.org/t/p/"]
+        public_url_proof:
+          type: string
+          description: |
+            base64url(HMAC-SHA256(key, nonce)) with the `tindeerr/v1/public-url-proof`
+            sub-key. Present only when the request carried a
+            `Tindeerr-Verify-Nonce` this server is currently waiting for.
+      if:
+        required: [setup_required]
+        properties:
+          setup_required: { const: true }
+      then:
+        properties:
+          auth_methods: { maxItems: 0 }
+
+    AuthMethod:
+      type: string
+      enum: [password, plex_pin, quick_connect, pairing]
+
+    SetupState:
+      type: object
+      description: What the setup wizard still has to do (docs/auth.md, section 3).
+      required: [media_server, media_server_locked, locked_fields, auth_methods]
+      properties:
+        media_server:
+          description: The configured media server, or null.
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [kind]
+              properties:
+                kind: { $ref: "#/components/schemas/MediaServerKind" }
+                name: { type: [string, "null"] }
+        media_server_locked:
+          type: boolean
+          description: |
+            `TINDEERR_MEDIA_SERVER_KIND`, `_URL` and `_API_KEY` are all set: the
+            wizard skips the media server step.
+        locked_fields:
+          type: array
+          description: "`MediaServerConfigInput` fields set by environment variables (`server_type`, `url`, `api_key`, `verify_tls`)."
+          items: { type: string }
+        auth_methods:
+          type: array
+          description: |
+            Methods the administrator can use to complete setup: the rules of
+            `ServerInfo.auth_methods` for this caller, without `pairing`. Empty until
+            a media server is configured.
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/AuthMethod" }
+
+    Handle:
+      type: string
+      description: |
+        Plex PIN or Quick Connect handle: 128 random bits, base64url. Never the
+        plex.tv PIN id or the Jellyfin secret. Bound to its purpose and initiator,
+        in memory only; anything wrong with it gets the same `410` as an unknown
+        handle.
+      pattern: "^[A-Za-z0-9_-]{22,64}$"
+
+    CodeVerifier:
+      type: string
+      description: PKCE code verifier (RFC 7636), kept by the app.
+      pattern: "^[A-Za-z0-9._~-]{43,128}$"
+
+    CodeChallenge:
+      type: string
+      description: "PKCE S256 challenge: base64url(SHA-256(`code_verifier`)), without padding."
+      pattern: "^[A-Za-z0-9_-]{43}$"
+
+    PlexPinRequest:
+      type: object
+      required: [purpose]
+      properties:
+        purpose:
+          type: string
+          enum: [sign_in, reauth, owner_token]
+          description: See `POST /auth/plex/pins` and docs/auth.md, section 5.
+        code_challenge:
+          $ref: "#/components/schemas/CodeChallenge"
+          description: App `sign_in` only. Without it, a `sign_in` handle is bound to the console's pre-auth cookie.
+      if:
+        properties:
+          purpose: { not: { const: sign_in } }
+      then:
+        properties:
+          code_challenge: false
+
+    QuickConnectRequest:
+      type: object
+      required: [purpose]
+      properties:
+        purpose: { type: string, enum: [sign_in, reauth] }
+        code_challenge:
+          $ref: "#/components/schemas/CodeChallenge"
+          description: App `sign_in` only. Without it, a `sign_in` handle is bound to the console's pre-auth cookie.
+      if:
+        properties:
+          purpose: { not: { const: sign_in } }
+      then:
+        properties:
+          code_challenge: false
+
+    ReauthInput:
+      description: Exactly one proof, checked against the currently configured media server.
+      oneOf:
+        - type: object
+          required: [password]
+          additionalProperties: false
+          properties:
+            password: { type: string, maxLength: 512 }
+        - type: object
+          required: [pin_id]
+          additionalProperties: false
+          properties:
+            pin_id: { $ref: "#/components/schemas/Handle" }
+        - type: object
+          required: [handle]
+          additionalProperties: false
+          properties:
+            handle:
+              $ref: "#/components/schemas/Handle"
+              description: Quick Connect handle of purpose `reauth`.
+
+    PairingRequested:
+      type: object
+      description: The pairing is `awaiting_approval`; poll `POST /auth/pair/complete`.
+      required: [pending, retry_after_ms, confirmation_code, expires_at]
+      properties:
+        pending: { type: boolean, const: true }
+        retry_after_ms: { type: integer, minimum: 250, examples: [2000] }
+        confirmation_code: { $ref: "#/components/schemas/ConfirmationCode" }
+        expires_at:
+          type: string
+          format: date-time
+          description: The pairing's expiry, 5 minutes after it was created.
+
+    ConfirmationCode:
+      type: string
+      description: |
+        4 digits derived from the `code_challenge` (first 32 bits of its SHA-256,
+        modulo 10 000, zero-padded). The app and the console show it; the user
+        approves only if both match.
+      pattern: "^[0-9]{4}$"
+      examples: ["4821"]
 
     DeviceInput:
       type: object
@@ -1602,7 +2486,17 @@ components:
             - type: "null"
             - $ref: "#/components/schemas/User"
         csrf_token: { type: string, description: Send as `X-CSRF-Token` on unsafe methods. }
-        expires_at: { type: string, format: date-time }
+        expires_at:
+          type: string
+          format: date-time
+          description: Absolute end of the session (7 days for `web`, 30 minutes for `setup`); a `web` session also ends after 24 h idle.
+        reauth_expires_at:
+          type: [string, "null"]
+          format: date-time
+          description: |
+            `web` only: until when the last sign-in or `POST /auth/web/reauth`
+            counts as fresh (5 minutes), for the media server connector and
+            `public_url`. Null when it has passed.
         setup_completed_now:
           type: boolean
           description: True when this sign-in completed the first-run setup.
@@ -1614,15 +2508,25 @@ components:
 
     Pairing:
       type: object
+      description: |
+        One of the caller's pairings (docs/auth.md, section 9). `pending`: the code
+        has not been used. `awaiting_approval`: a phone asked to pair; `device`,
+        `requested_from` and `confirmation_code` say which, for the user to approve
+        (`POST /pairings/{id}/approve`) or reject (`DELETE /pairings/{id}`).
+        `approved`: waiting for the phone to collect its tokens. `completed`: the
+        phone is signed in (`session_id`). `expired`: 5 minutes passed before
+        completion. `revoked`: cancelled or rejected.
       required: [id, status, created_at, expires_at]
       properties:
         id: { type: string }
-        status: { type: string, enum: [pending, completed, expired, revoked] }
+        status: { type: string, enum: [pending, awaiting_approval, approved, completed, expired, revoked] }
         created_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
+        requested_at: { type: [string, "null"], format: date-time }
+        approved_at: { type: [string, "null"], format: date-time }
         completed_at: { type: [string, "null"], format: date-time }
         device:
-          description: The phone that used the code, once `completed`.
+          description: The phone that asked to pair, from `awaiting_approval` on.
           oneOf:
             - type: "null"
             - type: object
@@ -1631,6 +2535,13 @@ components:
                 name: { type: string }
                 platform: { type: string }
                 app_version: { type: string }
+        requested_from:
+          type: [string, "null"]
+          description: Client IP of the phone's `POST /auth/pair`.
+        confirmation_code:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/ConfirmationCode"
         session_id: { type: [string, "null"], description: The session the pairing opened. }
 
     NewPairing:
@@ -1642,7 +2553,7 @@ components:
             code: { $ref: "#/components/schemas/PairingCode" }
             link:
               type: string
-              description: "`tindeerr://pair?server=<public_url>&code=<code>`, rendered as a QR code."
+              description: "`tindeerr://pair?server=<public_url>&code=<code>`, rendered as a QR code (SVG or canvas), with the host of `public_url` written next to it."
               examples: ["tindeerr://pair?server=https%3A%2F%2Ftindeerr.example.com&code=q7Xc0vW2dYk9LmN4pRs6Tu"]
 
     TokenPair:
@@ -1679,19 +2590,36 @@ components:
           $ref: "#/components/schemas/Role"
           description: Effective role, `admin` when `media_server_admin` or `promoted` (docs/adr/0010).
         avatar_url: { type: [string, "null"], format: uri }
+        media_server_admin:
+          type: boolean
+          description: |
+            Administrator on the media server, as read at the user's last sign-in
+            (or cleared since). Only a media server administrator can change the
+            media server connector, `public_url` and `password_sign_in`.
 
     AdminUser:
       allOf:
         - $ref: "#/components/schemas/User"
         - type: object
-          required: [enabled, media_server_admin, promoted, created_at, votes, generations_today]
+          required: [enabled, media_server_admin, promoted, remote_access, created_at, votes, generations_today]
           properties:
             enabled: { type: boolean }
+            disabled_reason:
+              type: [string, "null"]
+              enum: [admin, media_server, unlinked, null]
+              description: |
+                Why the user is disabled: by an admin, by the media server (removed or
+                disabled there; re-enabled at their next successful sign-in), or
+                unlinked after the media server was replaced. Null when enabled.
             media_server_admin:
               type: boolean
-              description: Administrator on the media server, as read at the user's last sign-in (or cleared by a demotion since).
+              description: Administrator on the media server, as read at the user's last sign-in (or cleared by a demotion or the hourly sync since).
             promoted: { type: boolean, description: Made admin in Tindeerr. }
+            remote_access:
+              type: boolean
+              description: From the media server policy; when false, the user is refused from non-private client IPs.
             created_at: { type: string, format: date-time }
+            last_sign_in_at: { type: [string, "null"], format: date-time }
             last_seen_at: { type: [string, "null"], format: date-time }
             votes: { type: integer, minimum: 0 }
             generations_today: { type: integer, minimum: 0 }
@@ -1709,6 +2637,7 @@ components:
         app_version: { type: string }
         created_at: { type: string, format: date-time }
         last_seen_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time, description: Absolute end of the session. }
         current: { type: boolean }
 
     MediaType:
@@ -1993,7 +2922,7 @@ components:
 
     ConnectorHealth:
       type: string
-      enum: [ok, unauthorized, unreachable, unexpected_response, not_configured]
+      enum: [ok, unauthorized, unreachable, unexpected_response, unsupported_version, not_configured]
 
     ConnectorStatus:
       type: object
@@ -2015,14 +2944,32 @@ components:
 
     MediaServerConfigInput:
       type: object
+      description: |
+        Used by `PUT /setup/media-server` and the `media_server` connector. Jellyfin
+        and Emby take `api_key` (an administrator API key), never `plex_pin_id`;
+        Plex takes `plex_pin_id`, never `api_key`. An omitted secret keeps the
+        stored one only when `url` and `server_type` are unchanged
+        (`secret_required` otherwise).
       required: [connector, server_type, url]
       properties:
         connector: { type: string, const: media_server }
         server_type: { $ref: "#/components/schemas/MediaServerKind" }
-        url: { type: string, format: uri, maxLength: 512 }
-        api_key: { type: string, maxLength: 512, description: Jellyfin / Emby admin API key. }
-        plex_pin_id: { type: string, description: Plex only; the owner token is taken from this completed PIN. }
+        url: { type: string, format: uri, maxLength: 512, pattern: "^https?://" }
+        api_key: { type: string, minLength: 1, maxLength: 512, description: Jellyfin / Emby admin API key. }
+        plex_pin_id:
+          $ref: "#/components/schemas/Handle"
+          description: Plex only. A completed Plex PIN of purpose `owner_token` from this session; the owner token is taken from it.
         verify_tls: { type: boolean, default: true }
+      if:
+        required: [server_type]
+        properties:
+          server_type: { const: plex }
+      then:
+        properties:
+          api_key: false
+      else:
+        properties:
+          plex_pin_id: false
 
     LlmProviderKind:
       type: string
@@ -2094,16 +3041,19 @@ components:
 
     ServerSettings:
       type: object
-      required: [name, public_url, language, streaming_region, daily_generation_limit, warm_up_enabled, content_filters]
+      required: [name, public_url, password_sign_in, language, streaming_region, daily_generation_limit, warm_up_enabled, content_filters]
       properties:
         name: { type: string }
         public_url:
           type: [string, "null"]
           format: uri
           description: |
-            Origin the phones reach the server at, used only in pairing QR codes.
-            `https`, or `http` only for a private, link-local, `.local` or
-            `localhost` host; no path. Null until set.
+            Origin the phones reach the server at, used in pairing QR codes; its
+            host is also an allowed `Host`. `https://host[:port]`, or `http` only when
+            the host is an IP literal in a private range, `localhost` or a `.local`
+            name; no path, query, fragment or user info. Null until set. Not an
+            accepted `Origin` for the console.
+        password_sign_in: { $ref: "#/components/schemas/PasswordSignIn" }
         language: { type: string, examples: [fr-FR] }
         streaming_region: { type: [string, "null"], pattern: "^[A-Z]{2}$" }
         daily_generation_limit: { type: integer, minimum: 0, description: Default per-user cap; 0 disables generation. }
@@ -2121,12 +3071,30 @@ components:
           format: uri
           maxLength: 255
           pattern: "^https?://[^/?#@]+/?$"
-          description: Validated as in `ServerSettings.public_url` (`validation_error` otherwise).
+          description: |
+            Validated as in `ServerSettings.public_url` (`validation_error`
+            otherwise), then verified through that URL before saving
+            (`public_url_unverified`). Media server administrator with a fresh
+            re-authentication only.
+        password_sign_in:
+          $ref: "#/components/schemas/PasswordSignIn"
+          description: Media server administrator only.
         language: { type: string, maxLength: 16 }
         streaming_region: { type: [string, "null"], pattern: "^[A-Z]{2}$" }
         daily_generation_limit: { type: integer, minimum: 0 }
         warm_up_enabled: { type: boolean }
         content_filters: { $ref: "#/components/schemas/ContentFilters" }
+
+    PasswordSignIn:
+      type: string
+      description: |
+        Whether Jellyfin / Emby password sign-in (and password re-authentication) is
+        offered: `enabled`, `lan_only` (only from a private client IP) or
+        `disabled`. Refused attempts get `403` `password_sign_in_disabled`. Quick
+        Connect, Plex PIN and pairing are not affected. Set by
+        `TINDEERR_PASSWORD_SIGN_IN` or by a media server administrator.
+      enum: [enabled, lan_only, disabled]
+      default: enabled
 
     ContentFilters:
       type: object
