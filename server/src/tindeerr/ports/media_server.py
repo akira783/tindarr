@@ -24,6 +24,8 @@ type ConnectorHealth = Literal[
 MEDIA_SERVER_KINDS: Final[tuple[MediaServerKind, ...]] = get_args(MediaServerKind.__value__)
 #: Jellyfin and Emby user ids are 32 hex digits; Plex users are keyed by account id.
 _JELLYFIN_ID_LENGTH: Final = 32
+#: Longest server id kept from ``/System/Info/Public``; real ones are 32 hex digits.
+_MAX_SERVER_ID_LENGTH: Final = 128
 
 
 def as_media_server_kind(value: object) -> MediaServerKind | None:
@@ -51,6 +53,20 @@ def normalize_user_id(kind: MediaServerKind, raw: str) -> str:
     return value
 
 
+def normalize_server_id(raw: str) -> str | None:
+    """Return the stored form of a media server's own id, or ``None`` when unusable.
+
+    Lower case without dashes, like a user id, but deliberately not required to be 32
+    hexadecimal digits: the identity is only ever compared with itself, so accepting a
+    fork that numbers its servers differently costs nothing and refusing it would make
+    the connector unsavable.
+    """
+    value = raw.strip().replace("-", "").lower()
+    if not value or len(value) > _MAX_SERVER_ID_LENGTH:
+        return None
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class MediaUser:
     """A user as the media server describes them."""
@@ -75,6 +91,20 @@ class ServerIdentity:
     def key(self) -> str:
         """``<kind>:<server id>``, as stored in ``server_state.media_server_identity``."""
         return f"{self.kind}:{self.server_id}"
+
+    @staticmethod
+    def server_id_of(key: str | None, kind: MediaServerKind) -> str | None:
+        """Return the server id inside a stored identity key, if it is one of ``kind``.
+
+        The Plex sign-in reads the ``machineIdentifier`` this way: a key of another kind
+        (the connector was repointed) must not match a resource.
+        """
+        if key is None:
+            return None
+        prefix, separator, server_id = key.partition(":")
+        if not separator or prefix != kind or not server_id:
+            return None
+        return server_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +157,10 @@ class MediaServer(Protocol):
 
     async def authenticate_password(self, username: str, password: str) -> MediaUser:
         """Check a user's password (Jellyfin and Emby) and return the user."""
+        ...
+
+    async def quick_connect_enabled(self) -> bool:
+        """Whether Quick Connect is switched on here (Jellyfin only; cached by auth)."""
         ...
 
     async def quick_connect_start(self) -> QuickConnectStart:

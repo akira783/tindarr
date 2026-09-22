@@ -20,6 +20,8 @@ _FIRST_ERROR_STATUS = HTTPStatus.BAD_REQUEST
 _LAST_ERROR_STATUS = 599
 #: Members of the problem body an extension may not replace.
 RESERVED_MEMBERS: Final = frozenset({"type", "title", "status", "code", "detail", "errors"})
+#: The contract's floor for ``Pending.retry_after_ms``.
+_MIN_PENDING_RETRY_MS: Final = 250
 
 
 class ProblemError(Exception):
@@ -45,6 +47,21 @@ class ProblemError(Exception):
         self.detail = detail
         self.headers: Mapping[str, str] = MappingProxyType(dict(headers or {}))
         self.extensions: Mapping[str, str | int] = MappingProxyType(dict(extensions or {}))
+
+
+class PendingError(Exception):
+    """Not a failure: the work is not finished, and the client should ask again.
+
+    The API renders it as ``202`` with ``{"pending": true, "retry_after_ms": …}`` and a
+    ``Retry-After`` header (the contract's ``Pending`` response). It is raised instead of
+    returned so that a poll travelling through several layers — a Quick Connect handle
+    nobody approved yet, a plex.tv PIN still pending — reads the same as any other
+    outcome at each of them.
+    """
+
+    def __init__(self, retry_after_ms: int = 1000) -> None:
+        super().__init__("pending")
+        self.retry_after_ms = max(retry_after_ms, _MIN_PENDING_RETRY_MS)
 
 
 class RateLimitedError(ProblemError):

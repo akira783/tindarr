@@ -1538,6 +1538,7 @@ dependencies = [
     { name = "alembic" },
     { name = "cryptography" },
     { name = "fastapi" },
+    { name = "httpx2" },
     { name = "pydantic" },
     { name = "pyjwt" },
     { name = "sqlalchemy", extra = ["asyncio"] },
@@ -1546,7 +1547,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx2" },
     { name = "import-linter" },
     { name = "jsonschema" },
     { name = "pip-audit" },
@@ -1563,6 +1563,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.20" },
     { name = "cryptography", specifier = ">=50" },
     { name = "fastapi", specifier = ">=0.141" },
+    { name = "httpx2", specifier = ">=2.13" },
     { name = "pydantic", specifier = ">=2.13" },
     { name = "pyjwt", specifier = ">=2.10" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.54,<2.1" },
@@ -1571,7 +1572,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx2" },
     { name = "import-linter" },
     { name = "jsonschema" },
     { name = "pip-audit" },

@@ -259,7 +259,15 @@ def quiet_noisy_libraries() -> None:
     """
     # Tindeerr logs its own migration summary; Alembic's step-by-step lines are noise.
     logging.getLogger("alembic").setLevel(logging.WARNING)
-    for name in ("httpx", "httpcore", "aiosqlite", "sqlalchemy.engine", "sqlalchemy.pool"):
+    for name in (
+        "httpx",
+        "httpx2",
+        "httpcore",
+        "httpcore2",
+        "aiosqlite",
+        "sqlalchemy.engine",
+        "sqlalchemy.pool",
+    ):
         logging.getLogger(name).setLevel(logging.WARNING)
 
 

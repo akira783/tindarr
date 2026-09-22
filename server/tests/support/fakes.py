@@ -75,6 +75,7 @@ class FakeMediaServer:
     passwords: dict[str, str] = field(default_factory=dict[str, str])
     quick_connect_code: str = "123456"
     quick_connect_user: MediaUser | None = None
+    quick_connect_on: bool = True
     #: What ``identify`` claims to be; defaults to ``kind``.
     identifies_as: MediaServerKind | None = None
     calls: list[str] = field(default_factory=list[str])
@@ -103,6 +104,11 @@ class FakeMediaServer:
         if user.disabled:
             raise ProblemError(403, "account_disabled", "This account is disabled.")
         return user
+
+    async def quick_connect_enabled(self) -> bool:
+        """Say whether Quick Connect is on, without calling anything."""
+        self.calls.append("quick_connect_enabled")
+        return self.kind == "jellyfin" and self.quick_connect_on
 
     async def quick_connect_start(self) -> QuickConnectStart:
         """Start a Quick Connect request."""

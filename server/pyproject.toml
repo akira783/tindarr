@@ -14,6 +14,7 @@ dependencies = [
     "aiosqlite>=0.22",
     "uvicorn>=0.53",
     "pyjwt>=2.10",
+    "httpx2>=2.13",
 ]
 
 [project.scripts]
@@ -21,7 +22,6 @@ tindeerr = "tindeerr.main.cli:main"
 
 [dependency-groups]
 dev = [
-    "httpx2",
     "import-linter",
     "jsonschema",
     "pip-audit",

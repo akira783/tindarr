@@ -8,6 +8,54 @@ wrong credential must not tell the caller which part was wrong.
 from http import HTTPStatus
 
 from tindeerr.core.errors import ProblemError
+from tindeerr.ports.problems import (
+    account_disabled,
+    invalid_credentials,
+    media_server_changed,
+    media_server_unreachable,
+    media_server_unsupported,
+    not_a_server_user,
+    plex_owner_required,
+    plex_tv_unreachable,
+    quick_connect_expired,
+    quick_connect_unavailable,
+    sign_in_method_unavailable,
+)
+
+# Problems an adapter can raise too (``tindeerr.ports.problems``) are re-exported here,
+# so every layer above keeps one place to look for the auth problems.
+__all__ = [
+    "account_disabled",
+    "admin_required",
+    "connector_failed",
+    "csrf_failed",
+    "host_not_allowed",
+    "https_required",
+    "invalid_credentials",
+    "invalid_setup_code",
+    "media_server_admin_required",
+    "media_server_changed",
+    "media_server_unreachable",
+    "media_server_unsupported",
+    "not_a_server_user",
+    "password_sign_in_disabled",
+    "pin_expired",
+    "plex_owner_required",
+    "plex_pin_pending",
+    "plex_tv_unreachable",
+    "quick_connect_expired",
+    "quick_connect_unavailable",
+    "reauth_required",
+    "refresh_token_reused",
+    "remote_access_denied",
+    "secret_required",
+    "setup_completed",
+    "setup_required",
+    "setup_session_required",
+    "sign_in_method_unavailable",
+    "token_expired",
+    "unauthorized",
+]
 
 
 def unauthorized(detail: str = "No valid credential for this request.") -> ProblemError:
@@ -81,9 +129,13 @@ def remote_access_denied() -> ProblemError:
     )
 
 
-def account_disabled() -> ProblemError:
-    """403: the account is disabled, here or on the media server."""
-    return ProblemError(HTTPStatus.FORBIDDEN, "account_disabled", "This account is disabled.")
+def password_sign_in_disabled() -> ProblemError:
+    """403: the ``password_sign_in`` setting does not offer passwords to this caller."""
+    return ProblemError(
+        HTTPStatus.FORBIDDEN,
+        "password_sign_in_disabled",
+        "Password sign-in is switched off; use Quick Connect, a Plex PIN or a paired phone.",
+    )
 
 
 def setup_session_required() -> ProblemError:
@@ -145,11 +197,6 @@ def connector_failed(health: str) -> ProblemError:
         codes.get(health, "connector_unexpected_response"),
         "The media server did not answer as expected; nothing was saved.",
     )
-
-
-def media_server_unsupported(detail: str) -> ProblemError:
-    """502: the address answers, but not as the declared product or version."""
-    return ProblemError(HTTPStatus.BAD_GATEWAY, "media_server_unsupported", detail)
 
 
 def setup_required() -> ProblemError:
