@@ -7,8 +7,11 @@ from pydantic import BaseModel
 
 from tindeerr import __version__
 from tindeerr.api.deps import Services
+from tindeerr.api.security import Context
+from tindeerr.api.v1.models import MediaServerInfo
 from tindeerr.auth.methods import AuthMethod, sign_in_methods
-from tindeerr.ports.media_server import MediaServerKind, as_media_server_kind
+from tindeerr.ports.media_server import as_media_server_kind
+from tindeerr.storage.settings import as_password_sign_in
 
 API_VERSION: Final = 1
 #: Oldest app release that can talk to this server.
@@ -16,12 +19,6 @@ MIN_APP_VERSION: Final = "0.1.0"
 TMDB_IMAGE_BASE_URL: Final = "https://image.tmdb.org/t/p/"
 
 router = APIRouter(prefix="/server", tags=["server"])
-
-
-class MediaServerInfo(BaseModel):
-    """The configured media server."""
-
-    kind: MediaServerKind
 
 
 class ServerInfo(BaseModel):
@@ -43,12 +40,27 @@ class ServerInfo(BaseModel):
     operation_id="getServerInfo",
     summary="Server identity, version and capabilities",
 )
-async def get_server_info(services: Services) -> ServerInfo:
-    """Tell the app what this server is and what it can do."""
+async def get_server_info(services: Services, context: Context) -> ServerInfo:
+    """Tell the app what this server is and what it can do.
+
+    Public and rate-limited per client address. The answer depends on the caller's
+    network (``password_sign_in = lan_only``), so it is never cached. It never calls the
+    media server: Quick Connect comes from a cache the adapters fill (step 2b).
+    """
+    services.limits.public.hit(context.rate_limit_key)
     name = (await services.settings.get("server_name")).value
     kind_value = (await services.settings.get("media_server_kind")).value
     kind = as_media_server_kind(kind_value)
+    password_sign_in = as_password_sign_in((await services.settings.get("password_sign_in")).value)
+    public_url = (await services.settings.get("public_url")).value
     setup_required = not await services.server_state.setup_completed()
+    methods = sign_in_methods(
+        kind,
+        password_sign_in=password_sign_in,
+        client_is_private=context.client_is_private,
+        quick_connect_enabled=None,
+        pairing_available=isinstance(public_url, str),
+    )
     return ServerInfo(
         name=name if isinstance(name, str) and name else "Tindeerr",
         version=__version__,
@@ -57,7 +69,7 @@ async def get_server_info(services: Services) -> ServerInfo:
         setup_required=setup_required,
         media_server=MediaServerInfo(kind=kind) if kind is not None else None,
         # Nobody signs in before setup completes: the console claims the server first.
-        auth_methods=[] if setup_required else sign_in_methods(kind),
+        auth_methods=[] if setup_required else methods,
         capabilities=[],
         tmdb_image_base_url=TMDB_IMAGE_BASE_URL,
     )

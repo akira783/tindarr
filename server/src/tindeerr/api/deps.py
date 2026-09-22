@@ -4,7 +4,15 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, Request
+from sqlalchemy.ext.asyncio import AsyncEngine
 
+from tindeerr.api.context import HostPolicy
+from tindeerr.auth.mediaserver import MediaServerConnector
+from tindeerr.auth.ratelimit import RateLimits
+from tindeerr.auth.sessions import SessionService
+from tindeerr.auth.setup import SetupService
+from tindeerr.core.clock import Clock
+from tindeerr.core.config import ServerConfig
 from tindeerr.storage.server_state import ServerStateRepository
 from tindeerr.storage.settings import SettingsStore
 
@@ -13,8 +21,19 @@ from tindeerr.storage.settings import SettingsStore
 class AppServices:
     """Everything a route may need, stored in ``app.state.services`` during the lifespan."""
 
+    config: ServerConfig
+    clock: Clock
+    #: The database, for the repositories the routes compose in one transaction.
+    engine: AsyncEngine
     settings: SettingsStore
     server_state: ServerStateRepository
+    sessions: SessionService
+    setup: SetupService
+    connector: MediaServerConnector
+    limits: RateLimits
+    hosts: HostPolicy
+    #: Random per database: the JWT issuer and the media server ``DeviceId``.
+    install_id: str
 
 
 def get_services(request: Request) -> AppServices:

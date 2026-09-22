@@ -249,6 +249,20 @@ def build_handler(stream: TextIO | None = None) -> logging.Handler:
     return handler
 
 
+def quiet_noisy_libraries() -> None:
+    """Raise the level of libraries that would print credentials or noise.
+
+    HTTP clients log full URLs (query strings included) at INFO and DEBUG, and the SQLite
+    drivers log every statement with its bound parameters at DEBUG: session tokens, CSRF
+    tokens and hashes would end up in the log of a server started with ``DEBUG``.
+    Adapters and repositories log what matters themselves, redacted.
+    """
+    # Tindeerr logs its own migration summary; Alembic's step-by-step lines are noise.
+    logging.getLogger("alembic").setLevel(logging.WARNING)
+    for name in ("httpx", "httpcore", "aiosqlite", "sqlalchemy.engine", "sqlalchemy.pool"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
 def configure_logging(level: str) -> None:
     """Send every log record, including uvicorn's, through one redacting JSON handler."""
     root = logging.getLogger()
@@ -260,12 +274,7 @@ def configure_logging(level: str) -> None:
         logger = logging.getLogger(name)
         logger.handlers.clear()
         logger.propagate = True
-    # Tindeerr logs its own migration summary; Alembic's step-by-step lines are noise.
-    logging.getLogger("alembic").setLevel(logging.WARNING)
-    # HTTP clients log full URLs (query strings included) at INFO and DEBUG. Adapters
-    # log their own calls, redacted; only the clients' warnings are kept.
-    for name in ("httpx", "httpcore"):
-        logging.getLogger(name).setLevel(logging.WARNING)
+    quiet_noisy_libraries()
     # Requests are logged by the app itself, with the request id and without query strings.
     logging.getLogger("uvicorn.access").disabled = True
     logging.captureWarnings(capture=True)

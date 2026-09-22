@@ -27,6 +27,7 @@ from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 from referencing.jsonschema import DRAFT202012
 
+from tests.support import server_config
 from tindeerr.core.config import ServerConfig
 from tindeerr.main.app import create_app
 
@@ -142,7 +143,7 @@ def test_error_codes_are_documented() -> None:
 
 @pytest.mark.parametrize("api_docs", [False, True])
 def test_every_exposed_route_is_in_the_contract(data_dir: Path, api_docs: bool) -> None:
-    app = create_app(ServerConfig(data_dir=data_dir, api_docs=api_docs))
+    app = create_app(server_config(data_dir, api_docs=api_docs))
     routes = list(exposed_operations(app))
     assert ("/healthz", "get", "health") in routes
     assert ("/api/v1/server/info", "get", "getServerInfo") in routes

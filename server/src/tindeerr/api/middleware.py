@@ -10,7 +10,7 @@ from typing import Final
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from tindeerr.api.proxy import TRUSTED_PEER_SCOPE_KEY, client_ip
+from tindeerr.api.context import TRUSTED_PEER_SCOPE_KEY, client_ip
 from tindeerr.core.logs import request_id_var
 
 REQUEST_ID_HEADER: Final = "X-Request-ID"

@@ -14,6 +14,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from tests.support import server_config
 from tindeerr import __version__
 from tindeerr.core.config import ConfigError, ServerConfig
 from tindeerr.core.crypto import DecryptionError
@@ -172,8 +173,7 @@ def test_request_id_is_generated(client: TestClient) -> None:
 
 
 def test_request_id_is_echoed_from_trusted_proxies_only(data_dir: Path) -> None:
-    config = ServerConfig(data_dir=data_dir, trusted_proxies="10.0.0.0/8")  # pyright: ignore[reportArgumentType]
-    app = create_app(config)
+    app = create_app(server_config(data_dir, trusted_proxies="10.0.0.0/8"))
     with TestClient(app, client=("10.0.0.2", 5000)) as proxied:
         assert (
             proxied.get("/healthz", headers={"X-Request-ID": "abc-123"}).headers["x-request-id"]
@@ -259,7 +259,7 @@ def test_docs_are_disabled_by_default(client: TestClient) -> None:
 
 
 def test_docs_can_be_enabled(data_dir: Path) -> None:
-    with TestClient(create_app(ServerConfig(data_dir=data_dir, api_docs=True))) as client:
+    with TestClient(create_app(server_config(data_dir, api_docs=True))) as client:
         docs = client.get("/api/docs")
         assert docs.status_code == 200
         assert "content-security-policy" not in docs.headers
@@ -281,8 +281,7 @@ def test_forwarded_headers_are_ignored_without_trusted_proxies(config: ServerCon
 def test_forwarded_headers_are_honoured_only_from_trusted_proxies(
     data_dir: Path, peer: str, expected: str
 ) -> None:
-    config = ServerConfig(data_dir=data_dir, trusted_proxies="10.0.0.0/8")  # pyright: ignore[reportArgumentType]
-    app = create_app(config)
+    app = create_app(server_config(data_dir, trusted_proxies="10.0.0.0/8"))
     add_test_routes(app)
     with TestClient(app, client=(peer, 5000)) as client:
         response = client.get(
@@ -402,7 +401,7 @@ def test_hsts_is_off_by_default(client: TestClient) -> None:
 
 
 def test_hsts_can_be_enabled(data_dir: Path) -> None:
-    with TestClient(create_app(ServerConfig(data_dir=data_dir, hsts=True))) as client:
+    with TestClient(create_app(server_config(data_dir, hsts=True))) as client:
         response = client.get("/healthz")
     assert response.headers["strict-transport-security"] == "max-age=31536000"
 

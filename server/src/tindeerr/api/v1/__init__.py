@@ -2,9 +2,11 @@
 
 from fastapi import APIRouter
 
-from tindeerr.api.v1 import server
+from tindeerr.api.v1 import auth, server, setup
 
 API_PREFIX = "/api/v1"
 
 router = APIRouter(prefix=API_PREFIX)
 router.include_router(server.router)
+router.include_router(setup.router)
+router.include_router(auth.router)

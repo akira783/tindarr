@@ -1,5 +1,7 @@
 """Shared fixtures."""
 
+import io
+import logging
 import os
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
@@ -8,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from tests.support import FakeClock, FakeMediaServers
+from tests.support import FakeClock, FakeMediaServers, server_config
 from tindeerr.auth.mediaserver import MediaServerConnector
 from tindeerr.auth.ratelimit import RateLimits
 from tindeerr.auth.sessions import SessionService
@@ -17,7 +19,7 @@ from tindeerr.auth.tokens import AccessTokens
 from tindeerr.core.config import ServerConfig
 from tindeerr.core.crypto import SecretCipher
 from tindeerr.core.keys import KeyMaterial, KeyPurpose, load_key_material
-from tindeerr.core.logs import clear_registered_secrets
+from tindeerr.core.logs import build_handler, clear_registered_secrets, quiet_noisy_libraries
 from tindeerr.main.app import create_app
 from tindeerr.storage.db import create_async_db_engine, database_path
 from tindeerr.storage.migrate import upgrade_database
@@ -48,7 +50,7 @@ def data_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def config(data_dir: Path) -> ServerConfig:
-    return ServerConfig(data_dir=data_dir)
+    return server_config(data_dir)
 
 
 @pytest.fixture
@@ -65,6 +67,21 @@ async def engine(data_dir: Path) -> AsyncIterator[AsyncEngine]:
     async_engine = create_async_db_engine(db_path)
     yield async_engine
     await async_engine.dispose()
+
+
+@pytest.fixture
+def log_stream() -> Iterator[io.StringIO]:
+    """Capture every log line through the real redacting handler, at DEBUG level."""
+    stream = io.StringIO()
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    root.handlers = [build_handler(stream)]
+    root.setLevel(logging.DEBUG)
+    quiet_noisy_libraries()
+    try:
+        yield stream
+    finally:
+        root.handlers, root.level = handlers, level
 
 
 @pytest.fixture

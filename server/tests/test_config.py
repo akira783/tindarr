@@ -127,3 +127,21 @@ def test_hsts_is_read_as_a_boolean(monkeypatch: pytest.MonkeyPatch) -> None:
     assert load_config().hsts is False
     monkeypatch.setenv("TINDEERR_HSTS", "true")
     assert load_config().hsts is True
+
+
+def test_allowed_hosts_are_parsed_and_normalised(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TINDEERR_ALLOWED_HOSTS", "Tindeerr.Example.com, console.lan ,")
+    assert load_config().allowed_hosts == ("tindeerr.example.com", "console.lan")
+
+
+@pytest.mark.parametrize("value", ["console.lan:8787", "https://console.lan", "not a host"])
+def test_invalid_allowed_hosts_are_refused(value: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TINDEERR_ALLOWED_HOSTS", value)
+    with pytest.raises(ConfigError, match="TINDEERR_ALLOWED_HOSTS"):
+        load_config()
+
+
+def test_the_plain_http_console_is_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert load_config().allow_http_console is False
+    monkeypatch.setenv("TINDEERR_ALLOW_HTTP_CONSOLE", "true")
+    assert load_config().allow_http_console is True
