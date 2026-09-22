@@ -118,26 +118,25 @@ def forged(keys: KeyMaterial, **changes: Any) -> str:
 
 
 @pytest.mark.parametrize(
-    ("name", "changes"),
+    "changes",
     [
-        ("wrong audience", {"payload": {"aud": "someone-else"}}),
-        ("wrong issuer", {"payload": {"iss": "tindeerr:another-install"}}),
-        ("wrong type", {"header": {"typ": "JWT"}}),
-        ("no type", {"header": {"typ": None}}),
-        ("wrong key id", {"header": {"kid": "0badc0de"}}),
-        ("no key id", {"header": {"kid": None}}),
-        ("no subject", {"without": ["sub"]}),
-        ("no session", {"without": ["sid"]}),
-        ("no issued at", {"without": ["iat"]}),
-        ("no expiry", {"without": ["exp"]}),
-        ("no issuer", {"without": ["iss"]}),
-        ("no audience", {"without": ["aud"]}),
+        pytest.param({"payload": {"aud": "someone-else"}}, id="wrong audience"),
+        pytest.param({"payload": {"iss": "tindeerr:another-install"}}, id="wrong issuer"),
+        pytest.param({"header": {"typ": "JWT"}}, id="wrong type"),
+        pytest.param({"header": {"typ": None}}, id="no type"),
+        pytest.param({"header": {"kid": "0badc0de"}}, id="wrong key id"),
+        pytest.param({"header": {"kid": None}}, id="no key id"),
+        pytest.param({"without": ["sub"]}, id="no subject"),
+        pytest.param({"without": ["sid"]}, id="no session"),
+        pytest.param({"without": ["iat"]}, id="no issued at"),
+        pytest.param({"without": ["exp"]}, id="no expiry"),
+        pytest.param({"without": ["iss"]}, id="no issuer"),
+        pytest.param({"without": ["aud"]}, id="no audience"),
     ],
 )
 def test_tokens_with_the_wrong_header_or_claims_are_refused(
-    access_tokens: AccessTokens, keys: KeyMaterial, clock: FakeClock, name: str, changes: Any
+    access_tokens: AccessTokens, keys: KeyMaterial, clock: FakeClock, changes: Any
 ) -> None:
-    del name
     token = forged(keys, **changes)
     clock.advance(1790000100 - clock.now().timestamp())
     with pytest.raises(ProblemError) as caught:

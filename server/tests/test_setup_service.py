@@ -426,7 +426,7 @@ async def test_completing_setup_creates_the_admin_and_a_new_web_session(
 
 
 async def test_completion_needs_a_live_setup_session(
-    setup_service: SetupService, engine: AsyncEngine, sessions: SessionService, clock: FakeClock
+    setup_service: SetupService, engine: AsyncEngine, sessions: SessionService
 ) -> None:
     await configure(setup_service, engine, sessions)
     claim = await setup_service.claim(await code_of(setup_service), client_key="10.0.0.1")
@@ -438,7 +438,6 @@ async def test_completion_needs_a_live_setup_session(
     assert (caught.value.status, caught.value.code) == (403, "setup_session_required")
     async with engine.connect() as connection:
         assert not (await state_repository.read(connection)).setup_completed
-    del clock
 
 
 async def test_completion_refuses_a_web_session(

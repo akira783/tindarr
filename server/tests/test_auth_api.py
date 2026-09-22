@@ -280,6 +280,24 @@ def test_a_stale_cookie_does_not_hide_a_good_one(app: FastAPI) -> None:
     assert response.json()["kind"] == "web"
 
 
+def test_a_dead_web_cookie_does_not_hide_the_setup_session(app: FastAPI) -> None:
+    from tests.support import claim  # noqa: PLC0415
+
+    with console_client(app) as client:
+        csrf = claim(client, app)
+        client.cookies.set(SECURE_NAMES.session, "a-session-that-no-longer-exists")
+        response = client.get(SESSION_PATH)
+    assert response.status_code == 200
+    assert response.json() == {
+        "kind": "setup",
+        "user": None,
+        "csrf_token": csrf,
+        "expires_at": response.json()["expires_at"],
+        "reauth_expires_at": None,
+        "setup_completed_now": False,
+    }
+
+
 def test_the_server_info_is_rate_limited(app: FastAPI) -> None:
     with console_client(app) as client:
         for _ in range(60):

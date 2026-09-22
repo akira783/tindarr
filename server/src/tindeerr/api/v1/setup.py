@@ -49,8 +49,11 @@ async def claim_server(
 async def get_setup_state(
     services: Services, context: Context, session: SetupSession
 ) -> SetupStateResponse:
-    """Tell the wizard whether the media server is configured, locked, and how to sign in."""
-    del session
+    """Tell the wizard whether the media server is configured, locked, and how to sign in.
+
+    ``session`` is the setup session the wizard holds: it is what authenticates the
+    request, and this answer does not depend on it otherwise.
+    """
     state = await services.setup.state(client_is_private=context.client_is_private)
     return SetupStateResponse(
         media_server=None
