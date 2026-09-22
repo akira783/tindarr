@@ -1,0 +1,179 @@
+[project]
+name = "tindeerr"
+version = "0.1.0"
+description = "Self-hosted server behind the Tindeerr app: AI-picked movie and series cards to swipe, requests filed to Seerr."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.20",
+    "cryptography>=50",
+    "fastapi>=0.141",
+    "pydantic>=2.13",
+    "pydantic-settings>=2.15",
+    "sqlalchemy[asyncio]>=2.0.54,<2.1",
+    "aiosqlite>=0.22",
+    "uvicorn>=0.53",
+]
+
+[project.scripts]
+tindeerr = "tindeerr.main.cli:main"
+
+[dependency-groups]
+dev = [
+    "httpx2",
+    "import-linter",
+    "jsonschema",
+    "pip-audit",
+    "pyright",
+    "pytest",
+    "pytest-cov",
+    "pyyaml",
+    "ruff",
+]
+
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "A",     # builtins shadowing
+    "ASYNC", # async pitfalls
+    "B",     # bugbear
+    "BLE",   # blind except
+    "C4",    # comprehensions
+    "DTZ",   # naive datetimes
+    "E",
+    "W",     # pycodestyle
+    "ERA",   # commented-out code
+    "F",     # pyflakes
+    "FBT",   # boolean traps
+    "G",     # logging format
+    "I",     # isort
+    "LOG",   # logging
+    "N",     # naming
+    "PERF",
+    "PGH",   # pygrep hooks
+    "PIE",
+    "PL",    # pylint
+    "PT",    # pytest style
+    "PTH",   # pathlib
+    "RET",
+    "RSE",
+    "RUF",
+    "S",     # bandit
+    "SIM",
+    "SLF",   # private member access
+    "T20",   # print
+    "TC",    # type-checking imports
+    "TRY",   # exception patterns
+    "UP",    # pyupgrade
+    "D",     # docstrings
+]
+ignore = [
+    "D105", # magic methods
+    "D107", # __init__ (documented on the class)
+    "D203", # conflicts with D211
+    "D213", # conflicts with D212
+    "TRY003", # short messages next to the raise read fine
+    "TC001", "TC002", "TC003", # FastAPI and pydantic need runtime annotations
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PLR2004", "D", "S105", "S106", "SLF001", "FBT001"]
+"src/tindeerr/storage/migrations/versions/*" = ["D103"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "--strict-config", "-ra"]
+xfail_strict = true
+filterwarnings = [
+    "error",
+    # Third-party deprecations outside our control (starlette's TestClient on anyio 4.15).
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["src/tindeerr"]
+branch = true
+omit = ["*/__main__.py"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = true
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]
+
+[tool.importlinter]
+root_package = "tindeerr"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layers: imports only point downwards"
+type = "layers"
+containers = ["tindeerr"]
+layers = [
+    "main",
+    "api",
+    "jobs",
+    "auth | swipe",
+    "storage",
+    "ports",
+    "core",
+]
+# Every sub-package must be placed; adapters sit beside the stack (next contracts).
+exhaustive = true
+exhaustive_ignores = ["adapters", "__main__"]
+
+[[tool.importlinter.contracts]]
+name = "Only tindeerr.main imports adapters"
+type = "forbidden"
+source_modules = [
+    "tindeerr.api",
+    "tindeerr.jobs",
+    "tindeerr.auth",
+    "tindeerr.swipe",
+    "tindeerr.storage",
+    "tindeerr.ports",
+    "tindeerr.core",
+]
+forbidden_modules = ["tindeerr.adapters"]
+
+[[tool.importlinter.contracts]]
+name = "Adapters depend on ports and core only"
+type = "forbidden"
+source_modules = ["tindeerr.adapters"]
+forbidden_modules = [
+    "tindeerr.main",
+    "tindeerr.api",
+    "tindeerr.jobs",
+    "tindeerr.auth",
+    "tindeerr.swipe",
+    "tindeerr.storage",
+]
+
+[[tool.importlinter.contracts]]
+name = "Domain and auth stay free of HTTP"
+type = "forbidden"
+source_modules = [
+    "tindeerr.swipe",
+    "tindeerr.auth",
+    "tindeerr.jobs",
+    "tindeerr.storage",
+    "tindeerr.ports",
+    "tindeerr.core",
+]
+forbidden_modules = ["fastapi", "starlette", "uvicorn"]

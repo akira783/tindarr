@@ -1,0 +1,114 @@
+import socket
+import threading
+from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Any, override
+
+import pytest
+
+from tindeerr import __version__
+from tindeerr.main import cli
+
+
+class _Health(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        self.send_response(200 if self.path == "/healthz" else 404)
+        self.end_headers()
+
+    @override
+    def log_message(self, format: str, *args: Any) -> None:
+        pass
+
+
+@pytest.fixture
+def health_server() -> Iterator[int]:
+    server = HTTPServer(("127.0.0.1", 0), _Health)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield server.server_address[1]
+    server.shutdown()
+    server.server_close()
+
+
+def free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def test_healthcheck_succeeds_when_healthz_answers(
+    monkeypatch: pytest.MonkeyPatch, health_server: int
+) -> None:
+    monkeypatch.setenv("TINDEERR_HOST", "0.0.0.0")  # noqa: S104 - probed on loopback
+    monkeypatch.setenv("TINDEERR_PORT", str(health_server))
+    assert cli.main(["healthcheck"]) == 0
+
+
+def test_healthcheck_fails_when_nothing_listens(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TINDEERR_PORT", str(free_port()))
+    assert cli.main(["healthcheck"]) == 1
+
+
+def test_healthcheck_handles_ipv6_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
+    urls: list[str] = []
+
+    def fake_urlopen(url: str, timeout: float) -> Any:
+        urls.append(url)
+        raise OSError
+
+    monkeypatch.setattr(cli.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("TINDEERR_HOST", "::1")
+    assert cli.main(["healthcheck"]) == 1
+    assert urls == ["http://[::1]:8787/healthz"]
+
+
+def test_invalid_configuration_exits_with_2(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import logging  # noqa: PLC0415
+
+    root = logging.getLogger()
+    saved = list(root.handlers)
+    monkeypatch.setenv("TINDEERR_PORT", "not-a-port")
+    try:
+        assert cli.main([]) == 2
+    finally:
+        root.handlers = saved
+        logging.getLogger("uvicorn.access").disabled = False
+        logging.captureWarnings(capture=False)
+    output = capsys.readouterr().out
+    assert "TINDEERR_PORT" in output
+    assert "not-a-port" not in output
+
+
+def test_serve_runs_uvicorn_without_proxy_headers(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_run(app: object, **kwargs: Any) -> None:
+        calls.append(kwargs)
+
+    import logging  # noqa: PLC0415
+
+    root = logging.getLogger()
+    saved = list(root.handlers)
+    monkeypatch.setattr(cli.uvicorn, "run", fake_run)
+    monkeypatch.setenv("TINDEERR_PORT", "9999")
+    try:
+        assert cli.main(["serve"]) == 0
+    finally:
+        root.handlers = saved
+        logging.getLogger("uvicorn.access").disabled = False
+        logging.captureWarnings(capture=False)
+    (kwargs,) = calls
+    assert kwargs["port"] == 9999
+    assert kwargs["host"] == "127.0.0.1"
+    assert kwargs["proxy_headers"] is False
+    assert kwargs["server_header"] is False
+    assert kwargs["log_config"] is None
+
+
+def test_version(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["--version"])
+    assert caught.value.code == 0
+    assert __version__ in capsys.readouterr().out

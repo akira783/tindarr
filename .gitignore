@@ -5,6 +5,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .coverage
+coverage.xml
 htmlcov/
 # Node / Expo
 node_modules/
@@ -27,3 +28,4 @@ setup-code
 .DS_Store
 .idea/
 .vscode/
+.import_linter_cache/
