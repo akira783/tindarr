@@ -156,12 +156,21 @@ def test_version(capsys: pytest.CaptureFixture[str]) -> None:
     assert __version__ in capsys.readouterr().out
 
 
+def _not_a_terminal() -> bool:
+    return False
+
+
+def _ignore_level(level: str) -> None:
+    """Keep the CLI from reconfiguring the logging the other tests rely on."""
+    del level
+
+
 def test_resetting_the_media_server_needs_a_confirmation(
     data_dir: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     monkeypatch.setenv("TINDEERR_DATA_DIR", str(data_dir))
-    monkeypatch.setattr(cli, "configure_logging", lambda _level: None)
-    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(cli, "configure_logging", _ignore_level)
+    monkeypatch.setattr(cli.sys.stdin, "isatty", _not_a_terminal)
     with caplog.at_level(logging.ERROR):
         assert cli.main(["media-server", "reset"]) == 2
     assert "--yes" in caplog.text
@@ -176,7 +185,7 @@ def test_resetting_the_media_server_starts_setup_again(
     from tindeerr.main.app import start  # noqa: PLC0415
 
     monkeypatch.setenv("TINDEERR_DATA_DIR", str(data_dir))
-    monkeypatch.setattr(cli, "configure_logging", lambda _level: None)
+    monkeypatch.setattr(cli, "configure_logging", _ignore_level)
 
     async def prepare() -> str:
         runtime = await start(ServerConfig(data_dir=data_dir))
