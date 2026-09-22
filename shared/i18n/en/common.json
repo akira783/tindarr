@@ -1,7 +1,7 @@
 {
   "app": {
-    "name": "Tindeerr",
-    "console": "Tindeerr console"
+    "name": "Tindarr",
+    "console": "Tindarr console"
   },
   "actions": {
     "save": "Save",
@@ -43,12 +43,12 @@
     "network": "The server could not be reached. Check that it is running and try again.",
     "validation_error": "Some fields are not valid.",
     "bad_request": "The request was malformed.",
-    "host_not_allowed": "This host name is not allowed. Set TINDEERR_ALLOWED_HOSTS or TINDEERR_PUBLIC_URL on the server, or use its IP address.",
+    "host_not_allowed": "This host name is not allowed. Set TINDARR_ALLOWED_HOSTS or TINDARR_PUBLIC_URL on the server, or use its IP address.",
     "unauthorized": "Your session has ended. Sign in again.",
     "token_expired": "Your session has ended. Sign in again.",
     "refresh_token_reused": "That session was signed out for safety. Sign in again.",
     "csrf_failed": "The request was refused for safety reasons. Reload the page and try again.",
-    "https_required": "The console needs HTTPS. Put the server behind TLS, open it on localhost, or set TINDEERR_ALLOW_HTTP_CONSOLE=true for a private network.",
+    "https_required": "The console needs HTTPS. Put the server behind TLS, open it on localhost, or set TINDARR_ALLOW_HTTP_CONSOLE=true for a private network.",
     "forbidden": "You are not allowed to do that.",
     "admin_required": "Only an administrator can do that.",
     "media_server_admin_required": "Only an administrator of the media server can do that.",

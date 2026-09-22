@@ -38,10 +38,10 @@ describe("the end-to-end CSP helper", () => {
 
   it("fails with the directive and the blocked address", async () => {
     const page = fakePage([
-      { directive: "script-src", blockedUri: "inline", url: "https://tindeerr.example/settings" },
+      { directive: "script-src", blockedUri: "inline", url: "https://tindarr.example/settings" },
     ]);
     await expect(assertNoCspViolations(page)).rejects.toThrow(
-      /script-src blocked inline on https:\/\/tindeerr.example\/settings/,
+      /script-src blocked inline on https:\/\/tindarr.example\/settings/,
     );
   });
 

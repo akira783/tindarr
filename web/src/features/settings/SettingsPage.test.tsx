@@ -84,7 +84,7 @@ describe("the server settings", () => {
       .on("GET", "/api/v1/admin/settings", () => ok(fixtures.settings({ public_url: null })))
       .on("PATCH", "/api/v1/admin/settings", () =>
         fresh
-          ? ok(fixtures.settings({ public_url: "https://tindeerr.example.com" }))
+          ? ok(fixtures.settings({ public_url: "https://tindarr.example.com" }))
           : problem(403, "reauth_required"),
       )
       .on("POST", "/api/v1/auth/web/reauth", (call) => {
@@ -95,7 +95,7 @@ describe("the server settings", () => {
 
     renderApp({ api, route: "/settings" });
 
-    await user.type(await screen.findByLabelText("Public address"), "https://tindeerr.example.com");
+    await user.type(await screen.findByLabelText("Public address"), "https://tindarr.example.com");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     const dialog = await screen.findByRole("dialog");

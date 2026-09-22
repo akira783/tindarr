@@ -1,7 +1,7 @@
 {
   "app": {
-    "name": "Tindeerr",
-    "console": "Console Tindeerr"
+    "name": "Tindarr",
+    "console": "Console Tindarr"
   },
   "actions": {
     "save": "Enregistrer",
@@ -43,12 +43,12 @@
     "network": "Le serveur est injoignable. Vérifiez qu'il tourne, puis réessayez.",
     "validation_error": "Certains champs ne sont pas valides.",
     "bad_request": "La requête est mal formée.",
-    "host_not_allowed": "Ce nom d'hôte n'est pas autorisé. Renseignez TINDEERR_ALLOWED_HOSTS ou TINDEERR_PUBLIC_URL sur le serveur, ou utilisez son adresse IP.",
+    "host_not_allowed": "Ce nom d'hôte n'est pas autorisé. Renseignez TINDARR_ALLOWED_HOSTS ou TINDARR_PUBLIC_URL sur le serveur, ou utilisez son adresse IP.",
     "unauthorized": "Votre session a pris fin. Reconnectez-vous.",
     "token_expired": "Votre session a pris fin. Reconnectez-vous.",
     "refresh_token_reused": "Cette session a été déconnectée par sécurité. Reconnectez-vous.",
     "csrf_failed": "La requête a été refusée par sécurité. Rechargez la page et réessayez.",
-    "https_required": "La console exige HTTPS. Placez le serveur derrière TLS, ouvrez-le sur localhost, ou définissez TINDEERR_ALLOW_HTTP_CONSOLE=true pour un réseau privé.",
+    "https_required": "La console exige HTTPS. Placez le serveur derrière TLS, ouvrez-le sur localhost, ou définissez TINDARR_ALLOW_HTTP_CONSOLE=true pour un réseau privé.",
     "forbidden": "Vous n'avez pas le droit de faire cela.",
     "admin_required": "Seul un administrateur peut faire cela.",
     "media_server_admin_required": "Seul un administrateur du serveur multimédia peut faire cela.",

@@ -14,7 +14,7 @@ import process from "node:process";
 const committed = "src/api/schema.d.ts";
 const contract = "../api/openapi.yaml";
 
-const directory = mkdtempSync(join(tmpdir(), "tindeerr-api-"));
+const directory = mkdtempSync(join(tmpdir(), "tindarr-api-"));
 const generated = join(directory, "schema.d.ts");
 
 try {

@@ -74,7 +74,7 @@ export function settings(
 ): Schemas["ServerSettings"] {
   return {
     name: "Maison",
-    public_url: "https://tindeerr.example.com",
+    public_url: "https://tindarr.example.com",
     password_sign_in: "enabled",
     language: "fr-FR",
     streaming_region: "FR",
@@ -106,7 +106,7 @@ export function newPairing(overrides: Partial<Schemas["NewPairing"]> = {}): Sche
     created_at: "2026-09-22T10:00:00Z",
     expires_at: "2126-09-22T10:05:00Z",
     code: "q7Xc0vW2dYk9LmN4pRs6Tu",
-    link: `tindeerr://pair?server=${encodeURIComponent("https://tindeerr.example.com")}&code=q7Xc0vW2dYk9LmN4pRs6Tu`,
+    link: `tindarr://pair?server=${encodeURIComponent("https://tindarr.example.com")}&code=q7Xc0vW2dYk9LmN4pRs6Tu`,
     ...overrides,
   };
 }

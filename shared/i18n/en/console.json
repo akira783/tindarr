@@ -58,7 +58,7 @@
     },
     "mediaServer": {
       "title": "Connect your media server",
-      "help": "Tindeerr signs users in through this server and reads what they have watched.",
+      "help": "Tindarr signs users in through this server and reads what they have watched.",
       "kind": "Type",
       "url": "Address",
       "urlHint": "For example http://192.168.1.20:8096",
@@ -138,7 +138,7 @@
     },
     "role": { "admin": "Administrator", "user": "User" },
     "mediaServerAdmin": "Administrator on the media server",
-    "promoted": "Promoted in Tindeerr",
+    "promoted": "Promoted in Tindarr",
     "status": {
       "enabled": "Active",
       "disabled": "Disabled",
@@ -160,12 +160,12 @@
   },
   "pairing": {
     "title": "Connect a phone",
-    "help": "Scan this code with the Tindeerr app. The code works once and expires in a few minutes.",
+    "help": "Scan this code with the Tindarr app. The code works once and expires in a few minutes.",
     "create": "Create a QR code",
     "again": "New QR code",
     "connectsTo": "Connects to {{host}}",
     "qrAlt": "QR code to pair a phone with {{host}}",
-    "openInApp": "Open in Tindeerr",
+    "openInApp": "Open in Tindarr",
     "expiresIn": "Expires in {{seconds}} s",
     "status": {
       "pending": "Waiting for a phone to scan the code…",
@@ -194,7 +194,7 @@
   },
   "deleteData": {
     "title": "Delete my data",
-    "help": "Deletes your votes, taste profile, preferences and sessions on this Tindeerr server. Nothing is deleted on the media server.",
+    "help": "Deletes your votes, taste profile, preferences and sessions on this Tindarr server. Nothing is deleted on the media server.",
     "understand": "I understand this cannot be undone.",
     "submit": "Delete my data",
     "confirm": "Delete every trace of your account on this server?"

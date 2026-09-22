@@ -58,7 +58,7 @@
     },
     "mediaServer": {
       "title": "Connectez votre serveur multimédia",
-      "help": "Tindeerr y authentifie les utilisateurs et y lit ce qu'ils ont regardé.",
+      "help": "Tindarr y authentifie les utilisateurs et y lit ce qu'ils ont regardé.",
       "kind": "Type",
       "url": "Adresse",
       "urlHint": "Par exemple http://192.168.1.20:8096",
@@ -138,7 +138,7 @@
     },
     "role": { "admin": "Administrateur", "user": "Utilisateur" },
     "mediaServerAdmin": "Administrateur sur le serveur multimédia",
-    "promoted": "Promu dans Tindeerr",
+    "promoted": "Promu dans Tindarr",
     "status": {
       "enabled": "Actif",
       "disabled": "Désactivé",
@@ -160,12 +160,12 @@
   },
   "pairing": {
     "title": "Connecter un téléphone",
-    "help": "Scannez ce code avec l'application Tindeerr. Le code sert une seule fois et expire au bout de quelques minutes.",
+    "help": "Scannez ce code avec l'application Tindarr. Le code sert une seule fois et expire au bout de quelques minutes.",
     "create": "Créer un QR code",
     "again": "Nouveau QR code",
     "connectsTo": "Se connecte à {{host}}",
     "qrAlt": "QR code pour appairer un téléphone avec {{host}}",
-    "openInApp": "Ouvrir dans Tindeerr",
+    "openInApp": "Ouvrir dans Tindarr",
     "expiresIn": "Expire dans {{seconds}} s",
     "status": {
       "pending": "En attente du scan par un téléphone…",
@@ -194,7 +194,7 @@
   },
   "deleteData": {
     "title": "Supprimer mes données",
-    "help": "Supprime vos votes, votre profil de goûts, vos préférences et vos sessions sur ce serveur Tindeerr. Rien n'est supprimé sur le serveur multimédia.",
+    "help": "Supprime vos votes, votre profil de goûts, vos préférences et vos sessions sur ce serveur Tindarr. Rien n'est supprimé sur le serveur multimédia.",
     "understand": "Je comprends que c'est irréversible.",
     "submit": "Supprimer mes données",
     "confirm": "Supprimer toute trace de votre compte sur ce serveur ?"

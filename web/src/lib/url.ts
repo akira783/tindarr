@@ -2,7 +2,7 @@
 
 /**
  * Host of the `server` parameter of a pairing link
- * (`tindeerr://pair?server=<public_url>&code=<code>`), shown next to the QR code
+ * (`tindarr://pair?server=<public_url>&code=<code>`), shown next to the QR code
  * so the user sees where the phone will connect (docs/auth.md, section 9).
  * Internationalised names come back in punycode, as the app displays them.
  */

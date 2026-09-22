@@ -55,7 +55,7 @@ export interface paths {
         /**
          * Exchange the one-time setup code for a setup session
          * @description Called by the console. Opens a setup session (`kind` = `setup`, 30 minutes,
-         *     no user) in the `__Host-tindeerr_setup` cookie and revokes every earlier
+         *     no user) in the `__Host-tindarr_setup` cookie and revokes every earlier
          *     setup session: only the newest claim stays valid. The code stays usable until
          *     setup completes. `Origin` must be the server's origin, and plain HTTP is
          *     refused as for the web sign-ins (docs/auth.md, sections 2 and 3).
@@ -107,7 +107,7 @@ export interface paths {
          *     purpose `owner_token` (`POST /auth/plex/pins`, then
          *     `POST /auth/plex/pins/status`); the token must come from the account that
          *     owns this server. A failed connection test does not consume `plex_pin_id`.
-         *     When `TINDEERR_MEDIA_SERVER_KIND`, `_URL` and `_API_KEY` are all set, the
+         *     When `TINDARR_MEDIA_SERVER_KIND`, `_URL` and `_API_KEY` are all set, the
          *     wizard skips this step (`SetupState.media_server_locked`); a field set by an
          *     environment variable cannot be given another value (`setting_locked`).
          *     Connection tests are limited to 10 per minute per session. After this call, a media server administrator signs in on the console, from
@@ -536,7 +536,7 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Delete all of the caller's Tindeerr data and sign out everywhere
+         * Delete all of the caller's Tindarr data and sign out everywhere
          * @description Votes, profile, preferences and sessions. Nothing is deleted on the media
          *     server or the request backend. Console only: a phone's token cannot delete
          *     the account.
@@ -1060,7 +1060,7 @@ export interface paths {
         head?: never;
         /**
          * Enable, disable, promote or set limits for a user
-         * @description Disabling a user revokes their sessions. `role` edits the Tindeerr side
+         * @description Disabling a user revokes their sessions. `role` edits the Tindarr side
          *     only (docs/adr/0010): `admin` sets `promoted`; `user` clears `promoted` and
          *     clears `media_server_admin` until the user's next sign-in, where the media
          *     server's flag is read again (a media server administrator is then admin
@@ -1203,9 +1203,9 @@ export interface components {
              */
             tmdb_image_base_url: string;
             /**
-             * @description base64url(HMAC-SHA256(key, nonce)) with the `tindeerr/v1/public-url-proof`
+             * @description base64url(HMAC-SHA256(key, nonce)) with the `tindarr/v1/public-url-proof`
              *     sub-key. Present only when the request carried a
-             *     `Tindeerr-Verify-Nonce` this server is currently waiting for.
+             *     `Tindarr-Verify-Nonce` this server is currently waiting for.
              */
             public_url_proof?: string;
         };
@@ -1219,7 +1219,7 @@ export interface components {
                 name?: string | null;
             };
             /**
-             * @description `TINDEERR_MEDIA_SERVER_KIND`, `_URL` and `_API_KEY` are all set: the
+             * @description `TINDARR_MEDIA_SERVER_KIND`, `_URL` and `_API_KEY` are all set: the
              *     wizard skips the media server step.
              */
             media_server_locked: boolean;
@@ -1361,8 +1361,8 @@ export interface components {
         NewPairing: components["schemas"]["Pairing"] & {
             code: components["schemas"]["PairingCode"];
             /**
-             * @description `tindeerr://pair?server=<public_url>&code=<code>`, rendered as a QR code (SVG or canvas), with the host of `public_url` written next to it.
-             * @example tindeerr://pair?server=https%3A%2F%2Ftindeerr.example.com&code=q7Xc0vW2dYk9LmN4pRs6Tu
+             * @description `tindarr://pair?server=<public_url>&code=<code>`, rendered as a QR code (SVG or canvas), with the host of `public_url` written next to it.
+             * @example tindarr://pair?server=https%3A%2F%2Ftindarr.example.com&code=q7Xc0vW2dYk9LmN4pRs6Tu
              */
             link: string;
         };
@@ -1406,7 +1406,7 @@ export interface components {
             disabled_reason?: "admin" | "media_server" | "unlinked" | null;
             /** @description Administrator on the media server, as read at the user's last sign-in (or cleared by a demotion or the hourly sync since). */
             media_server_admin: boolean;
-            /** @description Made admin in Tindeerr. */
+            /** @description Made admin in Tindarr. */
             promoted: boolean;
             /** @description From the media server policy; when false, the user is refused from non-private client IPs. */
             remote_access: boolean;
@@ -1594,7 +1594,7 @@ export interface components {
             pick_type?: components["schemas"]["PickType"];
             /** Format: date-time */
             liked_at: string;
-            /** @description Requested from Tindeerr or already requested elsewhere. */
+            /** @description Requested from Tindarr or already requested elsewhere. */
             requested: boolean;
             availability: components["schemas"]["Availability"];
             /**
@@ -1806,7 +1806,7 @@ export interface components {
          *     offered: `enabled`, `lan_only` (only from a private client IP) or
          *     `disabled`. Refused attempts get `403` `password_sign_in_disabled`. Quick
          *     Connect, Plex PIN and pairing are not affected. Set by
-         *     `TINDEERR_PASSWORD_SIGN_IN` or by a media server administrator.
+         *     `TINDARR_PASSWORD_SIGN_IN` or by a media server administrator.
          * @default enabled
          * @enum {string}
          */
@@ -1936,20 +1936,20 @@ export interface components {
     requestBodies: never;
     headers: {
         /**
-         * @description `__Host-tindeerr_session=<token>; Path=/; Secure; HttpOnly; SameSite=Strict`
-         *     (no `Max-Age`). A web sign-in also clears `__Host-tindeerr_preauth`, and the
-         *     sign-in that completes setup clears `__Host-tindeerr_setup`.
+         * @description `__Host-tindarr_session=<token>; Path=/; Secure; HttpOnly; SameSite=Strict`
+         *     (no `Max-Age`). A web sign-in also clears `__Host-tindarr_preauth`, and the
+         *     sign-in that completes setup clears `__Host-tindarr_setup`.
          */
         SetSessionCookie: string;
-        /** @description `__Host-tindeerr_setup=<token>; Path=/; Secure; HttpOnly; SameSite=Strict`. */
+        /** @description `__Host-tindarr_setup=<token>; Path=/; Secure; HttpOnly; SameSite=Strict`. */
         SetSetupCookie: string;
         /**
-         * @description `__Host-tindeerr_preauth=<value>; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=900`,
+         * @description `__Host-tindarr_preauth=<value>; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=900`,
          *     only for a console `sign_in` handle when the browser has no pre-auth cookie
          *     yet.
          */
         SetPreAuthCookie: string;
-        /** @description Clears `__Host-tindeerr_session` (`Max-Age=0`) when the caller's web session was revoked by this request. */
+        /** @description Clears `__Host-tindarr_session` (`Max-Age=0`) when the caller's web session was revoked by this request. */
         ClearSessionCookie: string;
         /** @description Seconds, rounded up. */
         RetryAfter: number;
@@ -1991,7 +1991,7 @@ export interface operations {
                  *     for, the response carries `public_url_proof`; otherwise the header is
                  *     ignored.
                  */
-                "Tindeerr-Verify-Nonce"?: string;
+                "Tindarr-Verify-Nonce"?: string;
             };
             path?: never;
             cookie?: never;

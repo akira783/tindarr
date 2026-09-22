@@ -28,12 +28,12 @@ describe("connecting a phone", () => {
 
     await user.click(await screen.findByRole("button", { name: "Create a QR code" }));
 
-    expect(await screen.findByText("Connects to tindeerr.example.com")).toBeInTheDocument();
+    expect(await screen.findByText("Connects to tindarr.example.com")).toBeInTheDocument();
     const svg = container.querySelector("svg[role='img']");
     expect(svg).not.toBeNull();
     expect(svg?.querySelectorAll("path").length).toBeGreaterThan(0);
     // The code itself is only in the QR image and the deep link, never in the text.
-    expect(screen.getByRole("link", { name: "Open in Tindeerr" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Open in Tindarr" })).toHaveAttribute(
       "href",
       fixtures.newPairing().link,
     );

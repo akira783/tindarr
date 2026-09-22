@@ -4,8 +4,8 @@
  * (docs/adr/0009). Every access is guarded: storage can be unavailable or throw.
  */
 
-const LANGUAGE_KEY = "tindeerr.language";
-const THEME_KEY = "tindeerr.theme";
+const LANGUAGE_KEY = "tindarr.language";
+const THEME_KEY = "tindarr.theme";
 
 export type ThemeChoice = "system" | "light" | "dark";
 

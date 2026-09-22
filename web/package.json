@@ -1,8 +1,8 @@
 {
-  "name": "tindeerr-web",
+  "name": "tindarr-web",
   "private": true,
   "version": "0.0.0",
-  "description": "Tindeerr web console: setup, administration and phone pairing, served by the server.",
+  "description": "Tindarr web console: setup, administration and phone pairing, served by the server.",
   "license": "MIT",
   "type": "module",
   "engines": {

@@ -12,7 +12,7 @@ const builtPage = `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8" />
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-<title>Tindeerr console</title>
+<title>Tindarr console</title>
 <script type="module" crossorigin src="/assets/index-abc123.js"></script>
 <link rel="stylesheet" crossorigin href="/assets/index-def456.css">
 </head><body><div id="root"></div></body></html>`;

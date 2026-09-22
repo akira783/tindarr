@@ -17,7 +17,7 @@ export interface MinimalPage {
   evaluate: <T>(script: string) => Promise<T>;
 }
 
-export const VIOLATIONS_KEY = "__tindeerrCspViolations";
+export const VIOLATIONS_KEY = "__tindarrCspViolations";
 
 /** Injected before any page script runs: records what the browser refuses. */
 export const collectorScript = `(() => {

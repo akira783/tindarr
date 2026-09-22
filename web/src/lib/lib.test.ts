@@ -6,19 +6,19 @@ import { currentOrigin, isLikelyPhone, isPlexAuthUrl, pairingHost } from "./url"
 
 describe("pairingHost", () => {
   it("reads the host the phone will connect to from a pairing link", () => {
-    const link = `tindeerr://pair?server=${encodeURIComponent("https://tindeerr.example.com:8443")}&code=abc`;
-    expect(pairingHost(link)).toBe("tindeerr.example.com:8443");
+    const link = `tindarr://pair?server=${encodeURIComponent("https://tindarr.example.com:8443")}&code=abc`;
+    expect(pairingHost(link)).toBe("tindarr.example.com:8443");
   });
 
   it("shows an internationalised host in punycode, as the app does", () => {
-    const link = `tindeerr://pair?server=${encodeURIComponent("https://ünïcode.example")}&code=abc`;
+    const link = `tindarr://pair?server=${encodeURIComponent("https://ünïcode.example")}&code=abc`;
     expect(pairingHost(link)).toBe("xn--ncode-cta3g.example");
   });
 
   it("returns null for a link without a server, an odd scheme or garbage", () => {
-    expect(pairingHost("tindeerr://pair?code=abc")).toBeNull();
+    expect(pairingHost("tindarr://pair?code=abc")).toBeNull();
     expect(
-      pairingHost(`tindeerr://pair?server=${encodeURIComponent("javascript:alert(1)")}&code=a`),
+      pairingHost(`tindarr://pair?server=${encodeURIComponent("javascript:alert(1)")}&code=a`),
     ).toBeNull();
     expect(pairingHost("not a url")).toBeNull();
   });
@@ -67,7 +67,7 @@ describe("display preferences", () => {
     writeTheme("dark");
     expect(readLanguage()).toBe("fr");
     expect(readTheme()).toBe("dark");
-    expect(Object.keys(localStorage)).toEqual(["tindeerr.language", "tindeerr.theme"]);
+    expect(Object.keys(localStorage)).toEqual(["tindarr.language", "tindarr.theme"]);
   });
 
   it("survives storage that throws, as in a private window", () => {

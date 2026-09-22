@@ -37,7 +37,7 @@ describe("the console layout", () => {
     await user.selectOptions(await screen.findByLabelText("Language"), "fr");
 
     expect(await screen.findByRole("link", { name: "Réglages du serveur" })).toBeInTheDocument();
-    expect(localStorage.getItem("tindeerr.language")).toBe("fr");
+    expect(localStorage.getItem("tindarr.language")).toBe("fr");
   });
 
   it("switches the theme and remembers the choice", async () => {
@@ -49,7 +49,7 @@ describe("the console layout", () => {
     await waitFor(() => {
       expect(document.documentElement.dataset["theme"]).toBe("dark");
     });
-    expect(localStorage.getItem("tindeerr.theme")).toBe("dark");
+    expect(localStorage.getItem("tindarr.theme")).toBe("dark");
 
     await user.selectOptions(screen.getByLabelText("Theme"), "system");
     await waitFor(() => {

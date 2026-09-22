@@ -79,7 +79,7 @@ describe("the console fetch wrapper", () => {
         refused = false;
         return problem(403, "reauth_required");
       }
-      return ok({ name: "Tindeerr" });
+      return ok({ name: "Tindarr" });
     });
     install(mock);
 
@@ -89,14 +89,14 @@ describe("the console fetch wrapper", () => {
     setClientHooks({ getCsrfToken: () => "csrf-1", requestReauth });
 
     const { response } = await api.PATCH("/api/v1/admin/settings", {
-      body: { name: "Tindeerr" },
+      body: { name: "Tindarr" },
     });
 
     expect(requestReauth).toHaveBeenCalledTimes(1);
     expect(response.status).toBe(200);
     // The replayed request carries the same body.
     expect(mock.calls).toHaveLength(2);
-    expect(mock.calls[1]?.body).toEqual({ name: "Tindeerr" });
+    expect(mock.calls[1]?.body).toEqual({ name: "Tindarr" });
   });
 
   it("does not replay when the user cancels the re-authentication", async () => {
