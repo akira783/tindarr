@@ -994,7 +994,7 @@ components:
             daily_limit_reached, requests_not_configured, no_backend_user,
             title_not_offered, request_not_allowed, quota_exceeded,
             request_backend_error,
-            last_admin, internal_error.
+            last_admin, bad_request, method_not_allowed, internal_error.
           examples: [llm_quota]
         retry_after_ms: { type: integer, minimum: 0 }
         errors:
