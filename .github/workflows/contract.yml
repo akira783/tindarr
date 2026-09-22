@@ -8,6 +8,7 @@ on:
       - "redocly.yaml"
       - ".redocly.lint-ignore.yaml"
       - ".github/workflows/contract.yml"
+      - ".github/tools/redocly/**"
   pull_request:
     paths: *paths
   workflow_dispatch:
@@ -28,5 +29,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The lockfile pins Redocly CLI and every transitive dependency by hash.
+      - name: Install Redocly CLI
+        run: npm ci --ignore-scripts --no-audit --no-fund --prefix .github/tools/redocly
       - name: Redocly lint
-        run: npx --yes @redocly/cli@2.54.1 lint
+        run: .github/tools/redocly/node_modules/.bin/redocly lint

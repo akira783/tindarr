@@ -1,0 +1,9 @@
+{
+  "name": "tindeerr-contract-tools",
+  "private": true,
+  "description": "Pinned tools for the contract workflow; the lockfile pins every transitive dependency.",
+  "license": "MIT",
+  "devDependencies": {
+    "@redocly/cli": "2.54.1"
+  }
+}

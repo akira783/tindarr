@@ -23,14 +23,6 @@
       "matchStrings": ["UV_VERSION: \"(?<currentValue>[^\"]+)\""],
       "depNameTemplate": "astral-sh/uv",
       "datasourceTemplate": "github-releases"
-    },
-    {
-      "customType": "regex",
-      "description": "Redocly CLI run through npx",
-      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
-      "matchStrings": ["@redocly/cli@(?<currentValue>[0-9][^\\s]*)"],
-      "depNameTemplate": "@redocly/cli",
-      "datasourceTemplate": "npm"
     }
   ],
   "packageRules": [
