@@ -2,19 +2,29 @@ openapi: 3.1.0
 info:
   title: Tindeerr API
   version: 1.0.0-draft
-  summary: Self-hosted server behind the Tindeerr mobile app.
+  summary: Self-hosted server behind the Tindeerr mobile app and web console.
   description: |
-    Contract between the Tindeerr app and a Tindeerr server. Written before the
-    implementation; CI validates the server's responses against this file and rejects
-    routes it does not document.
+    Contract between a Tindeerr server and its two clients: the mobile app and the
+    web console the server serves under `/`. Written before the implementation; CI
+    validates the server's responses against this file and rejects routes it does
+    not document.
 
     Rules (see docs/adr/0006):
     - Additive changes only within v1. Clients ignore unknown fields and treat
       unknown enum values as "other".
     - Errors are `application/problem+json` with a stable `code`.
     - Slow work answers `202` with `retry_after_ms`; the client polls.
-    - Every `/api/v1` endpoint requires a bearer access token unless marked
-      `security: []`.
+    - Authentication (see docs/adr/0009):
+      - The app sends a bearer access token. When an `Authorization` header is
+        present, the session cookie is ignored.
+      - The console sends the `__Host-tindeerr_session` cookie. On `POST`, `PUT`,
+        `PATCH` and `DELETE` it must also send `X-CSRF-Token` (the `csrfToken`
+        scheme, never checked on `GET`), and the `Origin` header must be the
+        server's own origin (`code` = `csrf_failed` otherwise).
+      - Endpoints without their own `security` accept either. Endpoints tagged
+        `console` accept only a web session (or the setup session for `setup`).
+        `security: []` marks public endpoints.
+    - CORS is disabled: the console is same-origin.
   license:
     name: MIT
     identifier: MIT
@@ -27,20 +37,28 @@ servers:
 
 security:
   - bearer: []
+  - cookieSession: []
+    csrfToken: []
 
 tags:
   - name: server
     description: Health and public server information.
+  - name: console
+    description: |
+      Web console only. Requires the session cookie (plus `X-CSRF-Token` on unsafe
+      methods); bearer tokens are refused.
   - name: setup
-    description: First-run claim and media server configuration.
+    description: First-run claim and media server configuration, from the console.
   - name: auth
-    description: Sign-in through the media server, token rotation, sign-out.
+    description: Sign-in through the media server, phone pairing, token rotation, sign-out.
   - name: me
     description: The signed-in user's account and sessions.
+  - name: pairing
+    description: Connecting a phone by QR code from the console.
   - name: swipe
     description: Deck, votes, requests, likes, taste profile and preferences.
   - name: admin
-    description: Connectors, server settings, users and AI usage. Admins only.
+    description: Connectors, server settings, users and AI usage. Admins only, from the console.
 
 paths:
   /healthz:
@@ -78,8 +96,12 @@ paths:
   # ---------------------------------------------------------------- setup
   /api/v1/setup/claim:
     post:
-      tags: [setup]
-      summary: Exchange the one-time setup code for a setup token
+      tags: [setup, console]
+      summary: Exchange the one-time setup code for a setup session
+      description: |
+        Called by the console. Sets the session cookie with a setup session
+        (`kind` = `setup`, valid 30 minutes, no user), accepted only by the setup
+        endpoints. The `Origin` header must be the server's own origin.
       operationId: claimServer
       security: []
       requestBody:
@@ -93,16 +115,22 @@ paths:
                 setup_code: { type: string, minLength: 12, maxLength: 64 }
       responses:
         "200":
-          description: Setup token, valid 30 minutes.
+          description: Setup session opened.
+          headers:
+            Set-Cookie: { $ref: "#/components/headers/SetSessionCookie" }
           content:
             application/json:
-              schema:
-                type: object
-                required: [setup_token, expires_at]
-                properties:
-                  setup_token: { type: string }
-                  expires_at: { type: string, format: date-time }
-        "401": { $ref: "#/components/responses/Problem" }
+              schema: { $ref: "#/components/schemas/WebSession" }
+        "401":
+          description: "`invalid_setup_code`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "403":
+          description: "`csrf_failed` (wrong or missing `Origin`) or `https_required`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "409":
           description: Setup already completed (`code` = `setup_completed`).
           content:
@@ -112,15 +140,16 @@ paths:
 
   /api/v1/setup/media-server:
     put:
-      tags: [setup]
+      tags: [setup, console]
       summary: Configure the media server during setup
       description: |
         The connection is tested before saving. For Plex, obtain the owner token
         through the Plex PIN endpoints first. After this call, the first media
-        server administrator who signs in completes the setup.
+        server administrator who signs in on the console completes the setup.
       operationId: setupMediaServer
       security:
-        - setupToken: []
+        - setupSession: []
+          csrfToken: []
       requestBody:
         required: true
         content:
@@ -134,6 +163,11 @@ paths:
               schema: { $ref: "#/components/schemas/ConnectorStatus" }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
+        "403":
+          description: "`csrf_failed`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "502":
           description: Connection test failed (`code` = `connector_unreachable` or `connector_unauthorized`).
@@ -141,12 +175,14 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
 
-  # ---------------------------------------------------------------- auth
+  # ---------------------------------------------------------------- auth (app)
   /api/v1/auth/login:
     post:
       tags: [auth]
-      summary: Sign in with Jellyfin or Emby credentials
-      description: The password is checked with the media server and never stored.
+      summary: Sign the app in with Jellyfin or Emby credentials
+      description: |
+        The password is checked with the media server and never stored. The
+        administrator flag is re-read from the media server (docs/adr/0010).
       operationId: login
       security: []
       requestBody:
@@ -172,13 +208,13 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
         "403":
-          description: "`account_disabled`, `not_a_server_user`, or `admin_required` while setup is pending."
+          description: "`account_disabled` or `not_a_server_user`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
         "429": { $ref: "#/components/responses/Problem" }
         "503":
-          description: "`setup_required` or `media_server_unreachable`."
+          description: "`setup_required` (setup is done in the console) or `media_server_unreachable`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -188,16 +224,15 @@ paths:
       tags: [auth]
       summary: Start a Plex PIN sign-in
       description: |
-        The server creates a strong plex.tv PIN. The app opens `auth_url` in the
-        browser, then calls `POST /auth/plex/login` until it succeeds or the PIN
-        expires. The same PIN flow gives the owner token for the media server
-        connector: during setup (with a setup token, then `PUT /setup/media-server`)
-        or later by an admin (`PUT /admin/connectors/media_server`). A PIN is
-        consumed by the first call that uses it.
+        The server creates a strong plex.tv PIN. The client opens `auth_url` in a
+        browser, then calls `POST /auth/plex/login` (app) or
+        `POST /auth/web/plex/login` (console) until it succeeds or the PIN expires.
+        The same PIN flow gives the owner token for the media server connector,
+        during setup (`PUT /setup/media-server`) or later by an admin
+        (`PUT /admin/connectors/media_server`). A PIN is consumed by the first call
+        that uses it.
       operationId: createPlexPin
-      security:
-        - {}
-        - setupToken: []
+      security: []
       responses:
         "201":
           description: PIN created.
@@ -218,7 +253,7 @@ paths:
   /api/v1/auth/plex/login:
     post:
       tags: [auth]
-      summary: Complete a Plex PIN sign-in
+      summary: Complete a Plex PIN sign-in (app)
       operationId: loginWithPlex
       security: []
       requestBody:
@@ -229,7 +264,7 @@ paths:
               type: object
               required: [pin_id, device]
               properties:
-                pin_id: { type: string }
+                pin_id: { type: string, maxLength: 64 }
                 device: { $ref: "#/components/schemas/DeviceInput" }
       responses:
         "200":
@@ -239,7 +274,7 @@ paths:
               schema: { $ref: "#/components/schemas/AuthResult" }
         "202": { $ref: "#/components/responses/Pending" }
         "403":
-          description: "`account_disabled`, `not_a_server_user`, or `admin_required` while setup is pending."
+          description: "`account_disabled` or `not_a_server_user`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -255,13 +290,179 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
 
+  /api/v1/auth/quick-connect:
+    post:
+      tags: [auth]
+      summary: Start a Jellyfin Quick Connect sign-in
+      description: |
+        Jellyfin only (Emby has no Quick Connect). The server calls Jellyfin's
+        `POST /QuickConnect/Initiate` and keeps the returned secret. The client
+        shows `code`; the user approves it in any Jellyfin client where they are
+        signed in. The client then calls `POST /auth/quick-connect/login` (app) or
+        `POST /auth/web/quick-connect/login` (console) until it succeeds or the code
+        expires.
+      operationId: createQuickConnect
+      security: []
+      responses:
+        "201":
+          description: Quick Connect started.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [handle, code, expires_at]
+                properties:
+                  handle:
+                    type: string
+                    description: Random single-use handle (at least 128 bits), not the Jellyfin secret.
+                  code:
+                    type: string
+                    description: Code to enter in a signed-in Jellyfin client.
+                    examples: ["123456"]
+                  expires_at: { type: string, format: date-time }
+        "409":
+          description: "`quick_connect_unavailable` (not a Jellyfin server, or Quick Connect disabled there)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+        "503":
+          description: "`setup_required` or `media_server_unreachable`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /api/v1/auth/quick-connect/login:
+    post:
+      tags: [auth]
+      summary: Complete a Quick Connect sign-in (app)
+      description: |
+        Each call checks `GET /QuickConnect/Connect` once. When the code was
+        approved, the server calls `POST /Users/AuthenticateWithQuickConnect`,
+        reads the administrator flag and ends that Jellyfin session.
+      operationId: loginWithQuickConnect
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [handle, device]
+              properties:
+                handle: { type: string, maxLength: 64 }
+                device: { $ref: "#/components/schemas/DeviceInput" }
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResult" }
+        "202": { $ref: "#/components/responses/Pending" }
+        "403":
+          description: "`account_disabled` or `not_a_server_user`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "410":
+          description: "`quick_connect_expired` (also for an unknown or already used `handle`)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+        "503":
+          description: "`setup_required` or `media_server_unreachable`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /api/v1/auth/pair/preview:
+    post:
+      tags: [auth, pairing]
+      summary: Show who a pairing code signs in, without using it
+      description: |
+        The app calls this after scanning a QR code, shows the server URL and the
+        user name, and asks the user to confirm before calling `POST /auth/pair`.
+        The code is not consumed.
+      operationId: previewPairing
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { $ref: "#/components/schemas/PairingCode" }
+      responses:
+        "200":
+          description: The pairing is valid.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [server_name, user_name, expires_at]
+                properties:
+                  server_name: { type: string }
+                  user_name: { type: string }
+                  expires_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/Problem" }
+        "410":
+          description: "`pairing_expired` (also for an unknown, used or revoked code)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/auth/pair:
+    post:
+      tags: [auth, pairing]
+      summary: Sign the app in with a pairing code from the console
+      description: |
+        Consumes the code and opens a `mobile` session for the user who created
+        it. Does not contact the media server, so the administrator flag is not
+        re-synced (docs/adr/0010).
+      operationId: pairDevice
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, device]
+              properties:
+                code: { $ref: "#/components/schemas/PairingCode" }
+                device: { $ref: "#/components/schemas/DeviceInput" }
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403":
+          description: "`account_disabled`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "410":
+          description: "`pairing_expired` (also for an unknown, used or revoked code)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+
   /api/v1/auth/refresh:
     post:
       tags: [auth]
       summary: Rotate the refresh token and get a new access token
       description: |
-        Each refresh token works once. Presenting a used one revokes the whole
-        session (`code` = `refresh_token_reused`).
+        Each refresh token works once, with no grace period: presenting a used one,
+        even right after its rotation, revokes the whole session (`code` =
+        `refresh_token_reused`). Clients must refresh single-flight: one refresh in
+        flight at a time, other requests wait for its result (docs/adr/0010).
       operationId: refreshTokens
       security: []
       requestBody:
@@ -272,7 +473,7 @@ paths:
               type: object
               required: [refresh_token]
               properties:
-                refresh_token: { type: string }
+                refresh_token: { type: string, maxLength: 128 }
       responses:
         "200":
           description: New token pair.
@@ -286,9 +487,161 @@ paths:
     post:
       tags: [auth]
       summary: Revoke the current session
+      description: For a web session, the response also clears the cookie.
       operationId: logout
       responses:
         "204": { description: Signed out. }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+
+  # ---------------------------------------------------------------- auth (console)
+  /api/v1/auth/web/login:
+    post:
+      tags: [auth, console]
+      summary: Sign the console in with Jellyfin or Emby credentials
+      description: |
+        Same checks as `POST /auth/login`, but opens a `web` session and sets the
+        session cookie. The `Origin` header must be the server's own origin.
+        While setup is pending, only a media server administrator can sign in, and
+        that sign-in completes the setup.
+      operationId: webLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string, minLength: 1, maxLength: 128 }
+                password: { type: string, maxLength: 512 }
+      responses:
+        "200":
+          description: Signed in.
+          headers:
+            Set-Cookie: { $ref: "#/components/headers/SetSessionCookie" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebSession" }
+        "401":
+          description: "`invalid_credentials` (same answer for unknown user and wrong password)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "403":
+          description: "`account_disabled`, `not_a_server_user`, `admin_required` while setup is pending, `csrf_failed` (wrong or missing `Origin`), `https_required`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+        "503":
+          description: "`setup_required` (no media server configured yet) or `media_server_unreachable`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /api/v1/auth/web/plex/login:
+    post:
+      tags: [auth, console]
+      summary: Complete a Plex PIN sign-in (console)
+      description: Same as `POST /auth/plex/login`, ending in a web session. Same `Origin` check as `POST /auth/web/login`.
+      operationId: webLoginWithPlex
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pin_id]
+              properties:
+                pin_id: { type: string, maxLength: 64 }
+      responses:
+        "200":
+          description: Signed in.
+          headers:
+            Set-Cookie: { $ref: "#/components/headers/SetSessionCookie" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebSession" }
+        "202": { $ref: "#/components/responses/Pending" }
+        "403":
+          description: "`account_disabled`, `not_a_server_user`, `admin_required` while setup is pending, `csrf_failed`, `https_required`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "410":
+          description: "`pin_expired` (also for an unknown or already used `pin_id`)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+        "503":
+          description: "`setup_required` or `media_server_unreachable`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /api/v1/auth/web/quick-connect/login:
+    post:
+      tags: [auth, console]
+      summary: Complete a Quick Connect sign-in (console)
+      description: Same as `POST /auth/quick-connect/login`, ending in a web session. Same `Origin` check as `POST /auth/web/login`.
+      operationId: webLoginWithQuickConnect
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [handle]
+              properties:
+                handle: { type: string, maxLength: 64 }
+      responses:
+        "200":
+          description: Signed in.
+          headers:
+            Set-Cookie: { $ref: "#/components/headers/SetSessionCookie" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebSession" }
+        "202": { $ref: "#/components/responses/Pending" }
+        "403":
+          description: "`account_disabled`, `not_a_server_user`, `admin_required` while setup is pending, `csrf_failed`, `https_required`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "410":
+          description: "`quick_connect_expired` (also for an unknown or already used `handle`)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+        "503":
+          description: "`setup_required` or `media_server_unreachable`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /api/v1/auth/web/session:
+    get:
+      tags: [auth, console]
+      summary: The current web or setup session, with its CSRF token
+      description: |
+        The console calls this on load: the CSRF token lives only in memory, so a
+        reload gets it back here. Never cached.
+      operationId: getWebSession
+      security:
+        - cookieSession: []
+        - setupSession: []
+      responses:
+        "200":
+          description: Current session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebSession" }
         "401": { $ref: "#/components/responses/Problem" }
 
   # ---------------------------------------------------------------- me
@@ -352,6 +705,69 @@ paths:
       responses:
         "204": { description: Revoked. }
         "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  # ---------------------------------------------------------------- pairing
+  /api/v1/pairings:
+    post:
+      tags: [pairing, console]
+      summary: Create a code to connect a phone (any signed-in user)
+      description: |
+        The code is bound to the caller, single-use, valid 5 minutes and stored
+        hashed; it is only returned here. The console renders `link` as a QR code.
+        At most 3 pending pairings per user (`rate_limited` beyond).
+      operationId: createPairing
+      security:
+        - cookieSession: []
+          csrfToken: []
+      responses:
+        "201":
+          description: Pairing created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NewPairing" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409":
+          description: "`public_url_not_set`: an admin must set `public_url` first."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/pairings/{pairing_id}:
+    get:
+      tags: [pairing, console]
+      summary: Status of one of the caller's pairings
+      description: Polled by the console to show "Pixel 9 connected".
+      operationId: getPairing
+      security:
+        - cookieSession: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/PairingId"
+      responses:
+        "200":
+          description: Pairing.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pairing" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    delete:
+      tags: [pairing, console]
+      summary: Cancel a pending pairing, or revoke the session it opened
+      operationId: revokePairing
+      security:
+        - cookieSession: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/PairingId"
+      responses:
+        "204": { description: Cancelled or revoked. }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
 
   # ---------------------------------------------------------------- swipe
@@ -429,7 +845,8 @@ paths:
       description: |
         Idempotent per `client_vote_id`: resending a vote already stored returns
         `duplicate`. Voting again on the same title replaces the previous vote.
-        Items are processed independently.
+        Items are processed independently. A `skip` ("not now") takes the card out
+        of the deck and teaches nothing: see `VoteValue`.
       operationId: submitVotes
       requestBody:
         required: true
@@ -486,8 +903,9 @@ paths:
       tags: [swipe]
       summary: Undo the vote on one title
       description: |
-        The card goes back to the top of the deck if it is less than 24 h old. A
-        request already filed for the title (auto-request) is not cancelled.
+        Works the same for every vote value, `skip` included. The card goes back
+        to the top of the deck if it is less than 24 h old. A request already filed
+        for the title (auto-request) is not cancelled.
       operationId: undoVote
       parameters:
         - $ref: "#/components/parameters/MediaTypePath"
@@ -505,8 +923,9 @@ paths:
         Filed as the caller's request-backend user (`X-API-User`), so their
         permissions, quotas, auto-approval and override rules apply. Only titles
         served to or voted on by the caller can be requested (`code` =
-        `title_not_offered` otherwise). A title not voted on yet is recorded as a
-        `like`. Requesting a title twice answers `already_requested`.
+        `title_not_offered` otherwise). A title not voted on yet, or skipped, is
+        recorded as a `like`; other votes are kept as they are. Requesting a title
+        twice answers `already_requested`.
       operationId: requestTitle
       requestBody:
         required: true
@@ -545,6 +964,10 @@ paths:
     get:
       tags: [swipe]
       summary: The caller's liked titles
+      description: |
+        Titles whose current vote is `like`: the "to request" list. `seen_liked`
+        titles are not listed: they are already seen, so there is nothing to
+        request; they only feed the taste profile.
       operationId: listLikes
       parameters:
         - name: status
@@ -655,10 +1078,45 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
 
+  /api/v1/swipe/providers:
+    get:
+      tags: [swipe]
+      summary: Streaming services available in the server's region
+      description: |
+        From TMDb (movie and TV watch providers, merged), for the server's
+        `streaming_region`, cached by the server for 7 days. The user ticks the
+        ones they subscribe to in `Preferences.streaming_services`.
+      operationId: listStreamingProviders
+      responses:
+        "200":
+          description: Providers, in TMDb's display order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [region, providers]
+                properties:
+                  region: { type: string, pattern: "^[A-Z]{2}$" }
+                  providers:
+                    type: array
+                    items: { $ref: "#/components/schemas/ProviderOption" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "409":
+          description: "`streaming_region_not_set` or `tmdb_not_configured`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "502":
+          description: "`metadata_unreachable` and nothing cached."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
   /api/v1/swipe/stats:
     get:
       tags: [swipe]
       summary: Like and request rates, overall and per pick type
+      description: Skipped titles are counted apart (`skips`) and left out of every rate.
       operationId: getStats
       responses:
         "200":
@@ -671,7 +1129,10 @@ paths:
   # ---------------------------------------------------------------- admin
   /api/v1/admin/connectors:
     get:
-      tags: [admin]
+      tags: [admin, console]
+      security:
+        - cookieSession: []
+          csrfToken: []
       summary: All connectors, secrets masked
       operationId: listConnectors
       responses:
@@ -691,7 +1152,10 @@ paths:
 
   /api/v1/admin/connectors/{kind}:
     put:
-      tags: [admin]
+      tags: [admin, console]
+      security:
+        - cookieSession: []
+          csrfToken: []
       summary: Configure a connector
       description: |
         Omitted secret fields keep their stored value, unless the URL changes
@@ -716,7 +1180,10 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
     delete:
-      tags: [admin]
+      tags: [admin, console]
+      security:
+        - cookieSession: []
+          csrfToken: []
       summary: Remove an optional connector (omdb, requests)
       operationId: deleteConnector
       parameters:
@@ -729,7 +1196,10 @@ paths:
 
   /api/v1/admin/connectors/{kind}/test:
     post:
-      tags: [admin]
+      tags: [admin, console]
+      security:
+        - cookieSession: []
+          csrfToken: []
       summary: Test a connector without saving
       description: |
         Returns a coarse result only, never the remote response body. Omitted
@@ -755,7 +1225,10 @@ paths:
 
   /api/v1/admin/llm/models:
     post:
-      tags: [admin]
+      tags: [admin, console]
+      security:
+        - cookieSession: []
+          csrfToken: []
       summary: List the models a provider offers
       description: |
         Uses the given settings, or the stored ones for omitted fields. The stored
@@ -785,7 +1258,10 @@ paths:
 
   /api/v1/admin/settings:
     get:
-      tags: [admin]
+      tags: [admin, console]
+      security:
+        - cookieSession: []
+          csrfToken: []
       summary: General server settings
       operationId: getSettings
       responses:
@@ -797,7 +1273,10 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
     patch:
-      tags: [admin]
+      tags: [admin, console]
+      security:
+        - cookieSession: []
+          csrfToken: []
       summary: Change general server settings
       operationId: updateSettings
       requestBody:
@@ -818,7 +1297,10 @@ paths:
 
   /api/v1/admin/users:
     get:
-      tags: [admin]
+      tags: [admin, console]
+      security:
+        - cookieSession: []
+          csrfToken: []
       summary: Users who signed in at least once
       operationId: listUsers
       responses:
@@ -838,9 +1320,19 @@ paths:
 
   /api/v1/admin/users/{user_id}:
     patch:
-      tags: [admin]
+      tags: [admin, console]
+      security:
+        - cookieSession: []
+          csrfToken: []
       summary: Enable, disable, promote or set limits for a user
-      description: Disabling a user revokes their sessions. An admin cannot demote or disable the last admin.
+      description: |
+        Disabling a user revokes their sessions. `role` edits the Tindeerr side
+        only (docs/adr/0010): `admin` sets `promoted`; `user` clears `promoted` and
+        clears `media_server_admin` until the user's next sign-in, where the media
+        server's flag is read again (a media server administrator is then admin
+        again). Only a media server administrator can demote or disable another
+        one (`forbidden`). The last enabled admin cannot be demoted or disabled
+        (`last_admin`).
       operationId: updateUser
       parameters:
         - $ref: "#/components/parameters/UserId"
@@ -872,7 +1364,10 @@ paths:
 
   /api/v1/admin/users/{user_id}/sessions:
     delete:
-      tags: [admin]
+      tags: [admin, console]
+      security:
+        - cookieSession: []
+          csrfToken: []
       summary: Sign a user out of every device
       operationId: revokeUserSessions
       parameters:
@@ -885,7 +1380,10 @@ paths:
 
   /api/v1/admin/usage:
     get:
-      tags: [admin]
+      tags: [admin, console]
+      security:
+        - cookieSession: []
+          csrfToken: []
       summary: AI usage per user and per day
       operationId: getUsage
       parameters:
@@ -913,11 +1411,29 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Access token from login or refresh, valid 15 minutes.
-    setupToken:
-      type: http
-      scheme: bearer
-      description: Setup token from `POST /setup/claim`, valid 30 minutes, setup endpoints only.
+      description: Access token from an app sign-in, pairing or refresh, valid 15 minutes. Mobile app only.
+    cookieSession:
+      type: apiKey
+      in: cookie
+      name: __Host-tindeerr_session
+      description: |
+        Web console session (`kind` = `web`): opaque, `HttpOnly`, `Secure`,
+        `SameSite=Strict`, `Path=/`. Expires after 24 h idle or 7 days. Named
+        `tindeerr_session`, without `Secure`, only when the operator allowed the
+        console over plain HTTP on a private network.
+    setupSession:
+      type: apiKey
+      in: cookie
+      name: __Host-tindeerr_session
+      description: Same cookie, holding the setup session from `POST /setup/claim` (`kind` = `setup`, 30 minutes). Setup endpoints only.
+    csrfToken:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: |
+        The session's CSRF token, from the `WebSession` body. Required with a
+        cookie session on `POST`, `PUT`, `PATCH` and `DELETE`, together with an
+        `Origin` header equal to the server's origin; not checked on `GET`.
 
   parameters:
     Cursor:
@@ -948,11 +1464,21 @@ components:
       in: path
       required: true
       schema: { type: integer, minimum: 1 }
+    PairingId:
+      name: pairing_id
+      in: path
+      required: true
+      schema: { type: string }
     ConnectorKind:
       name: kind
       in: path
       required: true
       schema: { $ref: "#/components/schemas/ConnectorKind" }
+
+  headers:
+    SetSessionCookie:
+      description: "`__Host-tindeerr_session=<token>; Path=/; Secure; HttpOnly; SameSite=Strict`."
+      schema: { type: string }
 
   responses:
     Problem:
@@ -987,9 +1513,11 @@ components:
             token_expired, refresh_token_reused, forbidden, admin_required,
             not_found, rate_limited, setup_required, setup_completed,
             invalid_setup_code, invalid_credentials, account_disabled,
-            not_a_server_user, pin_expired, media_server_unreachable,
+            not_a_server_user, pin_expired, quick_connect_unavailable,
+            quick_connect_expired, pairing_expired, public_url_not_set,
+            csrf_failed, https_required, media_server_unreachable,
             connector_unreachable, connector_unauthorized, setting_locked,
-            secret_required,
+            secret_required, streaming_region_not_set, metadata_unreachable,
             llm_not_configured, tmdb_not_configured, llm_auth_failed, llm_quota,
             llm_model_not_found, llm_unreachable, llm_invalid_output,
             daily_limit_reached, requests_not_configured, no_backend_user,
@@ -1034,12 +1562,16 @@ components:
                 name: { type: string }
         auth_methods:
           type: array
+          description: |
+            Ways to sign in. `password` (Jellyfin, Emby), `plex_pin` (Plex),
+            `quick_connect` (Jellyfin with Quick Connect enabled), `pairing` (QR
+            code from the console; listed once `public_url` is set).
           items:
             type: string
-            enum: [password, plex_pin]
+            enum: [password, plex_pin, quick_connect, pairing]
         capabilities:
           type: array
-          description: Feature flags the app enables on, e.g. `trailers`, `ratings`, `streaming_providers`, `requests`, `notifications`.
+          description: Feature flags the clients enable features on, e.g. `trailers`, `ratings`, `streaming_providers`, `requests`, `notifications`.
           items: { type: string }
         tmdb_image_base_url:
           type: string
@@ -1049,11 +1581,69 @@ components:
 
     DeviceInput:
       type: object
+      description: Sent by the app. Web sessions describe the browser from its User-Agent instead.
       required: [name, platform, app_version]
       properties:
         name: { type: string, maxLength: 80, examples: ["Pixel 9"] }
-        platform: { type: string, enum: [android, ios, web] }
+        platform: { type: string, enum: [android, ios] }
         app_version: { type: string, maxLength: 32 }
+
+    WebSession:
+      type: object
+      description: |
+        A console session. The session token itself is only in the `HttpOnly`
+        cookie; `csrf_token` is not a credential on its own.
+      required: [kind, csrf_token, expires_at]
+      properties:
+        kind: { type: string, enum: [web, setup] }
+        user:
+          description: Null for a setup session.
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/User"
+        csrf_token: { type: string, description: Send as `X-CSRF-Token` on unsafe methods. }
+        expires_at: { type: string, format: date-time }
+        setup_completed_now:
+          type: boolean
+          description: True when this sign-in completed the first-run setup.
+
+    PairingCode:
+      type: string
+      description: At least 128 bits, base64url.
+      pattern: "^[A-Za-z0-9_-]{22,64}$"
+
+    Pairing:
+      type: object
+      required: [id, status, created_at, expires_at]
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [pending, completed, expired, revoked] }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        completed_at: { type: [string, "null"], format: date-time }
+        device:
+          description: The phone that used the code, once `completed`.
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [name, platform]
+              properties:
+                name: { type: string }
+                platform: { type: string }
+                app_version: { type: string }
+        session_id: { type: [string, "null"], description: The session the pairing opened. }
+
+    NewPairing:
+      allOf:
+        - $ref: "#/components/schemas/Pairing"
+        - type: object
+          required: [code, link]
+          properties:
+            code: { $ref: "#/components/schemas/PairingCode" }
+            link:
+              type: string
+              description: "`tindeerr://pair?server=<public_url>&code=<code>`, rendered as a QR code."
+              examples: ["tindeerr://pair?server=https%3A%2F%2Ftindeerr.example.com&code=q7Xc0vW2dYk9LmN4pRs6Tu"]
 
     TokenPair:
       type: object
@@ -1085,16 +1675,22 @@ components:
       properties:
         id: { type: string }
         name: { type: string }
-        role: { $ref: "#/components/schemas/Role" }
+        role:
+          $ref: "#/components/schemas/Role"
+          description: Effective role, `admin` when `media_server_admin` or `promoted` (docs/adr/0010).
         avatar_url: { type: [string, "null"], format: uri }
 
     AdminUser:
       allOf:
         - $ref: "#/components/schemas/User"
         - type: object
-          required: [enabled, created_at, votes, generations_today]
+          required: [enabled, media_server_admin, promoted, created_at, votes, generations_today]
           properties:
             enabled: { type: boolean }
+            media_server_admin:
+              type: boolean
+              description: Administrator on the media server, as read at the user's last sign-in (or cleared by a demotion since).
+            promoted: { type: boolean, description: Made admin in Tindeerr. }
             created_at: { type: string, format: date-time }
             last_seen_at: { type: [string, "null"], format: date-time }
             votes: { type: integer, minimum: 0 }
@@ -1104,9 +1700,10 @@ components:
 
     Session:
       type: object
-      required: [id, device_name, platform, created_at, last_seen_at, current]
+      required: [id, kind, device_name, platform, created_at, last_seen_at, current]
       properties:
         id: { type: string }
+        kind: { type: string, enum: [mobile, web] }
         device_name: { type: string }
         platform: { type: string }
         app_version: { type: string }
@@ -1134,7 +1731,13 @@ components:
 
     VoteValue:
       type: string
-      enum: [like, dislike, seen_liked, seen_disliked]
+      description: |
+        `like` and `dislike` are about titles not seen yet; `seen_liked` and
+        `seen_disliked` about titles already seen (profile signals only). `skip`
+        means "not now": the card leaves the deck, the vote teaches nothing (no
+        profile rewrite, not in the prompt's vote history, not in calibration or
+        like/dislike stats), and the title may be offered again 60 days later.
+      enum: [like, dislike, seen_liked, seen_disliked, skip]
 
     RequestStatus:
       type: string
@@ -1161,12 +1764,26 @@ components:
 
     StreamingProvider:
       type: object
-      required: [name, offer]
+      required: [provider_id, name, offer, subscribed]
       properties:
         provider_id: { type: integer, description: TMDb watch provider id. }
         name: { type: string }
         logo_path: { type: [string, "null"] }
         offer: { type: string, enum: [subscription, free, ads, rent, buy] }
+        subscribed:
+          type: boolean
+          description: |
+            "On your services": the provider is in the caller's
+            `streaming_services` and the offer is `subscription`, `free` or `ads`.
+            Computed when the card is returned, from the current preferences.
+
+    ProviderOption:
+      type: object
+      required: [provider_id, name]
+      properties:
+        provider_id: { type: integer, description: TMDb watch provider id. }
+        name: { type: string }
+        logo_path: { type: [string, "null"] }
 
     Trailer:
       type: object
@@ -1277,14 +1894,14 @@ components:
 
     Like:
       type: object
-      required: [media_type, tmdb_id, title, vote, liked_at, requested, availability]
+      description: A title whose current vote is `like`. `seen_liked` titles are not likes.
+      required: [media_type, tmdb_id, title, liked_at, requested, availability]
       properties:
         media_type: { $ref: "#/components/schemas/MediaType" }
         tmdb_id: { type: integer }
         title: { type: string }
         year: { type: [integer, "null"] }
         poster_path: { type: [string, "null"] }
-        vote: { type: string, enum: [like, seen_liked] }
         pick_type: { $ref: "#/components/schemas/PickType" }
         liked_at: { type: string, format: date-time }
         requested: { type: boolean, description: Requested from Tindeerr or already requested elsewhere. }
@@ -1315,7 +1932,7 @@ components:
 
     Preferences:
       type: object
-      required: [media_type, novelty, auto_request, language]
+      required: [media_type, novelty, auto_request, language, streaming_services]
       properties:
         media_type: { $ref: "#/components/schemas/MediaFilter" }
         novelty: { $ref: "#/components/schemas/Novelty" }
@@ -1324,6 +1941,11 @@ components:
           type: string
           description: BCP 47 tag for card titles and overviews; defaults to the server language.
           examples: [fr-FR]
+        streaming_services:
+          type: array
+          description: TMDb provider ids of the services the user subscribes to (see `GET /swipe/providers`). Drives the "on your services" badge.
+          uniqueItems: true
+          items: { type: integer, minimum: 1 }
 
     PreferencesPatch:
       type: object
@@ -1333,14 +1955,22 @@ components:
         novelty: { $ref: "#/components/schemas/Novelty" }
         auto_request: { type: boolean }
         language: { type: string, maxLength: 16 }
+        streaming_services:
+          type: array
+          uniqueItems: true
+          maxItems: 100
+          items: { type: integer, minimum: 1 }
 
     Stats:
       type: object
-      required: [total, likes, dislikes, requested, like_rate, request_rate, by_pick_type]
+      required: [total, likes, dislikes, seen_liked, seen_disliked, skips, requested, like_rate, request_rate, by_pick_type]
       properties:
-        total: { type: integer }
+        total: { type: integer, description: Votes other than `skip`. }
         likes: { type: integer }
         dislikes: { type: integer }
+        seen_liked: { type: integer }
+        seen_disliked: { type: integer }
+        skips: { type: integer, description: Current `skip` votes; not part of `total` or of any rate. }
         requested: { type: integer }
         like_rate: { type: number, minimum: 0, maximum: 1 }
         request_rate: { type: number, minimum: 0, maximum: 1 }
@@ -1464,9 +2094,16 @@ components:
 
     ServerSettings:
       type: object
-      required: [name, language, streaming_region, daily_generation_limit, warm_up_enabled, content_filters]
+      required: [name, public_url, language, streaming_region, daily_generation_limit, warm_up_enabled, content_filters]
       properties:
         name: { type: string }
+        public_url:
+          type: [string, "null"]
+          format: uri
+          description: |
+            Origin the phones reach the server at, used only in pairing QR codes.
+            `https`, or `http` only for a private, link-local, `.local` or
+            `localhost` host; no path. Null until set.
         language: { type: string, examples: [fr-FR] }
         streaming_region: { type: [string, "null"], pattern: "^[A-Z]{2}$" }
         daily_generation_limit: { type: integer, minimum: 0, description: Default per-user cap; 0 disables generation. }
@@ -1479,6 +2116,12 @@ components:
       minProperties: 1
       properties:
         name: { type: string, maxLength: 60 }
+        public_url:
+          type: [string, "null"]
+          format: uri
+          maxLength: 255
+          pattern: "^https?://[^/?#@]+/?$"
+          description: Validated as in `ServerSettings.public_url` (`validation_error` otherwise).
         language: { type: string, maxLength: 16 }
         streaming_region: { type: [string, "null"], pattern: "^[A-Z]{2}$" }
         daily_generation_limit: { type: integer, minimum: 0 }
