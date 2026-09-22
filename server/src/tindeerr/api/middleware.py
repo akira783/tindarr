@@ -10,6 +10,7 @@ from typing import Final
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from tindeerr.api.proxy import TRUSTED_PEER_SCOPE_KEY, client_ip
 from tindeerr.core.logs import request_id_var
 
 REQUEST_ID_HEADER: Final = "X-Request-ID"
@@ -33,8 +34,9 @@ access_logger = logging.getLogger("tindeerr.access")
 class RequestIdMiddleware:
     """Assigns a request id, echoes it in ``X-Request-ID`` and logs one line per request.
 
-    A client-supplied id is kept when it is short and made of safe characters (so it can
-    be correlated with a reverse proxy's logs); otherwise a new one is generated. The
+    An incoming id is kept when the request came through a trusted proxy (so it can be
+    correlated with the proxy's logs) and it is short and made of safe characters;
+    otherwise a new one is generated, so a client cannot forge the ids in the logs. The
     access log line has no query string, which could carry a credential.
     """
 
@@ -47,7 +49,10 @@ class RequestIdMiddleware:
             await self.app(scope, receive, send)
             return
         incoming = Headers(scope=scope).get(REQUEST_ID_HEADER, "")
-        request_id = incoming if _VALID_REQUEST_ID.fullmatch(incoming) else uuid.uuid4().hex
+        if scope.get(TRUSTED_PEER_SCOPE_KEY) and _VALID_REQUEST_ID.fullmatch(incoming):
+            request_id = incoming
+        else:
+            request_id = uuid.uuid4().hex
         token = request_id_var.set(request_id)
         status = 500
         started = time.perf_counter()
@@ -63,7 +68,7 @@ class RequestIdMiddleware:
             await self.app(scope, receive, send_wrapper)
         finally:
             path: str = scope["path"]
-            client = scope.get("client")
+            client = client_ip(scope)
             access_logger.log(
                 logging.DEBUG
                 if path in _QUIET_PATHS and status < _FIRST_ERROR_STATUS
@@ -74,7 +79,7 @@ class RequestIdMiddleware:
                     "path": path,
                     "status": status,
                     "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                    "client": client[0] if client else None,
+                    "client": str(client) if client else None,
                 },
             )
             request_id_var.reset(token)

@@ -8,13 +8,13 @@ from dataclasses import dataclass
 
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncEngine
-from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from tindeerr import __version__
 from tindeerr.api import health, v1
 from tindeerr.api.deps import AppServices
 from tindeerr.api.errors import UnhandledErrorMiddleware, install_error_handlers
 from tindeerr.api.middleware import RequestIdMiddleware, SecurityHeadersMiddleware
+from tindeerr.api.proxy import TrustedProxyMiddleware
 from tindeerr.core.config import ServerConfig
 from tindeerr.core.crypto import SecretCipher
 from tindeerr.core.keys import load_key_material
@@ -91,10 +91,6 @@ def create_app(config: ServerConfig) -> FastAPI:
     app.add_middleware(UnhandledErrorMiddleware)
     app.add_middleware(SecurityHeadersMiddleware, csp_exempt_paths={DOCS_URL})
     app.add_middleware(RequestIdMiddleware)
-    if config.trusted_proxies:
-        # X-Forwarded-For/-Proto are only honoured from these peers; unset, never.
-        app.add_middleware(
-            ProxyHeadersMiddleware,
-            trusted_hosts=[str(network) for network in config.trusted_proxies],
-        )
+    # Outermost: X-Forwarded-For/-Proto are only honoured from these peers; unset, never.
+    app.add_middleware(TrustedProxyMiddleware, trusted_proxies=config.trusted_proxies)
     return app

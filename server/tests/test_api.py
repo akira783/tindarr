@@ -145,16 +145,26 @@ def test_setup_required_follows_the_state_flag(config: ServerConfig, data_dir: P
         assert client.get("/api/v1/server/info").json()["setup_required"] is False
 
 
-def test_request_id_is_generated_or_echoed(client: TestClient) -> None:
+def test_request_id_is_generated(client: TestClient) -> None:
     generated = client.get("/healthz").headers["x-request-id"]
     assert len(generated) == 32
-    assert (
-        client.get("/healthz", headers={"X-Request-ID": "abc-123"}).headers["x-request-id"]
-        == "abc-123"
-    )
-    unsafe = client.get("/healthz", headers={"X-Request-ID": "bad id\x7f" + "x" * 200})
-    assert unsafe.headers["x-request-id"] != "bad id"
-    assert len(unsafe.headers["x-request-id"]) == 32
+    assert client.get("/healthz").headers["x-request-id"] != generated
+
+
+def test_request_id_is_echoed_from_trusted_proxies_only(data_dir: Path) -> None:
+    config = ServerConfig(data_dir=data_dir, trusted_proxies="10.0.0.0/8")  # pyright: ignore[reportArgumentType]
+    app = create_app(config)
+    with TestClient(app, client=("10.0.0.2", 5000)) as proxied:
+        assert (
+            proxied.get("/healthz", headers={"X-Request-ID": "abc-123"}).headers["x-request-id"]
+            == "abc-123"
+        )
+        unsafe = proxied.get("/healthz", headers={"X-Request-ID": "bad id\x7f" + "x" * 200})
+        assert len(unsafe.headers["x-request-id"]) == 32
+    with TestClient(app, client=("192.0.2.1", 5000)) as direct:
+        forged = direct.get("/healthz", headers={"X-Request-ID": "abc-123"})
+        assert forged.headers["x-request-id"] != "abc-123"
+        assert len(forged.headers["x-request-id"]) == 32
 
 
 def test_access_log_has_request_id_and_no_query_string(

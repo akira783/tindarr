@@ -54,7 +54,7 @@ values count as unset.
 | `TINDEERR_HOST` | `127.0.0.1` (`0.0.0.0` in the image) | Listening address. |
 | `TINDEERR_PORT` | `8787` | Listening port. |
 | `TINDEERR_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR`. Logs are JSON lines on stdout, with credentials redacted. |
-| `TINDEERR_TRUSTED_PROXIES` | none | Comma-separated IPs/CIDRs of reverse proxies. `X-Forwarded-For` / `-Proto` are ignored from anyone else. |
+| `TINDEERR_TRUSTED_PROXIES` | none | Comma-separated IPs/CIDRs of reverse proxies. `X-Forwarded-For` / `-Proto` are ignored from anyone else, and so is `X-Request-ID`. A private address sending `X-Forwarded-For` without being listed is logged once. |
 | `TINDEERR_API_DOCS` | `false` | Serve interactive docs at `/api/docs` (and `/api/openapi.json`). |
 | `TINDEERR_DB_BACKUPS_KEEP` | `5` | Pre-migration backups to keep. |
 
