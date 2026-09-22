@@ -143,7 +143,8 @@ class PlexServer:
 
     async def _owned_resource(self, token: str, machine_id: str) -> PlexResource:
         """Return the configured server among the token's resources, if it owns it."""
-        resource = find_server(await self._plex_tv.resources(token), machine_id)
+        found = await self._plex_tv.resources(token, self._connection.device_id)
+        resource = find_server(found, machine_id)
         if resource is None or not resource.owned:
             raise problems.plex_owner_required()
         return resource
@@ -176,11 +177,11 @@ class PlexServer:
         Plex has no notion of a disabled user: someone who lost access simply stops
         appearing here, which the sync reads as "removed on the media server".
         """
-        token = self._connection.secret
+        token, client_id = self._connection.secret, self._connection.device_id
         identity = await self.identify()
         try:
-            owner = await self._plex_tv.account(token)
-            shared = await self._plex_tv.shared_users(token, identity.server_id)
+            owner = await self._plex_tv.account(token, client_id)
+            shared = await self._plex_tv.shared_users(token, identity.server_id, client_id)
         except RateLimitedError:
             # The sync runs again in an hour; nothing is changed on a partial read.
             raise problems.plex_tv_unreachable() from None

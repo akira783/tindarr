@@ -166,7 +166,7 @@ async def test_a_retry_after_header_sets_the_backoff() -> None:
 
 
 async def test_the_account_is_keyed_by_its_decimal_id(plex_tv: FakePlexTv) -> None:
-    account = await client(plex_tv).account(OWNER_TOKEN)
+    account = await client(plex_tv).account(OWNER_TOKEN, "client-1")
     assert (account.id, account.name) == (OWNER_ID, "Alex")
     assert plex_tv.requests[-1].headers["x-plex-token"] == OWNER_TOKEN
     assert b"token" not in plex_tv.requests[-1].url.query
@@ -174,7 +174,7 @@ async def test_the_account_is_keyed_by_its_decimal_id(plex_tv: FakePlexTv) -> No
 
 async def test_an_unknown_token_has_no_account(plex_tv: FakePlexTv) -> None:
     with pytest.raises(ProblemError) as caught:
-        await client(plex_tv).account("nope")
+        await client(plex_tv).account("nope", "client-1")
     assert caught.value.code == "plex_tv_unreachable"
 
 
@@ -183,20 +183,20 @@ async def test_an_account_without_a_numeric_id_is_refused() -> None:
         return httpx2.Response(200, json={"id": "abc", "title": "Alex"})
 
     with pytest.raises(ProblemError):
-        await PlexTvClient(httpx2.MockTransport(handle)).account("t")
+        await PlexTvClient(httpx2.MockTransport(handle)).account("t", "client-1")
 
 
 async def test_an_account_falls_back_to_its_username() -> None:
     def handle(_request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(200, json={"id": 7, "username": "robin"})
 
-    account = await PlexTvClient(httpx2.MockTransport(handle)).account("t")
+    account = await PlexTvClient(httpx2.MockTransport(handle)).account("t", "client-1")
     assert (account.id, account.name) == ("7", "robin")
 
 
 async def test_resources_are_read_with_their_provides_list(plex_tv: FakePlexTv) -> None:
     plex_tv.resources[OWNER_TOKEN][0]["provides"] = "server,player"
-    [resource] = await client(plex_tv).resources(OWNER_TOKEN)
+    [resource] = await client(plex_tv).resources(OWNER_TOKEN, "client-1")
     assert resource.provides == ("server", "player")
     assert resource.is_server is True
     assert resource.owned is True
@@ -204,7 +204,7 @@ async def test_resources_are_read_with_their_provides_list(plex_tv: FakePlexTv) 
 
 async def test_a_resource_without_an_identifier_is_dropped(plex_tv: FakePlexTv) -> None:
     plex_tv.resources[OWNER_TOKEN].append({"name": "broken"})
-    assert len(await client(plex_tv).resources(OWNER_TOKEN)) == 1
+    assert len(await client(plex_tv).resources(OWNER_TOKEN, "client-1")) == 1
 
 
 async def test_unreadable_resources_are_reported(plex_tv: FakePlexTv) -> None:
@@ -212,7 +212,7 @@ async def test_unreadable_resources_are_reported(plex_tv: FakePlexTv) -> None:
         return httpx2.Response(200, json={"not": "a list"})
 
     with pytest.raises(ProblemError):
-        await PlexTvClient(httpx2.MockTransport(handle)).resources("t")
+        await PlexTvClient(httpx2.MockTransport(handle)).resources("t", "client-1")
 
 
 def test_the_configured_server_is_matched_by_identifier_only() -> None:
@@ -290,13 +290,13 @@ async def test_a_device_list_that_is_not_xml_is_reported() -> None:
 
 async def test_shared_users_only_lists_accounts_of_this_server(plex_tv: FakePlexTv) -> None:
     plex_tv.shared = [("7", "Robin", MACHINE_ID), ("8", "Sam", "another-machine")]
-    accounts = await client(plex_tv).shared_users(OWNER_TOKEN, MACHINE_ID)
+    accounts = await client(plex_tv).shared_users(OWNER_TOKEN, MACHINE_ID, "client-1")
     assert [(account.id, account.name) for account in accounts] == [("7", "Robin")]
 
 
 async def test_shared_users_fails_when_plex_tv_refuses(plex_tv: FakePlexTv) -> None:
     with pytest.raises(ProblemError) as caught:
-        await client(plex_tv).shared_users("nope", MACHINE_ID)
+        await client(plex_tv).shared_users("nope", MACHINE_ID, "client-1")
     assert caught.value.code == "plex_tv_unreachable"
 
 
@@ -305,7 +305,7 @@ async def test_shared_users_fails_on_an_unreadable_body() -> None:
         return httpx2.Response(200, content=b"<broken")
 
     with pytest.raises(ProblemError):
-        await PlexTvClient(httpx2.MockTransport(handle)).shared_users("t", MACHINE_ID)
+        await PlexTvClient(httpx2.MockTransport(handle)).shared_users("t", MACHINE_ID, "client-1")
 
 
 # --- the Plex media server ---------------------------------------------------------------------
@@ -414,3 +414,19 @@ async def test_a_rate_limited_sync_changes_nothing(plex_tv: FakePlexTv) -> None:
     with pytest.raises(ProblemError) as caught:
         await plex_server(plex_tv, plex_media_server()).list_users()
     assert caught.value.code == "plex_tv_unreachable"
+
+
+async def test_every_plex_tv_call_identifies_the_client(plex_tv: FakePlexTv) -> None:
+    # plex.tv answers 400 to its v2 endpoints without X-Plex-Client-Identifier.
+    await client(plex_tv).account(OWNER_TOKEN, "client-1")
+    await client(plex_tv).resources(OWNER_TOKEN, "client-1")
+    identified = [request.headers.get("x-plex-client-identifier") for request in plex_tv.requests]
+    assert identified == ["client-1", "client-1"]
+
+
+async def test_the_owner_token_calls_use_the_installs_identifier(plex_tv: FakePlexTv) -> None:
+    adapter = plex_server(plex_tv, plex_media_server())
+    plex_tv.shared = [("7", "Robin", MACHINE_ID)]
+    await adapter.list_users()
+    identifiers = {request.headers.get("x-plex-client-identifier") for request in plex_tv.requests}
+    assert identifiers == {"install-abc"}

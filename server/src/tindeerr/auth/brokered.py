@@ -143,7 +143,7 @@ class PlexPinFlow:
         # log redaction: nothing ever puts it in a log field, and the redaction set is
         # scanned for every line, so request-scoped values must not accumulate in it.
         # The settings store registers the owner token once the connector saves it.
-        account = await self._plex_tv.account(token)
+        account = await self._plex_tv.account(token, handle.pin.client_id)
         handle.token, handle.account_name = token, account.name
         logger.info("a Plex owner token was approved", extra={"account": account.name})
 
@@ -176,8 +176,8 @@ class PlexPinFlow:
         return machine_id
 
     async def _account_for(self, token: str, client_id: str, machine_id: str) -> MediaUser:
-        account = await self._plex_tv.account(token)
-        resource = find_server(await self._plex_tv.resources(token), machine_id)
+        account = await self._plex_tv.account(token, client_id)
+        resource = find_server(await self._plex_tv.resources(token, client_id), machine_id)
         # The device goes whatever the answer is: Tindeerr keeps no Plex sign-in token,
         # and leaves none live in the user's plex.tv account either.
         await self._plex_tv.delete_device(token, client_id)

@@ -129,9 +129,9 @@ class PlexTvClient:
 
     # --- account and resources ------------------------------------------------------
 
-    async def account(self, token: str) -> PlexAccount:
+    async def account(self, token: str, client_id: str) -> PlexAccount:
         """Return the plex.tv account a token belongs to."""
-        payload = await self._json_object("GET", "/api/v2/user", token=token)
+        payload = await self._json_object("GET", "/api/v2/user", client_id=client_id, token=token)
         account = self._account_of(payload.get("id"), as_text(payload.get("title")), payload)
         if account is None:
             raise self._unusable("account", RemoteCallError("no_account"))
@@ -147,9 +147,9 @@ class PlexTvClient:
         name = title or as_text(payload.get("username")) or account_id
         return PlexAccount(id=account_id, name=name)
 
-    async def resources(self, token: str) -> list[PlexResource]:
+    async def resources(self, token: str, client_id: str) -> list[PlexResource]:
         """Return the resources the token may reach, as plex.tv reports them."""
-        response = await self._call("GET", "/api/v2/resources", token=token)
+        response = await self._call("GET", "/api/v2/resources", client_id=client_id, token=token)
         self._expect(response, (HTTPStatus.OK,), "resources")
         try:
             rows = read_list(response)
@@ -187,7 +187,9 @@ class PlexTvClient:
             device_id = await self._device_id(token, client_id)
             if device_id is None:
                 return False
-            response = await self._call("DELETE", f"/devices/{device_id}.xml", token=token)
+            response = await self._call(
+                "DELETE", f"/devices/{device_id}.xml", client_id=client_id, token=token
+            )
             deleted = response.status_code < HTTPStatus.BAD_REQUEST
         except (ProblemError, RemoteCallError) as failure:
             reason = failure.code if isinstance(failure, ProblemError) else failure.reason
@@ -204,7 +206,7 @@ class PlexTvClient:
         return deleted
 
     async def _device_id(self, token: str, client_id: str) -> str | None:
-        response = await self._call("GET", "/devices.xml", token=token)
+        response = await self._call("GET", "/devices.xml", client_id=client_id, token=token)
         if response.status_code != HTTPStatus.OK:
             return None
         for device in read_xml(response).iter("Device"):
@@ -214,9 +216,11 @@ class PlexTvClient:
 
     # --- the hourly sync ------------------------------------------------------------
 
-    async def shared_users(self, owner_token: str, machine_id: str) -> list[PlexAccount]:
+    async def shared_users(
+        self, owner_token: str, machine_id: str, client_id: str
+    ) -> list[PlexAccount]:
         """Return the accounts this server is shared with (``GET /api/users``, XML)."""
-        response = await self._call("GET", "/api/users", token=owner_token)
+        response = await self._call("GET", "/api/users", client_id=client_id, token=owner_token)
         self._expect(response, (HTTPStatus.OK,), "shared_users")
         try:
             root = read_xml(response)

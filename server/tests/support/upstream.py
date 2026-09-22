@@ -363,12 +363,17 @@ class FakePlexTv:
         return _json({"id": int(pin.id), "code": pin.code, "authToken": pin.token})
 
     def _account(self, request: httpx2.Request) -> httpx2.Response:
+        if not request.headers.get("x-plex-client-identifier"):
+            # plex.tv refuses its v2 endpoints without one.
+            return _json({"error": "X-Plex-Client-Identifier is missing"}, 400)
         account = self.accounts.get(request.headers.get("x-plex-token", ""))
         if account is None:
             return _json({"error": "unauthorized"}, 401)
         return _json({"id": int(account[0]), "uuid": "uuid", "title": account[1]})
 
     def _resources(self, request: httpx2.Request) -> httpx2.Response:
+        if not request.headers.get("x-plex-client-identifier"):
+            return _json({"error": "X-Plex-Client-Identifier is missing"}, 400)
         token = request.headers.get("x-plex-token", "")
         if token not in self.accounts:
             return _json({"error": "unauthorized"}, 401)

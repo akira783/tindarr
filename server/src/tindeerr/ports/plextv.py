@@ -97,6 +97,12 @@ def find_server(resources: list[PlexResource], machine_id: str) -> PlexResource 
 class PlexTv(Protocol):
     """What auth and the Plex adapter ask plex.tv.
 
+    Every call carries a ``client_id``: plex.tv identifies the caller by
+    ``X-Plex-Client-Identifier`` and refuses its v2 endpoints without one. It is the
+    install's own identifier for anything done with the owner token, and the PIN's own
+    identifier for anything done with a sign-in token, so the device a sign-in creates
+    can be deleted without touching the install's.
+
     Failures are ``ProblemError`` with the contract's codes: ``plex_tv_unreachable``
     when plex.tv does not answer usably, ``rate_limited`` when it asks to slow down.
     """
@@ -113,11 +119,11 @@ class PlexTv(Protocol):
         """Return the PIN's token once it was approved, else ``None``."""
         ...
 
-    async def account(self, token: str) -> PlexAccount:
+    async def account(self, token: str, client_id: str) -> PlexAccount:
         """Return the account a token belongs to."""
         ...
 
-    async def resources(self, token: str) -> list[PlexResource]:
+    async def resources(self, token: str, client_id: str) -> list[PlexResource]:
         """Return the resources this token may reach."""
         ...
 
@@ -129,6 +135,8 @@ class PlexTv(Protocol):
         """
         ...
 
-    async def shared_users(self, owner_token: str, machine_id: str) -> list[PlexAccount]:
+    async def shared_users(
+        self, owner_token: str, machine_id: str, client_id: str
+    ) -> list[PlexAccount]:
         """Return the accounts this server is shared with (the hourly sync)."""
         ...
