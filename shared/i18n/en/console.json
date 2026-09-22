@@ -75,7 +75,8 @@
         "unreachable": "The server could not be reached",
         "unexpected_response": "Unexpected answer",
         "unsupported_version": "Unsupported version",
-        "not_configured": "Not configured"
+        "not_configured": "Not configured",
+        "unknown": "Configured, not tested here"
       },
       "plex": {
         "start": "Link the owner's Plex account",
@@ -93,7 +94,8 @@
       "help": "The address phones use to reach this server. It is checked before it is saved, and it is what pairing QR codes point to.",
       "label": "Public address",
       "suggestion": "Use this browser's address ({{origin}})",
-      "skip": "Set it later",
+      "checking": "Asking that address whether it reaches this server…",
+        "skip": "Set it later",
       "done": "Setup finished."
     }
   },
@@ -102,7 +104,8 @@
     "general": "General",
     "name": "Server name",
     "publicUrl": "Public address",
-    "publicUrlHint": "Origin the phones reach this server at, used in pairing QR codes.",
+    "publicUrlHint": "Origin the phones reach this server at, used in pairing QR codes. It is checked before it is saved.",
+      "publicUrlChecking": "Asking that address whether it reaches this server…",
     "passwordSignIn": "Password sign-in",
     "passwordSignInOption": {
       "enabled": "Allowed",
@@ -186,6 +189,7 @@
     "help": "Every device signed in with your account.",
     "empty": "No other session.",
     "current": "This browser",
+    "unnamed": "Unnamed device",
     "kind": { "web": "Console", "mobile": "App" },
     "created": "Signed in {{date}}",
     "lastSeen": "Last seen {{date}}",

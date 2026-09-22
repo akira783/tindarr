@@ -940,7 +940,13 @@ export interface paths {
          */
         put: operations["saveConnector"];
         post?: never;
-        /** Remove an optional connector (omdb, requests) */
+        /**
+         * Remove an optional connector (omdb, requests)
+         * @description Only the optional connectors can be removed. `media_server` is not one of
+         *     them: a Tindarr without a media server signs nobody in, so it is repointed
+         *     with `PUT` instead (`409` `media_server_required`). In step 2 the optional
+         *     connectors do not exist yet and answer `404`.
+         */
         delete: operations["deleteConnector"];
         options?: never;
         head?: never;
@@ -1138,7 +1144,7 @@ export interface components {
              *       public_url_unverified;
              *     - connectors: connector_unreachable, connector_unauthorized,
              *       connector_unexpected_response, media_server_unsupported,
-             *       secret_required;
+             *       media_server_required, secret_required;
              *     - swipe and admin: last_admin, streaming_region_not_set,
              *       metadata_unreachable, llm_not_configured, tmdb_not_configured,
              *       llm_auth_failed, llm_quota, llm_model_not_found, llm_unreachable,
@@ -1180,7 +1186,8 @@ export interface components {
             setup_required: boolean;
             media_server?: null | {
                 kind: components["schemas"]["MediaServerKind"];
-                name?: string;
+                /** @description What the media server calls itself, read at the last successful connection test; null while it is unknown. */
+                name?: string | null;
             };
             /**
              * @description Ways to sign in for this caller (docs/auth.md, section 11). Empty while
@@ -1225,6 +1232,17 @@ export interface components {
             media_server_locked: boolean;
             /** @description `MediaServerConfigInput` fields set by environment variables (`server_type`, `url`, `api_key`, `verify_tls`). */
             locked_fields: string[];
+            /**
+             * @description The values the environment forces on `locked_fields`, so the wizard can
+             *     show them and send them back unchanged in `PUT /setup/media-server`. A
+             *     locked `api_key` is never returned: `locked_fields` says it is set, and
+             *     the field is left empty in the form.
+             */
+            locked_values: {
+                server_type: null | components["schemas"]["MediaServerKind"];
+                url: string | null;
+                verify_tls: boolean | null;
+            };
             /**
              * @description Methods the administrator can use to complete setup: the rules of
              *     `ServerInfo.auth_methods` for this caller, without `pairing`. Empty until
@@ -1357,6 +1375,11 @@ export interface components {
             confirmation_code?: null | components["schemas"]["ConfirmationCode"];
             /** @description The session the pairing opened. */
             session_id?: string | null;
+            /**
+             * @description How long to wait before reading this pairing again; null once it is `completed`, `expired` or `revoked` and nothing more will happen.
+             * @example 2000
+             */
+            retry_after_ms?: number | null;
         };
         NewPairing: components["schemas"]["Pairing"] & {
             code: components["schemas"]["PairingCode"];
@@ -1425,9 +1448,11 @@ export interface components {
             id: string;
             /** @enum {string} */
             kind: "mobile" | "web";
-            device_name: string;
-            platform: string;
-            app_version?: string;
+            /** @description The app's `DeviceInput.name`, or the browser a web session was opened from ("Firefox on Linux"). Null only for a row written without either. */
+            device_name: string | null;
+            /** @description `android`, `ios`, or `web` for a console session. */
+            platform: string | null;
+            app_version?: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -1658,18 +1683,34 @@ export interface components {
         MediaServerKind: "jellyfin" | "emby" | "plex";
         /** @enum {string} */
         ConnectorKind: "media_server" | "requests" | "tmdb" | "omdb" | "llm";
-        /** @enum {string} */
-        ConnectorHealth: "ok" | "unauthorized" | "unreachable" | "unexpected_response" | "unsupported_version" | "not_configured";
+        /**
+         * @description Coarse result of the last check, never a remote response body.
+         *     `not_configured`: nothing is stored for this connector. `unknown`: it is
+         *     configured but the answer did not test it — `GET /admin/connectors` never
+         *     calls a remote service, so the console asks with
+         *     `POST /admin/connectors/{kind}/test`.
+         * @enum {string}
+         */
+        ConnectorHealth: "ok" | "unauthorized" | "unreachable" | "unexpected_response" | "unsupported_version" | "not_configured" | "unknown";
         ConnectorStatus: {
             health: components["schemas"]["ConnectorHealth"];
             server_name?: string | null;
             server_version?: string | null;
-            /** Format: date-time */
-            checked_at?: string;
+            /**
+             * Format: date-time
+             * @description Null when this answer did not test the connector.
+             */
+            checked_at?: string | null;
         };
         /** @description A stored secret is never returned; only whether it is set. */
         SecretState: {
             set: boolean;
+            /**
+             * @description Last four characters of the stored secret, so an administrator can tell
+             *     two keys apart. Null when showing them would help nobody: a Plex
+             *     connector holds the owner's **account** token, of which there is only
+             *     ever one, so it is masked entirely.
+             */
             last4?: string | null;
             /** @description Set by an environment variable. */
             locked?: boolean;
@@ -1694,8 +1735,8 @@ export interface components {
             api_key?: string;
             /** @description Plex only. A completed Plex PIN of purpose `owner_token` from this session; the owner token is taken from it. */
             plex_pin_id?: components["schemas"]["Handle"];
-            /** @default true */
-            verify_tls: boolean;
+            /** @description Verify the media server's TLS certificate. Omitted means true, and must be omitted when `verify_tls` is locked by the environment. */
+            verify_tls?: boolean;
         };
         /** @enum {string} */
         LlmProviderKind: "openai" | "anthropic" | "gemini" | "mistral" | "openai_compatible" | "ollama";
@@ -2390,7 +2431,7 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description `setup_required`, `plex_tv_unreachable` or `media_server_changed`. */
+            /** @description `setup_required`, `plex_tv_unreachable`, `media_server_unreachable` (the Plex server's own identity is re-read before the sign-in uses it, docs/auth.md section 6) or `media_server_changed`. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -2852,7 +2893,7 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description `setup_required`, `plex_tv_unreachable` or `media_server_changed`. */
+            /** @description `setup_required`, `plex_tv_unreachable`, `media_server_unreachable` (the Plex server's own identity is re-read before the sign-in uses it, docs/auth.md section 6) or `media_server_changed`. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -3827,7 +3868,16 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["AdminForbidden"];
-            /** @description `setting_locked` (the connector is set by environment variables). */
+            /** @description `not_found`: a connector kind not implemented yet (step 2: every kind but `media_server`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description `setting_locked` (the connector is set by environment variables) or `media_server_required` (the media server connector cannot be removed). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -3864,7 +3914,15 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["AdminForbidden"];
+            /** @description `admin_required`, `plex_owner_required` (the PIN's account does not own that Plex server), `csrf_failed` or `remote_access_denied`. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description `not_found`: a connector kind not implemented yet (step 2: every kind but `media_server`). */
             404: {
                 headers: {

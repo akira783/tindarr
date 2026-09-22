@@ -75,7 +75,8 @@
         "unreachable": "Le serveur est injoignable",
         "unexpected_response": "Réponse inattendue",
         "unsupported_version": "Version non prise en charge",
-        "not_configured": "Non configuré"
+        "not_configured": "Non configuré",
+        "unknown": "Configuré, non testé ici"
       },
       "plex": {
         "start": "Lier le compte Plex propriétaire",
@@ -93,7 +94,8 @@
       "help": "L'adresse que les téléphones utilisent pour joindre ce serveur. Elle est vérifiée avant d'être enregistrée et sert aux QR codes d'appairage.",
       "label": "Adresse publique",
       "suggestion": "Utiliser l'adresse de ce navigateur ({{origin}})",
-      "skip": "Plus tard",
+      "checking": "Vérification : cette adresse joint-elle ce serveur ?",
+        "skip": "Plus tard",
       "done": "Installation terminée."
     }
   },
@@ -102,7 +104,8 @@
     "general": "Général",
     "name": "Nom du serveur",
     "publicUrl": "Adresse publique",
-    "publicUrlHint": "Origine par laquelle les téléphones joignent ce serveur, utilisée dans les QR codes d'appairage.",
+    "publicUrlHint": "Origine par laquelle les téléphones joignent ce serveur, utilisée dans les QR codes d'appairage. Elle est vérifiée avant d'être enregistrée.",
+      "publicUrlChecking": "Vérification : cette adresse joint-elle ce serveur ?",
     "passwordSignIn": "Connexion par mot de passe",
     "passwordSignInOption": {
       "enabled": "Autorisée",
@@ -186,6 +189,7 @@
     "help": "Tous les appareils connectés avec votre compte.",
     "empty": "Aucune autre session.",
     "current": "Ce navigateur",
+    "unnamed": "Appareil sans nom",
     "kind": { "web": "Console", "mobile": "Application" },
     "created": "Connecté le {{date}}",
     "lastSeen": "Vu le {{date}}",

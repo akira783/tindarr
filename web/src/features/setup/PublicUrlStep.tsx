@@ -39,6 +39,7 @@ export function PublicUrlStep({ onFinish }: { onFinish: () => void }): ReactNode
       <Alert kind="success">{t("setup.publicUrl.done")}</Alert>
       <p>{t("setup.publicUrl.help")}</p>
       <ErrorAlert error={error} />
+      {busy && <Alert kind="info">{t("setup.publicUrl.checking")}</Alert>}
       <form onSubmit={submit} className="flow">
         <TextField
           label={t("setup.publicUrl.label")}

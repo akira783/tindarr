@@ -30,6 +30,8 @@ export interface AuthContextValue {
   setupJustCompleted: boolean;
   clearSetupJustCompleted: () => void;
   adoptSession: (session: WebSession) => void;
+  /** Re-reads `GET /server/info`; the sign-in page calls it every time it is shown. */
+  refreshServerInfo: () => void;
   signOut: () => Promise<void>;
 }
 
@@ -93,6 +95,13 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
     [queryClient],
   );
 
+  const refreshServerInfo = useCallback(() => {
+    // `auth_methods` gains `quick_connect` only once the background probe has read
+    // `GET /QuickConnect/Enabled`, 15 s after a restart: a console loaded in those
+    // first seconds would otherwise offer only a password until it is reloaded.
+    void queryClient.invalidateQueries({ queryKey: SERVER_INFO_KEY });
+  }, [queryClient]);
+
   const signOut = useCallback(async () => {
     try {
       await logout();
@@ -125,9 +134,10 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
         setSetupJustCompleted(false);
       },
       adoptSession,
+      refreshServerInfo,
       signOut,
     }),
-    [state, info.data, setupJustCompleted, adoptSession, signOut],
+    [state, info.data, setupJustCompleted, adoptSession, refreshServerInfo, signOut],
   );
 
   return <AuthContext value={value}>{children}</AuthContext>;

@@ -151,4 +151,23 @@ describe("signing in to the console", () => {
       ),
     ).toBeInTheDocument();
   });
+
+  it("reads the sign-in methods again every time the page is shown", async () => {
+    // Quick Connect only appears once the background probe has answered, which is
+    // 15 s after a restart: a console loaded before that must not stay stuck on
+    // "password only" until it is reloaded (docs/auth.md, section 11).
+    let methods: ("password" | "quick_connect")[] = ["password"];
+    const api = new MockApi()
+      .on("GET", "/api/v1/server/info", () => ok(fixtures.serverInfo({ auth_methods: methods })))
+      .on("GET", "/api/v1/auth/web/session", () => problem(401, "unauthorized"));
+
+    const { unmount } = renderApp({ api, route: "/sign-in" });
+    await screen.findByLabelText("User name");
+    expect(screen.queryByRole("tab", { name: "Quick Connect" })).toBeNull();
+    unmount();
+
+    methods = ["password", "quick_connect"];
+    renderApp({ api, route: "/sign-in" });
+    expect(await screen.findByRole("tab", { name: "Quick Connect" })).toBeInTheDocument();
+  });
 });

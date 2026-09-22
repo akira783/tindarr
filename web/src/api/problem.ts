@@ -57,6 +57,7 @@ export const PROBLEM_CODES = [
   "connector_unauthorized",
   "connector_unexpected_response",
   "media_server_unsupported",
+  "media_server_required",
   "secret_required",
   // swipe and admin
   "last_admin",

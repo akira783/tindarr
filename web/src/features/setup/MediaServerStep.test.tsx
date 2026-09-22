@@ -110,4 +110,39 @@ describe("the media server step", () => {
       expect(api.callsTo("PUT", "/api/v1/setup/media-server")).toHaveLength(1);
     });
   });
+
+  it("starts from the values the environment locks, and does not send them back", async () => {
+    const user = userEvent.setup();
+    const saved = vi.fn();
+    const api = new MockApi()
+      .on("GET", "/api/v1/server/info", () => ok(fixtures.serverInfo()))
+      .on("GET", "/api/v1/auth/web/session", () => ok(fixtures.setupSession()))
+      .on("PUT", "/api/v1/setup/media-server", (call) => {
+        // `server_type` and `url` are the locked values, `verify_tls` is left out.
+        expect(call.body).toEqual({
+          connector: "media_server",
+          server_type: "emby",
+          url: "http://emby.lan:8096",
+        });
+        return ok({ health: "ok", server_name: "Home Emby", checked_at: "2026-09-22T10:00:00Z" });
+      });
+
+    renderWithProviders(
+      <MediaServerStep
+        state={fixtures.setupState({
+          locked_fields: ["server_type", "url", "api_key", "verify_tls"],
+          locked_values: { server_type: "emby", url: "http://emby.lan:8096", verify_tls: true },
+        })}
+        onSaved={saved}
+      />,
+      { api },
+    );
+
+    expect(await screen.findByLabelText(/Address/)).toHaveValue("http://emby.lan:8096");
+    await user.click(screen.getByRole("button", { name: "Test and save" }));
+
+    await waitFor(() => {
+      expect(saved).toHaveBeenCalledTimes(1);
+    });
+  });
 });

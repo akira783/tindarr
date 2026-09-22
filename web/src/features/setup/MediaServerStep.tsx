@@ -26,10 +26,15 @@ export function MediaServerStep({
   onSaved: (status: ConnectorStatus) => void;
 }): ReactNode {
   const { t } = useTranslation(["console", "common"]);
-  const [kind, setKind] = useState<MediaServerKind>(state.media_server?.kind ?? "jellyfin");
-  const [url, setUrl] = useState("");
+  // A locked field cannot be given another value, so the wizard starts from the value
+  // the environment forces and shows it read-only (`SetupState.locked_values`).
+  const forced = state.locked_values;
+  const [kind, setKind] = useState<MediaServerKind>(
+    forced.server_type ?? state.media_server?.kind ?? "jellyfin",
+  );
+  const [url, setUrl] = useState(forced.url ?? "");
   const [apiKey, setApiKey] = useState("");
-  const [verifyTls, setVerifyTls] = useState(true);
+  const [verifyTls, setVerifyTls] = useState(forced.verify_tls ?? true);
   const [owner, setOwner] = useState<OwnerToken | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [status, setStatus] = useState<ConnectorStatus | null>(null);
@@ -54,10 +59,9 @@ export function MediaServerStep({
     setStatus(null);
     setBusy(true);
 
-    // `verify_tls` has a default in the contract, so the generated type makes it
-    // required; a field locked by the environment must not be sent with another
-    // value, hence the narrower body type here.
-    const body = {
+    // A field the environment locks is left out rather than echoed back: the server
+    // refuses any other value, and an omitted one keeps what it already holds.
+    const body: MediaServerConfigInput = {
       connector: "media_server",
       server_type: kind,
       url,
@@ -71,7 +75,7 @@ export function MediaServerStep({
           : { api_key: apiKey }),
     };
 
-    saveSetupMediaServer(body as MediaServerConfigInput)
+    saveSetupMediaServer(body)
       .then((result) => {
         setStatus(result);
         onSaved(result);

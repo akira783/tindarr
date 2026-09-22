@@ -50,11 +50,12 @@ export function SessionsPage(): ReactNode {
           {(sessions.data ?? []).map((session) => (
             <li key={session.id} className="card">
               <p className="session-name">
-                {session.device_name}
+                {session.device_name ?? t("sessions.unnamed")}
                 {session.current && <span className="badge">{t("sessions.current")}</span>}
               </p>
               <p className="hint">
-                {t(`sessions.kind.${session.kind}`)} · {session.platform}
+                {t(`sessions.kind.${session.kind}`)}
+                {session.platform != null && ` · ${session.platform}`}
               </p>
               <p className="hint">
                 {t("sessions.created", { date: formatDateTime(session.created_at, i18n.language) })}
@@ -104,7 +105,9 @@ export function SessionsPage(): ReactNode {
         message={
           confirm?.current === true
             ? t("sessions.revokeCurrentWarning")
-            : t("sessions.revokeConfirm", { device: confirm?.device_name ?? "" })
+            : t("sessions.revokeConfirm", {
+                device: confirm?.device_name ?? t("sessions.unnamed"),
+              })
         }
         onCancel={() => {
           setConfirm(null);

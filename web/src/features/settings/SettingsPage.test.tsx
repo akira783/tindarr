@@ -109,4 +109,37 @@ describe("the server settings", () => {
     });
     expect(api.callsTo("PATCH", "/api/v1/admin/settings")).toHaveLength(2);
   });
+
+  it("says why an unverified public address was refused", async () => {
+    const user = userEvent.setup();
+    const api = signedIn()
+      .on("GET", "/api/v1/admin/settings", () => ok(fixtures.settings({ public_url: null })))
+      .on("PATCH", "/api/v1/admin/settings", (call) => {
+        expect(call.body).toEqual({ public_url: "https://elsewhere.example" });
+        return problem(409, "public_url_unverified", { reason: "redirected" });
+      });
+
+    renderApp({ api, route: "/settings" });
+
+    const field = await screen.findByLabelText("Public address");
+    await user.type(field, "https://elsewhere.example");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "That address did not answer as this server (redirected elsewhere).",
+    );
+  });
+
+  it("asks a promoted admin to leave the media server settings alone", async () => {
+    const api = signedIn(
+      fixtures.webSession({
+        user: { id: "u9", name: "Bo", role: "admin", media_server_admin: false },
+      }),
+    ).on("GET", "/api/v1/admin/settings", () => ok(fixtures.settings()));
+
+    renderApp({ api, route: "/settings" });
+
+    expect(await screen.findByLabelText("Public address")).toBeDisabled();
+    expect(screen.getByLabelText("Password sign-in")).toBeDisabled();
+  });
 });

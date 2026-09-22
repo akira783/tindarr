@@ -85,6 +85,7 @@
     "connector_unauthorized": "The key or token was refused.",
     "connector_unexpected_response": "The answer did not look like the expected server.",
     "media_server_unsupported": "That server is not supported: check the type, and use Jellyfin 10.10 or newer.",
+    "media_server_required": "The media server connector cannot be removed; point it at another server instead.",
     "secret_required": "Enter the key again after changing the address.",
     "last_admin": "There has to be at least one enabled administrator.",
     "streaming_region_not_set": "Set the streaming region first.",

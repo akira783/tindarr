@@ -47,6 +47,7 @@ export function setupState(overrides: Partial<Schemas["SetupState"]> = {}): Sche
     media_server: null,
     media_server_locked: false,
     locked_fields: [],
+    locked_values: { server_type: null, url: null, verify_tls: null },
     auth_methods: [],
     ...overrides,
   };
@@ -105,6 +106,7 @@ export function newPairing(overrides: Partial<Schemas["NewPairing"]> = {}): Sche
     status: "pending",
     created_at: "2026-09-22T10:00:00Z",
     expires_at: "2126-09-22T10:05:00Z",
+    retry_after_ms: 2000,
     code: "q7Xc0vW2dYk9LmN4pRs6Tu",
     link: `tindarr://pair?server=${encodeURIComponent("https://tindarr.example.com")}&code=q7Xc0vW2dYk9LmN4pRs6Tu`,
     ...overrides,
@@ -112,11 +114,14 @@ export function newPairing(overrides: Partial<Schemas["NewPairing"]> = {}): Sche
 }
 
 export function pairing(overrides: Partial<Schemas["Pairing"]> = {}): Schemas["Pairing"] {
+  const status = overrides.status ?? "pending";
   return {
     id: "pair-1",
-    status: "pending",
+    status,
     created_at: "2026-09-22T10:00:00Z",
     expires_at: "2126-09-22T10:05:00Z",
+    // As the server does: null once nothing more can happen, so the console stops.
+    retry_after_ms: ["completed", "expired", "revoked"].includes(status) ? null : 2000,
     ...overrides,
   };
 }

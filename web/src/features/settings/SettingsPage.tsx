@@ -133,6 +133,11 @@ function SettingsForm({ settings: current }: { settings: ServerSettings }): Reac
     <main id="main" className="page">
       <h1>{t("settings.title")}</h1>
       <ErrorAlert error={save.error} />
+      {/* The server calls that address before storing it, which can take a few
+          seconds; saying so keeps the wait from looking like a stuck form. */}
+      {save.isPending && form.publicUrl !== toForm(current).publicUrl && (
+        <Alert kind="info">{t("settings.publicUrlChecking")}</Alert>
+      )}
       {saved && <Alert kind="success">{t("settings.saved")}</Alert>}
       <form onSubmit={submit} className="flow">
         <section className="card">

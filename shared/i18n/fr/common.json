@@ -85,6 +85,7 @@
     "connector_unauthorized": "La clé ou le jeton a été refusé.",
     "connector_unexpected_response": "La réponse ne ressemble pas au serveur attendu.",
     "media_server_unsupported": "Ce serveur n'est pas pris en charge : vérifiez le type, et utilisez Jellyfin 10.10 ou plus récent.",
+    "media_server_required": "Le connecteur du serveur multimédia ne peut pas être supprimé ; pointez-le vers un autre serveur.",
     "secret_required": "Saisissez de nouveau la clé après avoir changé l'adresse.",
     "last_admin": "Il doit rester au moins un administrateur actif.",
     "streaming_region_not_set": "Définissez d'abord la région de streaming.",

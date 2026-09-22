@@ -15,8 +15,9 @@ import { Alert, Button, ErrorAlert } from "../../components/ui";
 import { secondsUntil } from "../../lib/format";
 import { isLikelyPhone, pairingHost } from "../../lib/url";
 
-const POLL_MS = 2000;
-const FINAL: Pairing["status"][] = ["completed", "expired", "revoked"];
+//: Used only until the first answer arrives; after that the server says how long to
+//: wait, and `retry_after_ms` is null once nothing more can happen.
+const FIRST_POLL_MS = 2000;
 
 /**
  * "Connect a phone" (docs/auth.md, section 9): the QR code is drawn as SVG
@@ -40,9 +41,14 @@ export function ConnectPhonePage(): ReactNode {
     queryFn: () => getPairing(pairing?.id ?? ""),
     enabled: pairing !== null,
     retry: false,
-    // Polling stops as soon as the pairing reached a final state.
-    refetchInterval: (query) =>
-      query.state.data !== undefined && FINAL.includes(query.state.data.status) ? false : POLL_MS,
+    // The server decides the rhythm and says when to stop: `retry_after_ms` is null
+    // once the pairing is completed, expired or revoked. Not knowing yet (no answer
+    // yet) and knowing there is nothing left to wait for are different things.
+    refetchInterval: (query) => {
+      const answer = query.state.data;
+      if (answer === undefined) return FIRST_POLL_MS;
+      return answer.retry_after_ms ?? false;
+    },
   });
 
   const approve = useMutation({

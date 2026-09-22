@@ -119,4 +119,21 @@ describe("connecting a phone", () => {
       "An administrator of the media server has to set the public address first.",
     );
   });
+
+  it("stops polling once the server says nothing more will happen", async () => {
+    const user = userEvent.setup();
+    const api = pairingApi()
+      .on("POST", "/api/v1/pairings", () => ok(fixtures.newPairing(), 201))
+      .on("GET", "/api/v1/pairings/{pairing_id}", () =>
+        ok(fixtures.pairing({ status: "revoked" })),
+      );
+
+    renderApp({ api, route: "/connect-phone" });
+    await user.click(await screen.findByRole("button", { name: "Create a QR code" }));
+    await screen.findByText("This request was cancelled.");
+
+    const polls = api.callsTo("GET", "/api/v1/pairings/{pairing_id}").length;
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    expect(api.callsTo("GET", "/api/v1/pairings/{pairing_id}")).toHaveLength(polls);
+  });
 });
