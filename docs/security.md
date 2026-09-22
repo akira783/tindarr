@@ -14,51 +14,102 @@ the app.
 | Watch history, votes, taste profile | server DB | Privacy |
 | Access / refresh tokens | app secure storage, hashed on server | Account takeover |
 | Web session cookie | browser (`HttpOnly`), hashed on server | Account takeover; admin rights for an admin |
-| Setup code, setup session | server logs and `data/setup-code`; cookie | Claim of an unconfigured server |
-| Pairing codes | QR code on screen, hashed on server, 5 min | Account takeover |
+| Setup code, setup session | `data/setup-code` (never logged); cookie | Claim of an unconfigured server |
+| Pairing codes | QR code on screen, hashed on server, 5 min | Account takeover (only after console approval) |
+| Plex PIN and Quick Connect handles | client memory, server memory | Someone else's sign-in, or the Plex owner token |
 | Media server passwords | never stored | Account takeover on the media server |
+| Media server accounts' availability | media server | Lockout of real users, admins included |
 
 ## Adversaries and mitigations
 
 ### 1. Internet attacker against an exposed server
 
-- **Unclaimed fresh install.** The server starts in setup mode and prints a one-time
-  **setup code** to its logs, and writes it to `data/setup-code` with mode 0600. The
-  code is random, at least 60 bits (12 base32 characters), and claim attempts are
-  rate-limited per IP and globally, so it cannot be brute-forced. The code is entered
-  in the web console, which exchanges it for a setup session (cookie, 30 minutes).
-  Every setup endpoint requires that session, so the first stranger to find the URL
-  cannot claim the instance. The code expires as soon as setup completes
-  ([ADR 0004](adr/0004-authentication.md), [ADR 0009](adr/0009-web-console-and-phone-pairing.md)).
-  The app never handles the setup code.
-- **Credential stuffing.** The login rate limit applies per IP and per username, with
-  exponential backoff. Errors are identical for an unknown user and a wrong password.
-  The media server enforces its own lockout too.
+The exact rules and numbers for this section are in
+[the authentication reference](auth.md).
+
+- **Spoofed client address.** Behind a reverse proxy, every request comes from the
+  proxy's private address. `X-Forwarded-For` and `X-Forwarded-Proto` are honoured only
+  from `TINDEERR_TRUSTED_PROXIES`, and the client IP is the rightmost untrusted hop, so a
+  client cannot pick its own address to escape rate limits, look "private" or fake
+  HTTPS. Without that setting behind a proxy, all clients share the proxy's address:
+  limits get stricter, never looser, and the server logs a hint. "Private network" is
+  decided on the resolved client IP, from IP ranges only.
+- **DNS rebinding.** A web page on an attacker's domain that resolves to the server's
+  LAN address would reach the console with the attacker's name in `Host`. Every request
+  must carry an allowed `Host` (IP literal, `localhost`, `TINDEERR_ALLOWED_HOSTS`, the
+  host of `public_url`), otherwise `host_not_allowed`; the expected `Origin` is built from
+  that validated host.
+- **Unclaimed fresh install.** The server starts in setup mode and writes a one-time
+  **setup code** to `data/setup-code` (mode 0600). Its logs only give the file's path,
+  never the code, so logs shipped to a log viewer do not leak it. The code is random,
+  60 bits, and claims are limited per IP (plus a global slowdown), so it cannot be
+  brute-forced. The console exchanges it for a setup session (its own cookie,
+  30 minutes). **There is only one active setup session:** a new claim revokes the
+  previous one. Setup completes only when a media server administrator signs in from
+  the browser holding that setup session; the setup session is then revoked and a new
+  web session issued. The code stops working at completion
+  ([ADR 0011](adr/0011-hardening-after-the-pre-step-2-review.md)). The app never
+  handles the setup code.
+- **Credential stuffing.** Failed password sign-ins are limited per client IP, with an
+  exponential pause. Errors are identical for an unknown user and a wrong password.
+- **Locking real users out through Tindeerr.** Jellyfin disables an account after a few
+  failed logins, and failures sent through Tindeerr count, even for a Jellyfin server
+  that is only reachable on the LAN. Tindeerr forwards at most 2 failures per
+  case-folded username per 15 minutes (below Jellyfin's default of 3), then pauses that
+  username without contacting the media server. The pause ends on its own: it is never
+  a lock an attacker can hold on the admin. Jellyfin's counter only resets on a
+  successful login, so a patient attacker can still lock an account over hours; an
+  admin can therefore restrict password sign-in to the LAN or turn it off
+  (`password_sign_in`), leaving Quick Connect, Plex PIN and pairing.
+- **Remote-access bypass.** A Jellyfin or Emby user may be barred from remote access,
+  but the media server only sees Tindeerr's LAN address. Tindeerr enforces the policy
+  itself: such a user is refused whenever the resolved client IP is not private, at
+  sign-in and on every request.
 - **Token theft in transit.** HTTPS is expected. Plain HTTP is accepted by the app only
-  for private and link-local addresses and `.local` names, after an explicit warning.
+  for private IP literals, `localhost` and `.local` names, after an explicit warning.
   The console refuses to sign in over plain HTTP (`https_required`), except on
-  `localhost` or when the operator sets `TINDEERR_ALLOW_HTTP_CONSOLE=true`, which only
-  applies to requests from private and link-local addresses and is logged at startup.
-- **Forged or replayed tokens.** Access tokens are JWTs, short-lived (15 min), signed
-  with a server key and carrying a session id. Refresh tokens are opaque (256 bits) and
-  stored as SHA-256 hashes. They rotate on every use: presenting a refresh token that
-  was already used revokes the whole session (reuse detection). There is no grace
-  period, even for a reuse a second after rotation. The app must therefore refresh
-  single-flight (one refresh in flight, other requests wait for it); this is tested
-  in the app ([ADR 0010](adr/0010-roles-and-refresh-tokens.md)).
+  `localhost` from the same machine, or when the operator sets
+  `TINDEERR_ALLOW_HTTP_CONSOLE=true`, which only applies to private client IPs and is
+  logged at startup.
+- **Forged or replayed tokens.** Access tokens are JWTs (HS256 with a dedicated derived
+  key, required `typ`, `kid`, `iss` and `aud`), valid 15 minutes and carrying a session
+  id. Refresh tokens are opaque (256 bits) and stored as SHA-256 hashes. They rotate on
+  every use through an atomic compare-and-set: presenting a refresh token that was
+  already used revokes the whole session (reuse detection). There is no grace period,
+  even for a reuse a second after rotation. The app must therefore refresh
+  single-flight; this is tested in the app
+  ([ADR 0010](adr/0010-roles-and-refresh-tokens.md)).
+- **Stale access.** Every authenticated request loads its session and its user, so a
+  revoked session or a disabled user stops working at once. Sessions have absolute
+  lifetimes (app 90 days, web 7 days). An hourly sync with the media server disables
+  users removed or disabled there and removes the admin flag from users who lost it
+  there.
 - **Surface.** Only `/healthz`, `/api/v1/server/info`, the sign-in endpoints
   (password, Plex PIN, Quick Connect, for the app and the console), the pairing
-  preview and exchange, token refresh and the setup claim are public, plus the
-  console's static files. `server/info` returns no user data and no internal URLs.
-  Every public endpoint is rate-limited per IP.
+  preview, request and completion, token refresh and the setup claim are public, plus
+  the console's static files. `server/info` returns no user data and no internal URLs.
+  Every public endpoint is rate-limited per client IP. Global thresholds only slow
+  requests down, so an attacker cannot block legitimate use; the only global refusal is
+  a memory cap on outstanding sign-in handles.
 - **Plex PIN and Quick Connect hijacking.** The `pin_id` or `handle` a client polls
-  with is a random server-side handle (at least 128 bits), not the plex.tv PIN id or
-  the Jellyfin Quick Connect secret, and it works once. Guessing it to catch someone
-  else's sign-in is not practical.
-- **Pairing code brute force.** Pairing codes have at least 128 bits, live 5
-  minutes, work once and are stored hashed. `POST /auth/pair` and its preview are
-  rate-limited per IP and globally. Unknown, used, expired and revoked codes get the
-  same answer (`pairing_expired`).
+  with is a random server-side handle (128 bits), not the plex.tv PIN id or the
+  Jellyfin Quick Connect secret. It is bound to its purpose (sign-in, re-authentication
+  or owner token) and to whoever started it: a pre-auth cookie for the console, a PKCE
+  verifier for the app, the session for the others. A leaked handle is useless to
+  anyone else.
+- **Plex resource spoofing.** plex.tv lists servers as they describe themselves. The
+  configured server is identified by the `machineIdentifier` read from its own
+  `/identity` at setup; a sign-in is accepted only if the user's plex.tv resources
+  include that exact identifier, and admin only if `owned` on it. Users are keyed by
+  plex.tv account id, never by name or email. The owner token must come from the account
+  that owns that server.
+- **Pairing code brute force.** Pairing codes have 128 bits, live 5 minutes, work once
+  and are stored hashed; the preview, request and completion are rate-limited per IP.
+  Unknown, used, expired and revoked codes get the same answer (`pairing_expired`), and
+  the preview only returns what the app must display.
+- **Exposure.** Docker's published ports bypass host firewalls such as ufw. The example
+  compose file publishes the port on `127.0.0.1` only, for a reverse proxy on the same
+  host; publishing it on the LAN is a deliberate change.
 
 ### 2. Another user of the same server
 
@@ -78,8 +129,8 @@ the app.
 - **Admin rights.** A user is admin when the media server says so at their last
   sign-in (re-read at every sign-in) or when a Tindeerr admin promoted them
   ([ADR 0010](adr/0010-roles-and-refresh-tokens.md)). Someone removed as administrator
-  on the media server loses Tindeerr admin at their next sign-in, unless promoted
-  here. A demotion done only in Tindeerr lasts until that media server
+  on the media server loses Tindeerr admin within the hour (sync) or at their next
+  sign-in, unless promoted here. A demotion done only in Tindeerr lasts until that media server
   administrator's next sign-in, and only a media server administrator can demote or
   disable another one, so a promoted admin cannot lock them out. The last enabled
   admin cannot be demoted or disabled. The role is checked in the database on every
@@ -87,16 +138,28 @@ the app.
   are masked: `set` + last 4 characters, never the value), change connectors or run
   connection tests, and only from the web console: a bearer token from a phone is
   refused on admin endpoints.
+- **Repointing the media server.** Whoever controls the media server connector sees
+  every user's password at their next sign-in, and decides who is a media server
+  administrator. Only a media server administrator can change it, and only after
+  re-authenticating on the **current** media server in the last 5 minutes, so neither a
+  promoted admin nor a stolen admin cookie can do it. Credentials are never sent to the
+  new URL before it is saved. If the new server is a different one (its id or Plex
+  `machineIdentifier` differs), every session is revoked and every user unlinked. If
+  the configured address starts answering with another identity, sign-ins stop until an
+  admin or the operator acts.
 
 ### 3. Stolen or lost phone
 
 - Tokens live in the Android Keystore through `expo-secure-store`. They are never
   written to logs, crash reports or backups (`allowBackup=false`).
-- Each device is a separate session. Users can list and revoke their sessions (from
-  the app or the console), and admins can revoke all of a user's sessions.
-- A phone's token cannot reach admin or pairing endpoints, so a stolen phone of an
-  admin cannot change connectors or pair another device.
-- Refresh tokens expire after 60 days of inactivity.
+- Each device is a separate session. Users can list their sessions from the app or the
+  console, and revoke them from the console; admins can revoke all of a user's
+  sessions.
+- A phone's token cannot reach admin, pairing or account-deletion endpoints, nor revoke
+  other sessions, so a stolen phone cannot change connectors, pair another device,
+  delete the owner's data or sign the owner out of the console.
+- Refresh tokens expire after 60 days of inactivity, and every app session after
+  90 days.
 
 ### 4. Attacks through the browser against the web console
 
@@ -111,40 +174,69 @@ the app.
 - **Cookie.** `__Host-tindeerr_session`: `Secure`, `HttpOnly`, `SameSite=Strict`,
   `Path=/`, no `Domain`, so a sibling subdomain cannot set or read it. It holds an
   opaque 256-bit token stored hashed. Web sessions expire after 24 h idle and 7 days
-  after sign-in.
+  after sign-in. The setup session uses a separate cookie, `__Host-tindeerr_setup`, and
+  console sign-in handles a pre-auth cookie, `__Host-tindeerr_preauth`, with the same
+  flags.
 - **CSRF.** Three layers: `SameSite=Strict`; a CSRF token bound to the server-side
   session, sent as `X-CSRF-Token` on every `POST`, `PUT`, `PATCH` and `DELETE` and
-  compared in constant time; and an `Origin` check (the server's own origin or
-  `public_url`, a missing `Origin` is refused). The web sign-in endpoints and the
+  compared in constant time; and an `Origin` check (the server's own origin, built
+  from an allowed `Host`; a missing `Origin` is refused). The web sign-in endpoints and the
   setup claim check `Origin` too, against login CSRF. Requests authenticated by a
   bearer header skip the CSRF check (a browser never adds that header by itself),
-  and then the cookie is ignored. CORS is disabled.
+  and then every cookie is ignored; a console endpoint then answers `401`. CORS is
+  disabled.
 - **Clickjacking.** `frame-ancestors 'none'` and `X-Frame-Options: DENY`.
 - **Caching.** API responses are `no-store`; so is `index.html`. Only hashed static
-  assets are cached.
+  assets under `/assets/` are cached (immutable).
+- **Libraries under the CSP.** The console may not inject `<style>` elements or use
+  `innerHTML` (Trusted Types). The QR code is rendered as React SVG elements or on a
+  canvas, and an end-to-end test fails on any CSP violation.
 
-### 5. Phone pairing and Quick Connect
+### 5. Phone pairing, Plex PIN and Quick Connect
 
-- **Photo or shoulder-surfing of the QR code.** The code lives 5 minutes, works once,
-  and the console shows which device used it ("Pixel 9 connected") with a revoke
-  button. The session also appears in the user's session list.
+- **Photo or shoulder-surfing of the QR code.** A code alone does not sign anyone in.
+  When a phone asks to pair, the console shows its name, platform, IP address and a
+  4-digit confirmation code that the real phone also displays, and tokens are issued
+  only after the user clicks Approve. Someone who photographs the QR code and pairs
+  first shows up as an unexpected request, and the user's own phone gets
+  "code already used" instead of a matching confirmation code. The code also lives
+  5 minutes and works once, and the session appears in the user's session list.
 - **Phishing a victim into scanning an attacker's QR code.** The victim's app would be
   signed in to the attacker's server, as the attacker's user, and could send it votes
-  and moods. Before accepting, the app shows the server URL and "You will be signed in
-  as <name>" (from `POST /auth/pair/preview`) and asks for confirmation, and warns when
-  it would replace an existing connection. It refuses an `http` server URL unless the
-  host is private, link-local or `.local`.
+  and moods. Before accepting, the app shows the target host prominently (in punycode
+  for internationalised names) and "You will be signed in as <name>" (from
+  `POST /auth/pair/preview`), asks for confirmation, and warns when it would replace an
+  existing connection. It refuses an `http` server URL unless the host is a private IP
+  literal, `localhost` or `.local`, decided without any DNS lookup.
 - **Another app catching the link.** Any Android app can register the `tindeerr://`
   scheme, so a code opened from the system camera could be intercepted. The app's own
-  scanner is the main path; the short lifetime and the device shown in the console
-  limit what an intercepted code gives.
+  scanner is the main path, and an intercepted code still needs the console approval.
+- **`public_url` abuse.** The QR link carries `public_url`. An admin session pointing it
+  at another host would send pairing codes there. `public_url` is verified before it is
+  saved (the server fetches its own `server/info` through that URL and checks an HMAC
+  of a fresh nonce), only a media server administrator with a fresh re-authentication
+  can change it, and the console writes the host next to every QR code. A reverse
+  proxy that forwards to this same instance still passes the check, by design.
 - **No short typed code.** Pairing is QR-only, so there is no low-entropy code on the
   public surface; users who cannot scan sign in normally.
 - **Quick Connect phishing.** An attacker could start a Quick Connect sign-in and
   convince a victim to approve the code in their Jellyfin client. This is inherent to
   Quick Connect (Jellyfin's own clients have the same risk). The code expires, the
-  handle works once, and the console's session list shows the new session. Admins
-  can leave Quick Connect disabled in Jellyfin, which removes the method.
+  handle works once for whoever started it, and the session list shows the new
+  session. Admins can leave Quick Connect disabled in Jellyfin, which removes the
+  method.
+- **Plex PIN phishing.** The same attack with a Plex PIN: an attacker starts a sign-in
+  and sends the victim the `app.plex.tv` link. Binding the handle does not help, since
+  the attacker is the initiator. The plex.tv approval page names the device
+  "Tindeerr (<server name>)", the PIN expires, and the new session shows in the
+  victim's session list. An attacker cannot get the owner token this way: `owner_token`
+  PINs can only be started from the setup session or by a media server administrator,
+  and the token must come from the account that owns the configured server.
+- **Leftover media server sessions.** Tindeerr ends the Jellyfin or Emby session opened
+  by each sign-in, cleans up Quick Connect approvals nobody collected, and deletes the
+  plex.tv device created by each Plex sign-in (an unofficial plex.tv endpoint; when it
+  fails, the device stays listed in the user's plex.tv account and can be removed
+  there). Tindeerr never stores a user's media server token.
 
 ### 6. Untrusted data from external systems (LLM, TMDb, media server)
 
@@ -172,7 +264,7 @@ URLs, and the server calls them. That is intended and restricted to admins.
   stored one is reused only if the URL is unchanged. A new URL requires the secret
   again (`code` = `secret_required`), so a stolen admin session cannot send the stored
   keys to a host of its choice.
-- **Redirects** are not followed to another host.
+- **Redirects** are not followed to another host. The `public_url` check follows none.
 
 ### 8. Supply chain
 
@@ -196,13 +288,24 @@ URLs, and the server calls them. That is intended and restricted to admins.
 - **Backups.** A copy of the database is useless without the key. Back up both, but
   separately.
 - **Signing key.** The JWT signing key is derived from the same key material with its
-  own label, so rotating the key signs everyone out.
+  own label (`tindeerr/v1/jwt-signing`), so rotating the key signs everyone out. The
+  `public_url` proof uses another label (`tindeerr/v1/public-url-proof`).
 
 ## Logging
 
 - **Structured JSON logs.** Tokens, keys, passwords, `Authorization` and `Cookie`
-  headers, CSRF tokens, pairing codes, Quick Connect secrets and provider error
-  bodies are redacted by a logging filter covered by tests.
+  headers, CSRF tokens, setup codes, pairing codes, PKCE verifiers, refresh tokens,
+  Plex PIN and Quick Connect handles, Quick Connect secrets and provider error bodies
+  are redacted by a logging filter covered by tests. Any value that is not a plain
+  string or number is converted to text and redacted before it is written.
+- **No credentials in URLs.** Tindeerr's own endpoints take codes, handles and tokens in
+  bodies, cookies or headers, never in a path or query string. Plex tokens go in the
+  `X-Plex-Token` header. The outbound HTTP client's own logger stays at `WARNING`, so
+  URLs such as Quick Connect's `?secret=` are never logged.
+- **Client-supplied request ids** are only kept from trusted proxies.
+- **Security events** (sign-ins, refresh-token reuse, revocations, pairing approvals,
+  connector and `public_url` changes, identity mismatches, rate-limit trips) are logged
+  without secrets.
 - **User content.** Titles and votes are logged only at debug level.
 
 ## Privacy
@@ -212,8 +315,8 @@ URLs, and the server calls them. That is intended and restricted to admins.
   lookups), the media server and the request backend. The app says which AI provider
   is used before the first batch.
 - **No tracking.** No telemetry and no analytics.
-- **Data control.** Users can reset their votes and delete their account's Tindeerr
-  data.
+- **Data control.** Users can reset their votes (app or console) and delete their
+  account's Tindeerr data (console).
 
 ## Reporting a vulnerability
 

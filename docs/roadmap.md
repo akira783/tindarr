@@ -6,7 +6,8 @@ previous step's checks are red.
 ## Step 0: framing ✅ done
 
 - Name, license, repository, v1 scope.
-- Architecture, security model, ADRs 0001–0008 (0009 and 0010 added before step 2).
+- Architecture, security model, ADRs 0001–0008 (0009 to 0011 added before step 2,
+  0011 after a four-part review of the design and the step-1 code).
 - HTTP API contract `api/openapi.yaml` (v1).
 
 ## Step 1: server foundation ✅ done
@@ -23,38 +24,135 @@ passes on the implemented endpoints.
 
 ## Step 2: setup, authentication and web console shell
 
+Everything here is specified in [the authentication reference](auth.md) and
+[`api/openapi.yaml`](../api/openapi.yaml); the console and build parts in the
+[architecture](architecture.md#web-console).
+
 Server:
 
-- Setup code, claim (setup session), media server configuration.
-- Jellyfin / Emby password, Plex PIN and Jellyfin Quick Connect sign-in, for the app
-  (token pair) and the console (cookie).
-- JWT + rotating refresh tokens with strict reuse detection, sessions per device,
-  web sessions with CSRF token and `Origin` check, roles re-synced at every sign-in
-  (ADR 0010), rate limits.
-- Phone pairing: create, poll and revoke from the console, preview and exchange for
-  the app. `public_url` setting.
-- Admin: settings with masked secrets, users (promote, demote, disable, limits).
-- Serving the console's static files with its Content-Security-Policy.
+- Request context: trusted proxies (rightmost untrusted hop), effective scheme,
+  allowed hosts, origin, private-network test.
+- Migration `0002`: `users`, `sessions`, `refresh_tokens`, `pairings`, new
+  `server_state` columns; new settings (`media_server_verify_tls`, `public_url`,
+  `password_sign_in`, and the general settings stored for later steps).
+- Setup: setup code (path only in the logs), claim with a single active setup session,
+  `GET /setup/state`, `PUT /setup/media-server` (with `setting_locked` for
+  environment-set fields), completion bound to the setup cookie with a new web session,
+  `tindeerr media-server reset` CLI.
+- Media server part of the ports, used by auth: `MediaServer.identify`, `test`,
+  `authenticate_password`, `quick_connect_start`, `quick_connect_poll`, `list_users` for
+  Jellyfin and Emby (the `Authorization: MediaBrowser …` header, Jellyfin 10.10+), and
+  the `PlexTv` client (PINs, account, resources, device deletion, shared users). The
+  library and engagement parts stay in step 3.
+- Sign-in for the app (token pair) and the console (cookie): password (with the
+  per-username cap and `password_sign_in`), Plex PIN (machine identifier, `owned`,
+  device deletion), Quick Connect (with the cleanup sweep); remote-access rule;
+  handles bound to purpose and initiator, with caps; the read-only PIN status for
+  setup.
+- Sessions: session and user loaded on every request, absolute lifetimes, JWT (PyJWT,
+  HS256, required claims), refresh rotation as a compare-and-set, web sessions with
+  CSRF token and `Origin` check, step-up re-authentication, hourly user sync, daily
+  purge.
+- Pairing: create, approve, reject and revoke from the console; preview, request and
+  completion (PKCE, confirmation code) for the app. `public_url` with its verification.
+- Rate limits (in memory, per client IP, global slowdowns).
+- Admin, in step 2:
+  - `GET /admin/settings` and `PATCH /admin/settings`: every field is stored and
+    returned; `name`, `public_url` and `password_sign_in` take effect now, the others
+    (`language`, `streaming_region`, `daily_generation_limit`, `warm_up_enabled`,
+    `content_filters`) are only stored until step 4.
+  - `GET /admin/connectors` lists every kind (all but `media_server` as
+    `configured: false`); `PUT /admin/connectors/media_server` and its `test` are
+    implemented (media server administrator + re-authentication, identity change
+    rules); the other kinds answer `404` until step 3.
+  - Users: list, promote, demote, disable, limits, revoke sessions. `votes` and
+    `generations_today` are `0` until step 4; `request_backend_user_found` is left out
+    until step 3.
+  - `POST /admin/llm/models` and `GET /admin/usage` come in steps 3 and 4.
+- Serving the console: `TINDEERR_WEB_DIR`, SPA fallback outside `/api`, path-aware
+  security headers.
+- Logging: the new redacted key names, no credentials in URLs, security events.
 
 Web console (`web/`, [ADR 0009](adr/0009-web-console-and-phone-pairing.md)):
 
-- React + Vite + TypeScript strict, ESLint, Vitest, generated API client,
-  `shared/i18n` (en, fr), built into the server image.
-- Pages: setup wizard (claim, media server, `public_url`), sign-in (all three
-  methods), server settings, users, "Connect a phone", my sessions.
+- React + Vite + TypeScript strict, React Router, TanStack Query, i18next with
+  `shared/i18n` (en, fr), ESLint, Vitest; generated API client committed.
+- Skeleton: fetch wrapper with `X-CSRF-Token`, auth guard on
+  `GET /auth/web/session`, typed problem errors.
+- Pages: setup wizard (claim, media server or "locked by the environment", admin
+  sign-in, `public_url`), sign-in (the methods in `auth_methods`), server settings,
+  users, "Connect a phone" (QR code as SVG or canvas, host shown, approval with the
+  confirmation code), my sessions (revoke), delete my data, re-authentication dialog.
 
-**Check:** a security test suite covering the claim without a code, refresh-token
-reuse, cross-user access, CSRF (missing token, wrong `Origin`), bearer tokens refused
-on console endpoints, admin role re-sync and the last-admin rule, pairing (expiry,
-single use, brute-force limit), lockout and redaction. In a browser, the console
-claims a fresh server and signs in with each method against real Jellyfin, Emby and
-Plex test instances in containers; pairing is exercised through the API.
+Build and CI:
+
+- Image built from the repository root with a Node stage pinned by digest, root
+  `.dockerignore`; compose example updated (`context: ..`).
+- `web.yml`; `server.yml` also triggered by `web/**` and `shared/**`; `e2e.yml`.
+
+**Check.** Run in CI only: the development host has no Docker, Plex needs a human or a
+real account, and browsers are not installed there.
+
+- **(a) Security test suite (pytest, runs locally and in `server.yml`).** Fake media
+  servers and a fake plex.tv built on `httpx.MockTransport`, no network. It covers:
+  - request context: forwarded headers from untrusted peers ignored, rightmost
+    untrusted hop, garbage and IPv6 entries, `host_not_allowed`, origin building;
+  - setup: claim without or with a wrong code, second claim revoking the first,
+    completion refused without the setup cookie or for a non-administrator, new session
+    at completion, code never in the logs, `setting_locked`, restart keeps the code;
+  - sign-in: identical errors for unknown user and wrong password, the per-username
+    cap (never more than 2 failures reach the fake server in 15 minutes), per-IP pause,
+    `password_sign_in` modes, remote-access rule at sign-in and on later requests,
+    Plex resource matching by `machineIdentifier` only, `owned` for admin, device
+    deletion (and its failure path), Quick Connect cleanup of abandoned approvals;
+  - handles: wrong purpose, wrong initiator (cookie, verifier, session), expiry,
+    single use, per-IP and global caps, owner-token PIN surviving a failed connection
+    test;
+  - tokens: JWT with a wrong `alg`, `typ`, `aud`, `iss`, `kid`, or expired beyond the
+    leeway; refresh-token reuse; two concurrent rotations of the same token (exactly one
+    wins); revocation and disabling effective on the next request; absolute lifetimes;
+  - CSRF: missing or wrong token, missing or wrong `Origin`, bearer on console
+    endpoints (`401`), setup session on `/me` (`401`), cookie ignored when a bearer
+    header is present;
+  - roles: admin re-sync at sign-in, the hourly sync (clears, never sets), last-admin
+    rule, promoted admin refused on the media server connector and `public_url`,
+    re-authentication required and expiring, identity change revoking every session and
+    unlinking users, unexpected identity stopping sign-ins;
+  - pairing: expiry, single use, preview revealing nothing for invalid codes, no tokens
+    before approval, rejection, wrong verifier, rate limits;
+  - `public_url`: proof checked, redirects not followed, nonce not answered when not
+    pending;
+  - rate limits: every `429` carries `retry_after_ms` and `Retry-After`; global
+    thresholds slow down without refusing;
+  - redaction of every new secret kind, security headers per path, SPA fallback never
+    under `/api`, contract validation of every new endpoint's responses.
+- **(b) End-to-end workflow (`e2e.yml`, GitHub Actions).** Builds the image, starts it
+  with Jellyfin and Emby containers (images pinned by digest) seeded through their
+  startup-wizard APIs (`/Startup/…`: admin user, then an API key and a second,
+  non-admin user). Playwright (Chromium) drives the console against the built image:
+  claim a fresh server, configure each media server, complete setup, sign in with a
+  password on both, and with Quick Connect on Jellyfin (the test approves the code
+  through Jellyfin's `POST /QuickConnect/Authorize` with a user token), set
+  `public_url`, create a pairing, and complete it through the API as the app would
+  (preview, request, approve in the console, complete). Every page is checked for zero
+  CSP violations (`securitypolicyviolation` events and console errors). Plex runs only
+  on `workflow_dispatch`, with repository secrets (a Plex account token and a claim
+  token for a throwaway Plex server): the test approves the PIN through plex.tv's API
+  with that token. Pull requests from forks never get these secrets.
 
 ## Step 3: adapters
 
 - TMDb, OMDb.
 - Media servers: engagement, library, deep links (Jellyfin, Emby, Plex).
-- Request backend: Seerr family, requests on behalf of the matching user.
+- **Decision: Plex tokens.** Step 2 stores the owner's account-wide token. Per-user
+  watch progress needs each user's server token (`shared_servers` for friends, Home
+  user switching for Home users). Choose between keeping the account-wide token (it can
+  do anything on the owner's plex.tv account, but gives the user sync and the per-user
+  tokens) and storing only server-scoped tokens (a leak only reaches that server, but
+  the user sync and per-user progress need another source). Record it in an ADR.
+- Request backend: Seerr v3.x (Jellyseerr as legacy, Overseerr for Plex only),
+  requests on behalf of the matching user (`X-API-User`), users matched by listing them
+  without `X-API-User`, ids normalised.
 - AI providers: OpenAI, Anthropic, Gemini, Mistral, OpenAI-compatible, Ollama, each
   with a model list and error mapping.
 - Console: connector pages with connection tests, AI provider and model picker.
@@ -81,7 +179,8 @@ with each AI provider family. `/status` stays under 50 ms during a generation.
 ## Step 5: packaging and first deployment
 
 - Signed multi-arch image on GHCR (server + built console), SBOM, documented
-  `docker-compose.yml` and reverse-proxy notes (HTTPS for the console).
+  `docker-compose.yml` and reverse-proxy notes (HTTPS for the console,
+  `TINDEERR_TRUSTED_PROXIES`, passing `Host`, `TINDEERR_PUBLIC_URL`).
 - `tindeerr import suggestarr`.
 - Deployment on the author's homelab next to the fork, which is left untouched.
   Setup and configuration are done in the web console.
@@ -94,9 +193,11 @@ votes and profile are imported. Monitoring is in place (Uptime Kuma).
 - Clickable mockups of the main screens, validated before any screen is built.
 - Expo + TypeScript strict, ESLint, Jest, i18n (en, fr), theme (dark first), generated
   API client.
-- Connect flow: scan a pairing QR code (confirmation screen with server URL and user
-  name), or server URL → `server/info` → sign-in (password / Plex PIN / Quick
-  Connect). A server with `setup_required` gets a message to open its console.
+- Connect flow: scan a pairing QR code (confirmation screen with the host shown
+  prominently in punycode and the user name, refusal of `http` for non-private hosts,
+  then the confirmation code while waiting for the console approval), or server URL →
+  `server/info` → sign-in (password / Plex PIN / Quick Connect, with a PKCE verifier
+  for the handles). A server with `setup_required` gets a message to open its console.
 - Secure token storage, single-flight token refresh, compatibility checks.
 
 **Check:** sign-in and QR pairing work on a real phone against the deployed server,
@@ -113,14 +214,15 @@ expired token cause exactly one refresh.
   providers with "on your services", ratings), trailer.
 - Like → request dialog, or direct request when enabled.
 
-**Check:** the same scenarios as the web version, as Maestro flows. A smooth 60 fps
+**Check:** the same scenarios as the fork's web UI, as Maestro flows. A smooth 60 fps
 swipe on a mid-range phone.
 
 ## Step 8: likes, taste, settings
 
 - "My likes" (to request / requested, `like` votes only), taste profile (bullets,
   edit, refresh), stats.
-- Preferences (including "my streaming services"), sessions, sign-out, data reset.
+- Preferences (including "my streaming services"), sessions (list; revoking other
+  sessions and deleting the account are done in the console), sign-out, votes reset.
 - No admin screens: admin work is in the web console. At most a read-only server
   status.
 
@@ -159,3 +261,5 @@ is covered by the console.
   until the store listing exists.
 - **Push relay (step 9).**
 - **Later sources:** Trakt history, Radarr/Sonarr direct requests, OIDC sign-in.
+- **Relinking users after a media server change.** Unlinked accounts keep their data
+  but cannot sign in; merging them into new accounts is not in v1.

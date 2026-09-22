@@ -5,7 +5,7 @@ like straight to your request queue.
 
 Tindeerr is a self-hosted server plus an Android app (iOS later). The server learns
 your taste from your votes and your media server's watch history, asks an AI provider
-for fitting titles, and files requests through Seerr / Jellyseerr / Overseerr. It also
+for fitting titles, and files requests through Seerr. It also
 serves a small web console for setup and administration, from which you connect your
 phone by scanning a QR code.
 
@@ -15,8 +15,10 @@ phone by scanning a QR code.
 
 ## How it fits together
 
-- **Media servers:** Jellyfin, Emby, Plex. Used to sign in and to read watch history.
-- **Requests:** Seerr, Jellyseerr, Overseerr.
+- **Media servers:** Jellyfin (10.10 or newer), Emby, Plex. Used to sign in (Tindeerr
+  has no passwords of its own) and to read watch history.
+- **Requests:** Seerr v3 (Jellyseerr still works as a legacy deployment; Overseerr
+  only with Plex).
 - **Metadata:** TMDb (required), OMDb (optional, for IMDb / Rotten Tomatoes ratings).
 - **AI providers:** OpenAI, Anthropic, Google Gemini, Mistral, any OpenAI-compatible
   endpoint, Ollama.
@@ -29,6 +31,7 @@ Tindeerr authors.
 
 - [Architecture](docs/architecture.md)
 - [Security model](docs/security.md)
+- [Authentication, sessions and setup](docs/auth.md)
 - [Roadmap](docs/roadmap.md)
 - [Architecture decision records](docs/adr/)
 - [HTTP API contract (OpenAPI 3.1)](api/openapi.yaml)
