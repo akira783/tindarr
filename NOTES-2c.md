@@ -22,3 +22,28 @@
    `MediaServerStep`).
 3. `GET /pairings/{id}` returns no `retry_after_ms`, so the console polls at a fixed
    2 s.
+
+## Contract and documentation friction found while building lot 2b
+
+4. `SetupState.media_server` documents an optional `name`, but nothing gives the
+   wizard the media server's own name: the connection test returns it in
+   `ConnectorStatus.server_name`, which `GET /setup/state` does not carry. The
+   server answers `{"kind": …}` only. → Either drop `name` from the contract or
+   store the tested server's name so the wizard can show "connected to Home
+   Jellyfin".
+5. `Connector.secret.last4` is filled with the last four characters of the stored
+   secret (admin-only, and the contract defines the field for telling keys apart).
+   If that is judged too much disclosure for a Plex **account** token, 2c should
+   say so and the server can return null.
+6. `GET /admin/connectors` and `DELETE /admin/connectors/{kind}` are not
+   implemented: 2b only needed `PUT /admin/connectors/media_server` and its
+   `test`. Every other kind answers `404 not_found`.
+7. `ServerInfo.auth_methods` gains `quick_connect` only once the background probe
+   has read `GET /QuickConnect/Enabled` (15 s after startup, then every 5 min), so
+   a console loaded in the first seconds of a restart sees only `password`. The
+   sign-in page should re-read `server/info` when it is shown, not once per boot.
+8. `docs/architecture.md` sketches `PlexTv.create_pin(self, client_id)` and a
+   `MediaServer` port without `quick_connect_enabled`. Both moved: `create_pin`
+   also takes the device name that names Tindeerr on the plex.tv approval page
+   (docs/auth.md §4 requires it), and `quick_connect_enabled` is what feeds the
+   cache `server/info` reads. The sketch should be updated with the rest of step 2.
