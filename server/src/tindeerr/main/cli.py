@@ -12,6 +12,7 @@ from tindeerr import __version__
 from tindeerr.core.config import ConfigError, ServerConfig, load_config
 from tindeerr.core.logs import configure_logging
 from tindeerr.main.app import create_app
+from tindeerr.storage.settings import environment_overrides
 
 HEALTHCHECK_TIMEOUT_S = 3
 _WILDCARD_HOSTS = frozenset({"0.0.0.0", "::", ""})  # noqa: S104 - compared, not bound
@@ -65,6 +66,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         config = load_config()
+        if args.command == "serve":
+            # Checked again at startup; failing here gives a one-line error, exit code 2.
+            environment_overrides()
     except ConfigError as exc:
         configure_logging("INFO")
         logger.error("%s", exc)  # noqa: TRY400 - the traceback adds nothing here

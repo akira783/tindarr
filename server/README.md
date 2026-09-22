@@ -61,7 +61,9 @@ values count as unset.
 Settings stored in the database can be forced the same way; they then show as locked
 in the web console. Today: `TINDEERR_SERVER_NAME`, `TINDEERR_MEDIA_SERVER_KIND`
 (`jellyfin`, `emby`, `plex`), `TINDEERR_MEDIA_SERVER_URL`,
-`TINDEERR_MEDIA_SERVER_API_KEY`.
+`TINDEERR_MEDIA_SERVER_API_KEY`. Values are checked against the setting's type
+(`true`/`false` for booleans, JSON for lists and objects); an invalid one stops the
+server at startup with a message naming the variable.
 
 ## Container
 

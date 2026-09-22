@@ -81,6 +81,29 @@ def test_invalid_configuration_exits_with_2(
     assert "not-a-port" not in output
 
 
+def test_invalid_setting_override_exits_with_2_before_serving(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import logging  # noqa: PLC0415
+
+    def fail_run(app: object, **kwargs: Any) -> None:
+        pytest.fail("the server must not start")
+
+    root = logging.getLogger()
+    saved = list(root.handlers)
+    monkeypatch.setattr(cli.uvicorn, "run", fail_run)
+    monkeypatch.setenv("TINDEERR_MEDIA_SERVER_KIND", "kodi-hunter2")
+    try:
+        assert cli.main(["serve"]) == 2
+    finally:
+        root.handlers = saved
+        logging.getLogger("uvicorn.access").disabled = False
+        logging.captureWarnings(capture=False)
+    output = capsys.readouterr().out
+    assert "TINDEERR_MEDIA_SERVER_KIND" in output
+    assert "hunter2" not in output
+
+
 def test_serve_runs_uvicorn_without_proxy_headers(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 

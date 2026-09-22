@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from tindeerr import __version__
-from tindeerr.core.config import ServerConfig
+from tindeerr.core.config import ConfigError, ServerConfig
 from tindeerr.core.crypto import DecryptionError
 from tindeerr.core.errors import ProblemError
 from tindeerr.main.app import create_app
@@ -123,14 +123,15 @@ def test_server_info_reflects_the_media_server(
     assert body["name"] == "Chez nous"
 
 
-def test_unknown_media_server_kind_is_ignored(
+def test_unknown_media_server_kind_prevents_startup(
     config: ServerConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TINDEERR_MEDIA_SERVER_KIND", "kodi")
-    with TestClient(create_app(config)) as client:
-        body = client.get("/api/v1/server/info").json()
-    assert body["media_server"] is None
-    assert body["auth_methods"] == []
+    with (
+        pytest.raises(ConfigError, match="TINDEERR_MEDIA_SERVER_KIND"),
+        TestClient(create_app(config)),
+    ):
+        pass
 
 
 def test_setup_required_follows_the_state_flag(config: ServerConfig, data_dir: Path) -> None:
