@@ -383,7 +383,7 @@ class FakePlexTv:
         if request.headers.get("x-plex-token", "") not in self.accounts:
             return _xml("<MediaContainer />", 401)
         rows = "".join(
-            f'<Device id="{device_id}" clientIdentifier="{client_id}" name="Tindeerr" />'
+            f'<Device id="{device_id}" clientIdentifier="{client_id}" name="Tindarr" />'
             for client_id, device_id in self.devices.items()
         )
         return _xml(f"<MediaContainer>{rows}</MediaContainer>")
@@ -417,7 +417,7 @@ _PLEX_HOST: Final = "plex.lan"
 
 @dataclass
 class FakeInternet:
-    """Everything outside Tindeerr: the media server, the Plex server and plex.tv.
+    """Everything outside Tindarr: the media server, the Plex server and plex.tv.
 
     One transport routes by host, so the application can be wired with the **real**
     adapters and still touch nothing: a test changes the fakes and watches what the

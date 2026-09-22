@@ -3,7 +3,7 @@
 import pytest
 
 from tests.support import FakeMediaServer
-from tindeerr.ports.media_server import (
+from tindarr.ports.media_server import (
     ConnectionCheck,
     MediaServer,
     ServerIdentity,

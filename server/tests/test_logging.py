@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from tindeerr.core.logs import (
+from tindarr.core.logs import (
     MAX_TEXT_LENGTH,
     REDACTED,
     TRUNCATED,

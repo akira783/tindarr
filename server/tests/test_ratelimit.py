@@ -6,14 +6,14 @@ from datetime import timedelta
 import pytest
 
 from tests.support import FakeClock
-from tindeerr.auth.ratelimit import (
+from tindarr.auth.ratelimit import (
     ExponentialPause,
     GlobalSlowdown,
     Limit,
     RateLimits,
     SlidingWindow,
 )
-from tindeerr.core.errors import ProblemError, RateLimitedError
+from tindarr.core.errors import ProblemError, RateLimitedError
 
 pytestmark = pytest.mark.anyio
 

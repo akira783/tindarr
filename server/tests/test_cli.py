@@ -9,8 +9,8 @@ from typing import Any, override
 
 import pytest
 
-from tindeerr import __version__
-from tindeerr.main import cli
+from tindarr import __version__
+from tindarr.main import cli
 
 
 class _Health(BaseHTTPRequestHandler):
@@ -42,13 +42,13 @@ def free_port() -> int:
 def test_healthcheck_succeeds_when_healthz_answers(
     monkeypatch: pytest.MonkeyPatch, health_server: int
 ) -> None:
-    monkeypatch.setenv("TINDEERR_HOST", "0.0.0.0")  # noqa: S104 - probed on loopback
-    monkeypatch.setenv("TINDEERR_PORT", str(health_server))
+    monkeypatch.setenv("TINDARR_HOST", "0.0.0.0")  # noqa: S104 - probed on loopback
+    monkeypatch.setenv("TINDARR_PORT", str(health_server))
     assert cli.main(["healthcheck"]) == 0
 
 
 def test_healthcheck_fails_when_nothing_listens(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TINDEERR_PORT", str(free_port()))
+    monkeypatch.setenv("TINDARR_PORT", str(free_port()))
     assert cli.main(["healthcheck"]) == 1
 
 
@@ -60,7 +60,7 @@ def test_healthcheck_ignores_http_proxies(
         monkeypatch.setenv(name, dead_proxy)
     for name in ("no_proxy", "NO_PROXY"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("TINDEERR_PORT", str(health_server))
+    monkeypatch.setenv("TINDARR_PORT", str(health_server))
     assert cli.main(["healthcheck"]) == 0
 
 
@@ -76,7 +76,7 @@ def test_healthcheck_handles_ipv6_hosts(monkeypatch: pytest.MonkeyPatch) -> None
         return FakeOpener()
 
     monkeypatch.setattr(cli.urllib.request, "build_opener", fake_build_opener)
-    monkeypatch.setenv("TINDEERR_HOST", "::1")
+    monkeypatch.setenv("TINDARR_HOST", "::1")
     assert cli.main(["healthcheck"]) == 1
     assert urls == ["http://[::1]:8787/healthz"]
 
@@ -88,7 +88,7 @@ def test_invalid_configuration_exits_with_2(
 
     root = logging.getLogger()
     saved = list(root.handlers)
-    monkeypatch.setenv("TINDEERR_PORT", "not-a-port")
+    monkeypatch.setenv("TINDARR_PORT", "not-a-port")
     try:
         assert cli.main([]) == 2
     finally:
@@ -96,7 +96,7 @@ def test_invalid_configuration_exits_with_2(
         logging.getLogger("uvicorn.access").disabled = False
         logging.captureWarnings(capture=False)
     output = capsys.readouterr().out
-    assert "TINDEERR_PORT" in output
+    assert "TINDARR_PORT" in output
     assert "not-a-port" not in output
 
 
@@ -111,7 +111,7 @@ def test_invalid_setting_override_exits_with_2_before_serving(
     root = logging.getLogger()
     saved = list(root.handlers)
     monkeypatch.setattr(cli.uvicorn, "run", fail_run)
-    monkeypatch.setenv("TINDEERR_MEDIA_SERVER_KIND", "kodi-hunter2")
+    monkeypatch.setenv("TINDARR_MEDIA_SERVER_KIND", "kodi-hunter2")
     try:
         assert cli.main(["serve"]) == 2
     finally:
@@ -119,7 +119,7 @@ def test_invalid_setting_override_exits_with_2_before_serving(
         logging.getLogger("uvicorn.access").disabled = False
         logging.captureWarnings(capture=False)
     output = capsys.readouterr().out
-    assert "TINDEERR_MEDIA_SERVER_KIND" in output
+    assert "TINDARR_MEDIA_SERVER_KIND" in output
     assert "hunter2" not in output
 
 
@@ -134,7 +134,7 @@ def test_serve_runs_uvicorn_without_proxy_headers(monkeypatch: pytest.MonkeyPatc
     root = logging.getLogger()
     saved = list(root.handlers)
     monkeypatch.setattr(cli.uvicorn, "run", fake_run)
-    monkeypatch.setenv("TINDEERR_PORT", "9999")
+    monkeypatch.setenv("TINDARR_PORT", "9999")
     try:
         assert cli.main(["serve"]) == 0
     finally:
@@ -168,23 +168,23 @@ def _ignore_level(level: str) -> None:
 def test_resetting_the_media_server_needs_a_confirmation(
     data_dir: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    monkeypatch.setenv("TINDEERR_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("TINDARR_DATA_DIR", str(data_dir))
     monkeypatch.setattr(cli, "configure_logging", _ignore_level)
     monkeypatch.setattr(cli.sys.stdin, "isatty", _not_a_terminal)
     with caplog.at_level(logging.ERROR):
         assert cli.main(["media-server", "reset"]) == 2
     assert "--yes" in caplog.text
-    assert not (data_dir / "tindeerr.db").exists()
+    assert not (data_dir / "tindarr.db").exists()
 
 
 def test_resetting_the_media_server_starts_setup_again(
     data_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from tindeerr.auth.setupcode import read_setup_code  # noqa: PLC0415
-    from tindeerr.core.config import ServerConfig  # noqa: PLC0415
-    from tindeerr.main.app import start  # noqa: PLC0415
+    from tindarr.auth.setupcode import read_setup_code  # noqa: PLC0415
+    from tindarr.core.config import ServerConfig  # noqa: PLC0415
+    from tindarr.main.app import start  # noqa: PLC0415
 
-    monkeypatch.setenv("TINDEERR_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("TINDARR_DATA_DIR", str(data_dir))
     monkeypatch.setattr(cli, "configure_logging", _ignore_level)
 
     async def prepare() -> str:

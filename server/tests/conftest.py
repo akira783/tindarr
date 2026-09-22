@@ -11,26 +11,26 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tests.support import FakeClock, FakeMediaServers, server_config
-from tindeerr.auth.mediaserver import MediaServerConnector
-from tindeerr.auth.ratelimit import RateLimits
-from tindeerr.auth.sessions import SessionService
-from tindeerr.auth.setup import SetupService
-from tindeerr.auth.tokens import AccessTokens
-from tindeerr.core.config import ServerConfig
-from tindeerr.core.crypto import SecretCipher
-from tindeerr.core.keys import KeyMaterial, KeyPurpose, load_key_material
-from tindeerr.core.logs import build_handler, clear_registered_secrets, quiet_noisy_libraries
-from tindeerr.main.app import create_app
-from tindeerr.storage.db import create_async_db_engine, database_path
-from tindeerr.storage.migrate import upgrade_database
-from tindeerr.storage.settings import SettingsStore
+from tindarr.auth.mediaserver import MediaServerConnector
+from tindarr.auth.ratelimit import RateLimits
+from tindarr.auth.sessions import SessionService
+from tindarr.auth.setup import SetupService
+from tindarr.auth.tokens import AccessTokens
+from tindarr.core.config import ServerConfig
+from tindarr.core.crypto import SecretCipher
+from tindarr.core.keys import KeyMaterial, KeyPurpose, load_key_material
+from tindarr.core.logs import build_handler, clear_registered_secrets, quiet_noisy_libraries
+from tindarr.main.app import create_app
+from tindarr.storage.db import create_async_db_engine, database_path
+from tindarr.storage.migrate import upgrade_database
+from tindarr.storage.settings import SettingsStore
 
 
 @pytest.fixture(autouse=True)
 def clean_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Hide the developer's TINDEERR_* variables and forget registered secrets."""
+    """Hide the developer's TINDARR_* variables and forget registered secrets."""
     for key in list(os.environ):
-        if key.startswith("TINDEERR_"):
+        if key.startswith("TINDARR_"):
             monkeypatch.delenv(key)
     yield
     clear_registered_secrets()

@@ -12,7 +12,7 @@ from starlette.responses import PlainTextResponse
 from starlette.types import Receive, Scope, Send
 
 from tests.support import CONSOLE_HOST, server_config
-from tindeerr.api.context import (
+from tindarr.api.context import (
     WARNING_INTERVAL_S,
     HostPolicy,
     RequestContext,
@@ -21,8 +21,8 @@ from tindeerr.api.context import (
     forwarded_client,
     request_context,
 )
-from tindeerr.core.net import parse_host
-from tindeerr.main.app import create_app
+from tindarr.core.net import parse_host
+from tindarr.main.app import create_app
 
 TRUSTED = (ip_network("10.0.0.0/8"), ip_network("fd00::/8"))
 
@@ -217,7 +217,7 @@ def test_untrusted_private_peer_sending_forwarded_headers_is_warned_once_an_hour
         for _ in range(3):
             whoami(client, headers={"X-Forwarded-For": "203.0.113.7"})
         whoami(client, headers={"X-Request-ID": "abc"})
-    warnings = [r for r in caplog.records if "TINDEERR_TRUSTED_PROXIES" in r.getMessage()]
+    warnings = [r for r in caplog.records if "TINDARR_TRUSTED_PROXIES" in r.getMessage()]
     assert len(warnings) == 1
     assert warnings[0].__dict__["peer"] == "172.18.0.5"
     assert "203.0.113.7" not in caplog.text
@@ -238,7 +238,7 @@ def test_the_warning_comes_back_after_an_hour(caplog: pytest.LogCaptureFixture) 
         client.get("/", headers={"X-Forwarded-For": "203.0.113.7"})
         seconds[0] += WARNING_INTERVAL_S
         client.get("/", headers={"X-Forwarded-For": "203.0.113.7"})
-    warnings = [r for r in caplog.records if "TINDEERR_TRUSTED_PROXIES" in r.getMessage()]
+    warnings = [r for r in caplog.records if "TINDARR_TRUSTED_PROXIES" in r.getMessage()]
     assert len(warnings) == 2
 
 
@@ -256,7 +256,7 @@ def test_public_untrusted_peer_is_not_warned_about(
 ) -> None:
     with make_client(data_dir, "8.8.8.8", trusted=None) as client, caplog.at_level(logging.WARNING):
         whoami(client, headers={"X-Forwarded-For": "203.0.113.7"})
-    assert "TINDEERR_TRUSTED_PROXIES" not in caplog.text
+    assert "TINDARR_TRUSTED_PROXIES" not in caplog.text
 
 
 # --- private network ----------------------------------------------------------------
@@ -330,13 +330,13 @@ def test_the_origin_is_built_from_the_validated_host(data_dir: Path) -> None:
 
 def test_the_public_url_host_is_accepted_once_it_is_set() -> None:
     hosts = HostPolicy(("console.test",))
-    assert not hosts.allows(parse_host("tindeerr.example.com"))
-    hosts.set_public_url("https://tindeerr.example.com:8443")
-    assert hosts.public_url_host == "tindeerr.example.com"
-    assert hosts.allows(parse_host("tindeerr.example.com"))
-    assert hosts.allows(parse_host("tindeerr.example.com:9000"))  # the port never matters
+    assert not hosts.allows(parse_host("tindarr.example.com"))
+    hosts.set_public_url("https://tindarr.example.com:8443")
+    assert hosts.public_url_host == "tindarr.example.com"
+    assert hosts.allows(parse_host("tindarr.example.com"))
+    assert hosts.allows(parse_host("tindarr.example.com:9000"))  # the port never matters
     hosts.set_public_url(None)
-    assert not hosts.allows(parse_host("tindeerr.example.com"))
+    assert not hosts.allows(parse_host("tindarr.example.com"))
     hosts.set_public_url("not a url")
     assert hosts.public_url_host is None
 

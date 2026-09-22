@@ -11,20 +11,20 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tests.support import FakeClock, FakeMediaServer, FakeMediaServers, media_user
-from tindeerr.auth.mediaserver import MediaServerConnector, MediaServerInput
-from tindeerr.auth.ratelimit import RateLimits
-from tindeerr.auth.sessions import CookieGrant, SessionService
-from tindeerr.auth.setup import CompletedSetup, SetupService
-from tindeerr.auth.setupcode import ALPHABET, CODE_LENGTH, read_setup_code, setup_code_hash
-from tindeerr.core.crypto import SecretCipher
-from tindeerr.core.errors import ProblemError
-from tindeerr.core.keys import KeyMaterial
-from tindeerr.storage import server_state as state_repository
-from tindeerr.storage import sessions as session_repository
-from tindeerr.storage import users as users_repository
-from tindeerr.storage.db import write_transaction
-from tindeerr.storage.sessions import Device
-from tindeerr.storage.settings import SettingsStore
+from tindarr.auth.mediaserver import MediaServerConnector, MediaServerInput
+from tindarr.auth.ratelimit import RateLimits
+from tindarr.auth.sessions import CookieGrant, SessionService
+from tindarr.auth.setup import CompletedSetup, SetupService
+from tindarr.auth.setupcode import ALPHABET, CODE_LENGTH, read_setup_code, setup_code_hash
+from tindarr.core.crypto import SecretCipher
+from tindarr.core.errors import ProblemError
+from tindarr.core.keys import KeyMaterial
+from tindarr.storage import server_state as state_repository
+from tindarr.storage import sessions as session_repository
+from tindarr.storage import users as users_repository
+from tindarr.storage.db import write_transaction
+from tindarr.storage.sessions import Device
+from tindarr.storage.settings import SettingsStore
 
 pytestmark = pytest.mark.anyio
 

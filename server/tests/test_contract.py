@@ -28,11 +28,11 @@ from referencing import Registry, Resource
 from referencing.jsonschema import DRAFT202012
 
 from tests.support import server_config
-from tindeerr.core.config import ServerConfig
-from tindeerr.main.app import create_app
+from tindarr.core.config import ServerConfig
+from tindarr.main.app import create_app
 
 CONTRACT_PATH = Path(__file__).resolve().parents[2] / "api" / "openapi.yaml"
-CONTRACT_URI = "urn:tindeerr:openapi"
+CONTRACT_URI = "urn:tindarr:openapi"
 HTTP_METHODS = {"get", "put", "post", "delete", "patch", "head", "options", "trace"}
 
 
@@ -152,7 +152,7 @@ def test_server_info_matches_contract(client: TestClient) -> None:
 def test_configured_server_info_matches_contract(
     config: ServerConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("TINDEERR_MEDIA_SERVER_KIND", "plex")
+    monkeypatch.setenv("TINDARR_MEDIA_SERVER_KIND", "plex")
     with TestClient(create_app(config)) as client:
         response = client.get("/api/v1/server/info")
     assert_matches_contract("/api/v1/server/info", "get", response)
@@ -195,7 +195,7 @@ def test_every_exposed_route_is_in_the_contract(data_dir: Path, api_docs: bool) 
 
 
 def test_no_route_is_hidden_from_the_generated_spec() -> None:
-    source = Path(__file__).resolve().parents[1] / "src" / "tindeerr"
+    source = Path(__file__).resolve().parents[1] / "src" / "tindarr"
     offenders = [
         str(path) for path in source.rglob("*.py") if "include_in_schema" in path.read_text()
     ]

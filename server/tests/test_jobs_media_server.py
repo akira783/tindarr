@@ -21,8 +21,8 @@ from tests.support import (
     set_up_server,
 )
 from tests.support.flows import configure_media_server
-from tindeerr.auth.sync import UserSync
-from tindeerr.jobs.media_server import (
+from tindarr.auth.sync import UserSync
+from tindarr.jobs.media_server import (
     handle_sweep_job,
     quick_connect_probe_job,
     user_sync_job,
@@ -191,11 +191,11 @@ def test_the_jobs_are_started_with_the_application(app: FastAPI) -> None:
     with console_client(app) as client:
         names = run(client, running)
     # Purge, user sync, handle sweep and the Quick Connect probe.
-    assert sorted(name for name in names if name.startswith("tindeerr.jobs.")) == [
-        "tindeerr.jobs.handle_sweep",
-        "tindeerr.jobs.purge",
-        "tindeerr.jobs.quick_connect_probe",
-        "tindeerr.jobs.user_sync",
+    assert sorted(name for name in names if name.startswith("tindarr.jobs.")) == [
+        "tindarr.jobs.handle_sweep",
+        "tindarr.jobs.purge",
+        "tindarr.jobs.quick_connect_probe",
+        "tindarr.jobs.user_sync",
     ]
 
 

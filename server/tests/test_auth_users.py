@@ -1,4 +1,4 @@
-"""Linking a media server account to a Tindeerr user (docs/auth.md, section 4)."""
+"""Linking a media server account to a Tindarr user (docs/auth.md, section 4)."""
 
 from datetime import timedelta
 
@@ -6,10 +6,10 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tests.support import FakeClock, media_user
-from tindeerr.auth.users import link_user
-from tindeerr.core.errors import ProblemError
-from tindeerr.storage import users as repository
-from tindeerr.storage.db import write_transaction
+from tindarr.auth.users import link_user
+from tindarr.core.errors import ProblemError
+from tindarr.storage import users as repository
+from tindarr.storage.db import write_transaction
 
 pytestmark = pytest.mark.anyio
 

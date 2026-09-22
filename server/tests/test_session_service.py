@@ -7,8 +7,8 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tests.support import FakeClock
-from tindeerr.auth.access import REAUTH_WINDOW, reauth_expires_at
-from tindeerr.auth.sessions import (
+from tindarr.auth.access import REAUTH_WINDOW, reauth_expires_at
+from tindarr.auth.sessions import (
     ABSOLUTE_LIFETIMES,
     IDLE_TIMEOUTS,
     LAST_SEEN_INTERVAL,
@@ -16,13 +16,13 @@ from tindeerr.auth.sessions import (
     SessionService,
     TokenPair,
 )
-from tindeerr.auth.tokens import AccessTokens, token_hash
-from tindeerr.core.errors import ProblemError
-from tindeerr.storage import sessions as session_repository
-from tindeerr.storage import users as user_repository
-from tindeerr.storage.db import write_transaction
-from tindeerr.storage.sessions import Device
-from tindeerr.storage.users import User
+from tindarr.auth.tokens import AccessTokens, token_hash
+from tindarr.core.errors import ProblemError
+from tindarr.storage import sessions as session_repository
+from tindarr.storage import users as user_repository
+from tindarr.storage.db import write_transaction
+from tindarr.storage.sessions import Device
+from tindarr.storage.users import User
 
 pytestmark = pytest.mark.anyio
 

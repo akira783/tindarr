@@ -4,10 +4,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from tindeerr.core.config import ServerConfig
-from tindeerr.core.keys import KEY_FILE_NAME, SecretKeyError
-from tindeerr.main.app import create_app, start
-from tindeerr.storage.migrate import SchemaTooNewError
+from tindarr.core.config import ServerConfig
+from tindarr.core.keys import KEY_FILE_NAME, SecretKeyError
+from tindarr.main.app import create_app, start
+from tindarr.storage.migrate import SchemaTooNewError
 
 pytestmark = pytest.mark.anyio
 
@@ -66,7 +66,7 @@ def test_newer_schema_prevents_startup(data_dir: Path) -> None:
     config = ServerConfig(data_dir=data_dir)
     with TestClient(create_app(config)):
         pass
-    with closing(sqlite3.connect(data_dir / "tindeerr.db")) as connection, connection:
+    with closing(sqlite3.connect(data_dir / "tindarr.db")) as connection, connection:
         connection.execute("UPDATE alembic_version SET version_num = 'ffff'")
     with pytest.raises(SchemaTooNewError), TestClient(create_app(config)):
         pass

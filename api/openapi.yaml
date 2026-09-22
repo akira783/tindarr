@@ -1,10 +1,10 @@
 openapi: 3.1.0
 info:
-  title: Tindeerr API
+  title: Tindarr API
   version: 1.0.0-draft
-  summary: Self-hosted server behind the Tindeerr mobile app and web console.
+  summary: Self-hosted server behind the Tindarr mobile app and web console.
   description: |
-    Contract between a Tindeerr server and its two clients: the mobile app and the
+    Contract between a Tindarr server and its two clients: the mobile app and the
     web console the server serves under `/`. Written before the implementation; CI
     validates the server's responses against this file and rejects routes it does
     not document.
@@ -19,10 +19,10 @@ info:
 
     Every request (docs/auth.md, sections 1 and 2):
     - The `Host` header must be an IP literal, `localhost`, a name in
-      `TINDEERR_ALLOWED_HOSTS` or the host of `public_url`; anything else gets
+      `TINDARR_ALLOWED_HOSTS` or the host of `public_url`; anything else gets
       `400` `host_not_allowed` before routing, on every path but `/healthz`.
     - The client IP and scheme come from `X-Forwarded-For` and
-      `X-Forwarded-Proto` only when the peer is in `TINDEERR_TRUSTED_PROXIES`.
+      `X-Forwarded-Proto` only when the peer is in `TINDARR_TRUSTED_PROXIES`.
       The server's origin is `<scheme>://<Host>`.
     - Codes, handles and tokens travel in bodies, cookies or headers, never in a
       path or query string.
@@ -33,9 +33,9 @@ info:
        no CSRF check applies. An operation that does not list `bearer` then
        answers `401` `unauthorized`, as if nothing had been sent.
     2. Otherwise the cookie of the kind the operation accepts is used:
-       `__Host-tindeerr_session` (`cookieSession`, web session),
-       `__Host-tindeerr_setup` (`setupSession`, setup session) or
-       `__Host-tindeerr_preauth` (`preAuth`, binds console sign-in handles). A
+       `__Host-tindarr_session` (`cookieSession`, web session),
+       `__Host-tindarr_setup` (`setupSession`, setup session) or
+       `__Host-tindarr_preauth` (`preAuth`, binds console sign-in handles). A
        cookie of another kind is never accepted in its place (`401`).
     3. Every authenticated request loads its session and its user: a revoked or
        expired session, or a disabled or unlinked user, gets `401`
@@ -49,7 +49,7 @@ info:
        claim, the web sign-ins, and Plex PIN and Quick Connect creation by the
        console) check `Origin` the same way. They also answer `403`
        `https_required` over plain HTTP, except from loopback to `localhost` or
-       when `TINDEERR_ALLOW_HTTP_CONSOLE` applies to a private client IP (the
+       when `TINDARR_ALLOW_HTTP_CONSOLE` applies to a private client IP (the
        cookies are then named without the `__Host-` prefix and `Secure`).
     6. Operations tagged `admin` need the effective role `admin` (`403`
        `admin_required`); some need a media server administrator
@@ -69,7 +69,7 @@ servers:
   - url: "{server}"
     variables:
       server:
-        default: https://tindeerr.example.com
+        default: https://tindarr.example.com
 
 security:
   - bearer: []
@@ -136,7 +136,7 @@ paths:
       operationId: getServerInfo
       security: []
       parameters:
-        - name: Tindeerr-Verify-Nonce
+        - name: Tindarr-Verify-Nonce
           in: header
           required: false
           description: |
@@ -161,7 +161,7 @@ paths:
       summary: Exchange the one-time setup code for a setup session
       description: |
         Called by the console. Opens a setup session (`kind` = `setup`, 30 minutes,
-        no user) in the `__Host-tindeerr_setup` cookie and revokes every earlier
+        no user) in the `__Host-tindarr_setup` cookie and revokes every earlier
         setup session: only the newest claim stays valid. The code stays usable until
         setup completes. `Origin` must be the server's origin, and plain HTTP is
         refused as for the web sign-ins (docs/auth.md, sections 2 and 3).
@@ -237,7 +237,7 @@ paths:
         purpose `owner_token` (`POST /auth/plex/pins`, then
         `POST /auth/plex/pins/status`); the token must come from the account that
         owns this server. A failed connection test does not consume `plex_pin_id`.
-        When `TINDEERR_MEDIA_SERVER_KIND`, `_URL` and `_API_KEY` are all set, the
+        When `TINDARR_MEDIA_SERVER_KIND`, `_URL` and `_API_KEY` are all set, the
         wizard skips this step (`SetupState.media_server_locked`); a field set by an
         environment variable cannot be given another value (`setting_locked`).
         Connection tests are limited to 10 per minute per session. After this call, a media server administrator signs in on the console, from
@@ -1079,7 +1079,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
     delete:
       tags: [me, console]
-      summary: Delete all of the caller's Tindeerr data and sign out everywhere
+      summary: Delete all of the caller's Tindarr data and sign out everywhere
       description: |
         Votes, profile, preferences and sessions. Nothing is deleted on the media
         server or the request backend. Console only: a phone's token cannot delete
@@ -1950,7 +1950,7 @@ paths:
           csrfToken: []
       summary: Enable, disable, promote or set limits for a user
       description: |
-        Disabling a user revokes their sessions. `role` edits the Tindeerr side
+        Disabling a user revokes their sessions. `role` edits the Tindarr side
         only (docs/adr/0010): `admin` sets `promoted`; `user` clears `promoted` and
         clears `media_server_admin` until the user's next sign-in, where the media
         server's flag is read again (a media server administrator is then admin
@@ -2048,34 +2048,34 @@ components:
     cookieSession:
       type: apiKey
       in: cookie
-      name: __Host-tindeerr_session
+      name: __Host-tindarr_session
       description: |
         Web console session (`kind` = `web`): opaque 256-bit token, stored hashed,
         `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, no `Domain`. Expires
-        after 24 h idle or 7 days after sign-in. Named `tindeerr_session`, without
+        after 24 h idle or 7 days after sign-in. Named `tindarr_session`, without
         `Secure`, only on requests from a private client IP when
-        `TINDEERR_ALLOW_HTTP_CONSOLE=true` (docs/auth.md, section 2).
+        `TINDARR_ALLOW_HTTP_CONSOLE=true` (docs/auth.md, section 2).
     setupSession:
       type: apiKey
       in: cookie
-      name: __Host-tindeerr_setup
+      name: __Host-tindarr_setup
       description: |
         Setup session from `POST /setup/claim` (`kind` = `setup`, no user,
         30 minutes absolute, same attributes as the web session cookie; named
-        `tindeerr_setup` under the plain-HTTP opt-in). Only one is valid at a time.
+        `tindarr_setup` under the plain-HTTP opt-in). Only one is valid at a time.
         Accepted by the setup operations, `GET /auth/web/session`, the web sign-ins
         while setup is pending, and Plex PINs of purpose `owner_token`. Never
         accepted where a web session is expected, and the reverse.
     preAuth:
       type: apiKey
       in: cookie
-      name: __Host-tindeerr_preauth
+      name: __Host-tindarr_preauth
       description: |
         Not a session: a random value that binds the console's Plex PIN and Quick
         Connect sign-in handles to the browser that started them (docs/auth.md,
         section 5). Set by `POST /auth/plex/pins` and `POST /auth/quick-connect`
         when called by the console without `code_challenge`, if absent; 15 minutes;
-        cleared by a successful web sign-in. Named `tindeerr_preauth` under the
+        cleared by a successful web sign-in. Named `tindarr_preauth` under the
         plain-HTTP opt-in.
     csrfToken:
       type: apiKey
@@ -2130,21 +2130,21 @@ components:
   headers:
     SetSessionCookie:
       description: |
-        `__Host-tindeerr_session=<token>; Path=/; Secure; HttpOnly; SameSite=Strict`
-        (no `Max-Age`). A web sign-in also clears `__Host-tindeerr_preauth`, and the
-        sign-in that completes setup clears `__Host-tindeerr_setup`.
+        `__Host-tindarr_session=<token>; Path=/; Secure; HttpOnly; SameSite=Strict`
+        (no `Max-Age`). A web sign-in also clears `__Host-tindarr_preauth`, and the
+        sign-in that completes setup clears `__Host-tindarr_setup`.
       schema: { type: string }
     SetSetupCookie:
-      description: "`__Host-tindeerr_setup=<token>; Path=/; Secure; HttpOnly; SameSite=Strict`."
+      description: "`__Host-tindarr_setup=<token>; Path=/; Secure; HttpOnly; SameSite=Strict`."
       schema: { type: string }
     SetPreAuthCookie:
       description: |
-        `__Host-tindeerr_preauth=<value>; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=900`,
+        `__Host-tindarr_preauth=<value>; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=900`,
         only for a console `sign_in` handle when the browser has no pre-auth cookie
         yet.
       schema: { type: string }
     ClearSessionCookie:
-      description: "Clears `__Host-tindeerr_session` (`Max-Age=0`) when the caller's web session was revoked by this request."
+      description: "Clears `__Host-tindarr_session` (`Max-Age=0`) when the caller's web session was revoked by this request."
       schema: { type: string }
     RetryAfter:
       description: Seconds, rounded up.
@@ -2321,9 +2321,9 @@ components:
         public_url_proof:
           type: string
           description: |
-            base64url(HMAC-SHA256(key, nonce)) with the `tindeerr/v1/public-url-proof`
+            base64url(HMAC-SHA256(key, nonce)) with the `tindarr/v1/public-url-proof`
             sub-key. Present only when the request carried a
-            `Tindeerr-Verify-Nonce` this server is currently waiting for.
+            `Tindarr-Verify-Nonce` this server is currently waiting for.
       if:
         required: [setup_required]
         properties:
@@ -2353,7 +2353,7 @@ components:
         media_server_locked:
           type: boolean
           description: |
-            `TINDEERR_MEDIA_SERVER_KIND`, `_URL` and `_API_KEY` are all set: the
+            `TINDARR_MEDIA_SERVER_KIND`, `_URL` and `_API_KEY` are all set: the
             wizard skips the media server step.
         locked_fields:
           type: array
@@ -2553,8 +2553,8 @@ components:
             code: { $ref: "#/components/schemas/PairingCode" }
             link:
               type: string
-              description: "`tindeerr://pair?server=<public_url>&code=<code>`, rendered as a QR code (SVG or canvas), with the host of `public_url` written next to it."
-              examples: ["tindeerr://pair?server=https%3A%2F%2Ftindeerr.example.com&code=q7Xc0vW2dYk9LmN4pRs6Tu"]
+              description: "`tindarr://pair?server=<public_url>&code=<code>`, rendered as a QR code (SVG or canvas), with the host of `public_url` written next to it."
+              examples: ["tindarr://pair?server=https%3A%2F%2Ftindarr.example.com&code=q7Xc0vW2dYk9LmN4pRs6Tu"]
 
     TokenPair:
       type: object
@@ -2614,7 +2614,7 @@ components:
             media_server_admin:
               type: boolean
               description: Administrator on the media server, as read at the user's last sign-in (or cleared by a demotion or the hourly sync since).
-            promoted: { type: boolean, description: Made admin in Tindeerr. }
+            promoted: { type: boolean, description: Made admin in Tindarr. }
             remote_access:
               type: boolean
               description: From the media server policy; when false, the user is refused from non-private client IPs.
@@ -2833,7 +2833,7 @@ components:
         poster_path: { type: [string, "null"] }
         pick_type: { $ref: "#/components/schemas/PickType" }
         liked_at: { type: string, format: date-time }
-        requested: { type: boolean, description: Requested from Tindeerr or already requested elsewhere. }
+        requested: { type: boolean, description: Requested from Tindarr or already requested elsewhere. }
         availability: { $ref: "#/components/schemas/Availability" }
         watch_url:
           type: [string, "null"]
@@ -3092,7 +3092,7 @@ components:
         offered: `enabled`, `lan_only` (only from a private client IP) or
         `disabled`. Refused attempts get `403` `password_sign_in_disabled`. Quick
         Connect, Plex PIN and pairing are not affected. Set by
-        `TINDEERR_PASSWORD_SIGN_IN` or by a media server administrator.
+        `TINDARR_PASSWORD_SIGN_IN` or by a media server administrator.
       enum: [enabled, lan_only, disabled]
       default: enabled
 

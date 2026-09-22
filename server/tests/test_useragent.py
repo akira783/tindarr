@@ -2,7 +2,7 @@
 
 import pytest
 
-from tindeerr.api.useragent import MAX_LENGTH, UNKNOWN, browser_name, console_device
+from tindarr.api.useragent import MAX_LENGTH, UNKNOWN, browser_name, console_device
 
 FIREFOX = "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0"
 CHROME = (

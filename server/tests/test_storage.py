@@ -8,13 +8,13 @@ import pytest
 from sqlalchemy import Table, select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from tindeerr.storage import server_state as state_repo
-from tindeerr.storage import sessions as sessions_repo
-from tindeerr.storage import users as users_repo
-from tindeerr.storage.db import write_transaction
-from tindeerr.storage.sessions import Device, Session, SessionLifetime
-from tindeerr.storage.tables import pairings, server_state, sessions, users
-from tindeerr.storage.users import User
+from tindarr.storage import server_state as state_repo
+from tindarr.storage import sessions as sessions_repo
+from tindarr.storage import users as users_repo
+from tindarr.storage.db import write_transaction
+from tindarr.storage.sessions import Device, Session, SessionLifetime
+from tindarr.storage.tables import pairings, server_state, sessions, users
+from tindarr.storage.users import User
 
 pytestmark = pytest.mark.anyio
 

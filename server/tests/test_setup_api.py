@@ -23,12 +23,12 @@ from tests.support import (
     setup_code,
 )
 from tests.test_contract import assert_is_problem, assert_matches_contract
-from tindeerr.adapters.emby import EmbyServer
-from tindeerr.adapters.factory import media_server_factory
-from tindeerr.adapters.jellyfin import JellyfinServer
-from tindeerr.adapters.plex import PlexServer
-from tindeerr.api.cookies import PLAIN_NAMES, SECURE_NAMES
-from tindeerr.ports.media_server import MediaServerConnection, MediaServerKind
+from tindarr.adapters.emby import EmbyServer
+from tindarr.adapters.factory import media_server_factory
+from tindarr.adapters.jellyfin import JellyfinServer
+from tindarr.adapters.plex import PlexServer
+from tindarr.api.cookies import PLAIN_NAMES, SECURE_NAMES
+from tindarr.ports.media_server import MediaServerConnection, MediaServerKind
 
 CLAIM_PATH = "/api/v1/setup/claim"
 STATE_PATH = "/api/v1/setup/state"
@@ -247,9 +247,9 @@ def test_the_state_shows_the_configured_media_server(app: Any) -> None:
 def test_the_state_lists_the_fields_the_environment_locks(
     data_dir: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("TINDEERR_MEDIA_SERVER_KIND", "emby")
-    monkeypatch.setenv("TINDEERR_MEDIA_SERVER_URL", "http://emby.lan:8096")
-    monkeypatch.setenv("TINDEERR_MEDIA_SERVER_API_KEY", "locked-key")
+    monkeypatch.setenv("TINDARR_MEDIA_SERVER_KIND", "emby")
+    monkeypatch.setenv("TINDARR_MEDIA_SERVER_URL", "http://emby.lan:8096")
+    monkeypatch.setenv("TINDARR_MEDIA_SERVER_API_KEY", "locked-key")
     app = build_app(data_dir, clock=clock)
     with console_client(app) as client:
         claim(client, app)
@@ -315,7 +315,7 @@ def test_a_failed_connection_test_is_a_bad_gateway(
 def test_a_locked_field_cannot_be_given_another_value(
     data_dir: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("TINDEERR_MEDIA_SERVER_URL", "http://jellyfin.lan:8096")
+    monkeypatch.setenv("TINDARR_MEDIA_SERVER_URL", "http://jellyfin.lan:8096")
     app = build_app(data_dir, clock=clock)
     with console_client(app) as client:
         csrf = claim(client, app)

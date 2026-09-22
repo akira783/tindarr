@@ -15,15 +15,15 @@ from fastapi.testclient import TestClient
 
 from tests.support.fakes import FakeClock, FakeMediaServers, media_user
 from tests.support.upstream import FakeInternet
-from tindeerr.adapters.factory import media_server_factory
-from tindeerr.adapters.plextv import PlexTvClient
-from tindeerr.api.cookies import SECURE_NAMES
-from tindeerr.api.deps import AppServices
-from tindeerr.auth.setupcode import read_setup_code
-from tindeerr.core.config import ServerConfig
-from tindeerr.main.app import Wiring, create_app
-from tindeerr.ports.media_server import MediaUser
-from tindeerr.storage.sessions import Device
+from tindarr.adapters.factory import media_server_factory
+from tindarr.adapters.plextv import PlexTvClient
+from tindarr.api.cookies import SECURE_NAMES
+from tindarr.api.deps import AppServices
+from tindarr.auth.setupcode import read_setup_code
+from tindarr.core.config import ServerConfig
+from tindarr.main.app import Wiring, create_app
+from tindarr.ports.media_server import MediaUser
+from tindarr.storage.sessions import Device
 
 #: The host the console is opened at in the tests, and the one TestClient sends by default.
 CONSOLE_HOST = "console.test"

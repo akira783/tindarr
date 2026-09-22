@@ -7,7 +7,7 @@ import jwt
 import pytest
 
 from tests.support import FakeClock
-from tindeerr.auth.tokens import (
+from tindarr.auth.tokens import (
     ACCESS_TOKEN_LIFETIME,
     AUDIENCE,
     LEEWAY,
@@ -16,8 +16,8 @@ from tindeerr.auth.tokens import (
     token_hash,
     tokens_equal,
 )
-from tindeerr.core.errors import ProblemError
-from tindeerr.core.keys import KeyMaterial, KeyPurpose
+from tindarr.core.errors import ProblemError
+from tindarr.core.keys import KeyMaterial, KeyPurpose
 
 
 def signing_key(keys: KeyMaterial) -> bytes:
@@ -30,7 +30,7 @@ def claims_of(token: str, keys: KeyMaterial) -> dict[str, Any]:
         signing_key(keys),
         algorithms=["HS256"],
         audience=AUDIENCE,
-        issuer="tindeerr:install-1",
+        issuer="tindarr:install-1",
         options={"verify_exp": False},  # the fake clock is not the system clock
     )
 
@@ -71,7 +71,7 @@ def test_an_issued_token_carries_the_required_header_and_claims(
     claims = claims_of(issued.value, keys)
 
     assert header == {"alg": "HS256", "typ": "at+jwt", "kid": keys.key_id}
-    assert claims["iss"] == "tindeerr:install-1"
+    assert claims["iss"] == "tindarr:install-1"
     assert claims["aud"] == AUDIENCE
     assert (claims["sub"], claims["sid"]) == ("user-1", "session-1")
     assert claims["exp"] - claims["iat"] == ACCESS_TOKEN_LIFETIME.total_seconds()
@@ -114,7 +114,7 @@ def test_a_token_from_the_future_is_refused(access_tokens: AccessTokens, clock: 
 def forged(keys: KeyMaterial, **changes: Any) -> str:
     """Sign a token with the real key but the wrong claims or header."""
     payload: dict[str, Any] = {
-        "iss": "tindeerr:install-1",
+        "iss": "tindarr:install-1",
         "aud": AUDIENCE,
         "sub": "user-1",
         "sid": "session-1",
@@ -137,7 +137,7 @@ def forged(keys: KeyMaterial, **changes: Any) -> str:
     "changes",
     [
         pytest.param({"payload": {"aud": "someone-else"}}, id="wrong audience"),
-        pytest.param({"payload": {"iss": "tindeerr:another-install"}}, id="wrong issuer"),
+        pytest.param({"payload": {"iss": "tindarr:another-install"}}, id="wrong issuer"),
         pytest.param({"header": {"typ": "JWT"}}, id="wrong type"),
         pytest.param({"header": {"typ": None}}, id="no type"),
         pytest.param({"header": {"kid": "0badc0de"}}, id="wrong key id"),
@@ -166,7 +166,7 @@ def test_a_token_signed_with_another_key_is_refused(
     other = KeyMaterial(b"another-master-key-0123456789abcd", "environment")
     token = jwt.encode(
         {
-            "iss": "tindeerr:install-1",
+            "iss": "tindarr:install-1",
             "aud": AUDIENCE,
             "sub": "user-1",
             "sid": "session-1",
@@ -184,7 +184,7 @@ def test_a_token_signed_with_another_key_is_refused(
 def test_an_unsigned_token_is_refused(access_tokens: AccessTokens, clock: FakeClock) -> None:
     unsigned = jwt.encode(
         {
-            "iss": "tindeerr:install-1",
+            "iss": "tindarr:install-1",
             "aud": AUDIENCE,
             "sub": "user-1",
             "sid": "session-1",

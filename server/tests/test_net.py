@@ -4,7 +4,7 @@ from ipaddress import IPv4Address, IPv6Address
 
 import pytest
 
-from tindeerr.core.net import (
+from tindarr.core.net import (
     build_origin,
     is_http_allowed_host,
     is_private_ip,
@@ -71,14 +71,14 @@ def test_rate_limit_key_groups_ipv6_by_64() -> None:
 @pytest.mark.parametrize(
     ("value", "host", "port"),
     [
-        ("tindeerr.example.com", "tindeerr.example.com", None),
-        ("Tindeerr.Example.COM:8787", "tindeerr.example.com", 8787),
+        ("tindarr.example.com", "tindarr.example.com", None),
+        ("Tindarr.Example.COM:8787", "tindarr.example.com", 8787),
         ("example.com.", "example.com", None),
         ("localhost", "localhost", None),
         ("192.168.1.4:8787", "192.168.1.4", 8787),
         ("[::1]", "::1", None),
         ("[2001:db8::1]:8787", "2001:db8::1", 8787),
-        ("xn--tindeerr-1ya.example", "xn--tindeerr-1ya.example", None),
+        ("xn--tindarr-1ya.example", "xn--tindarr-1ya.example", None),
     ],
 )
 def test_parse_host(value: str, host: str, port: int | None) -> None:
@@ -151,12 +151,12 @@ def test_normalize_origin_refuses(value: str) -> None:
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        ("https://tindeerr.example.com", "https://tindeerr.example.com"),
-        ("https://tindeerr.example.com/", "https://tindeerr.example.com"),
-        ("https://tindeerr.example.com:8443", "https://tindeerr.example.com:8443"),
+        ("https://tindarr.example.com", "https://tindarr.example.com"),
+        ("https://tindarr.example.com/", "https://tindarr.example.com"),
+        ("https://tindarr.example.com:8443", "https://tindarr.example.com:8443"),
         ("http://192.168.1.4:8787", "http://192.168.1.4:8787"),
         ("http://localhost:8787", "http://localhost:8787"),
-        ("http://tindeerr.local", "http://tindeerr.local"),
+        ("http://tindarr.local", "http://tindarr.local"),
         ("http://[fd00::1]", "http://[fd00::1]"),
     ],
 )
@@ -167,7 +167,7 @@ def test_public_url(value: str, expected: str) -> None:
 @pytest.mark.parametrize(
     ("value", "message"),
     [
-        ("tindeerr.example.com", "https"),
+        ("tindarr.example.com", "https"),
         ("ftp://example.com", "https"),
         ("http://example.com", "https"),
         ("http://8.8.8.8", "https"),
@@ -187,7 +187,7 @@ def test_public_url_refuses(value: str, message: str) -> None:
 
 
 def test_http_hosts_are_decided_without_dns() -> None:
-    for value in ("192.168.1.4", "localhost", "tindeerr.local", "[::1]"):
+    for value in ("192.168.1.4", "localhost", "tindarr.local", "[::1]"):
         host = parse_host(value)
         assert host is not None
         assert is_http_allowed_host(host)

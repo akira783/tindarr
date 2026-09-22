@@ -13,9 +13,9 @@ from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import text
 
-from tindeerr.storage import migrate
-from tindeerr.storage.db import UtcDateTime, create_sync_engine, database_path
-from tindeerr.storage.migrate import (
+from tindarr.storage import migrate
+from tindarr.storage.db import UtcDateTime, create_sync_engine, database_path
+from tindarr.storage.migrate import (
     LOCK_FILE_NAME,
     BackupError,
     MigrationResult,
@@ -25,7 +25,7 @@ from tindeerr.storage.migrate import (
     upgrade_database,
     verify_backup,
 )
-from tindeerr.storage.tables import metadata
+from tindarr.storage.tables import metadata
 
 EXTRA_REVISION = '''"""Test-only revision."""
 
@@ -169,13 +169,13 @@ def test_database_from_a_newer_version_is_refused(data_dir: Path) -> None:
     upgrade_database(db_path, data_dir / "backups", keep=3)
     with closing(sqlite3.connect(db_path)) as connection, connection:
         connection.execute("UPDATE alembic_version SET version_num = 'abcdef'")
-    with pytest.raises(SchemaTooNewError, match="newer Tindeerr"):
+    with pytest.raises(SchemaTooNewError, match="newer Tindarr"):
         upgrade_database(db_path, data_dir / "backups", keep=3)
     assert not (data_dir / "backups").exists()
 
 
 def test_prune_keeps_the_most_recent_backups(tmp_path: Path) -> None:
-    names = [f"tindeerr-2026010{day}T000000000000Z-rev-0001.db" for day in range(1, 6)]
+    names = [f"tindarr-2026010{day}T000000000000Z-rev-0001.db" for day in range(1, 6)]
     for name in names:
         (tmp_path / name).touch()
     (tmp_path / "unrelated.txt").touch()

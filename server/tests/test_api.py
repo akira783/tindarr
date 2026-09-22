@@ -15,14 +15,14 @@ from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from tests.support import server_config
-from tindeerr import __version__
-from tindeerr.core.config import ConfigError, ServerConfig
-from tindeerr.core.crypto import DecryptionError
-from tindeerr.core.errors import ProblemError
-from tindeerr.core.logs import is_sensitive_key
-from tindeerr.main.app import create_app
-from tindeerr.storage.db import database_path
-from tindeerr.storage.settings import SettingLockedError
+from tindarr import __version__
+from tindarr.core.config import ConfigError, ServerConfig
+from tindarr.core.crypto import DecryptionError
+from tindarr.core.errors import ProblemError
+from tindarr.core.logs import is_sensitive_key
+from tindarr.main.app import create_app
+from tindarr.storage.db import database_path
+from tindarr.storage.settings import SettingLockedError
 
 SECURITY_HEADERS = {
     "cache-control": "no-store",
@@ -105,7 +105,7 @@ def test_server_info_on_a_fresh_install(client: TestClient) -> None:
     response = client.get("/api/v1/server/info")
     assert response.status_code == 200
     assert response.json() == {
-        "name": "Tindeerr",
+        "name": "Tindarr",
         "version": __version__,
         "api_version": 1,
         "min_app_version": "0.1.0",
@@ -128,8 +128,8 @@ def test_server_info_reflects_the_media_server(
     kind: str,
     methods: list[str],
 ) -> None:
-    monkeypatch.setenv("TINDEERR_MEDIA_SERVER_KIND", kind)
-    monkeypatch.setenv("TINDEERR_SERVER_NAME", "Chez nous")
+    monkeypatch.setenv("TINDARR_MEDIA_SERVER_KIND", kind)
+    monkeypatch.setenv("TINDARR_SERVER_NAME", "Chez nous")
     with TestClient(create_app(config)) as client:
         body = client.get("/api/v1/server/info").json()
         assert body["media_server"] == {"kind": kind}
@@ -147,9 +147,9 @@ def test_server_info_reflects_the_media_server(
 def test_unknown_media_server_kind_prevents_startup(
     config: ServerConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("TINDEERR_MEDIA_SERVER_KIND", "kodi")
+    monkeypatch.setenv("TINDARR_MEDIA_SERVER_KIND", "kodi")
     with (
-        pytest.raises(ConfigError, match="TINDEERR_MEDIA_SERVER_KIND"),
+        pytest.raises(ConfigError, match="TINDARR_MEDIA_SERVER_KIND"),
         TestClient(create_app(config)),
     ):
         pass
@@ -190,9 +190,9 @@ def test_request_id_is_echoed_from_trusted_proxies_only(data_dir: Path) -> None:
 def test_access_log_has_request_id_and_no_query_string(
     client: TestClient, caplog: pytest.LogCaptureFixture
 ) -> None:
-    with caplog.at_level(logging.INFO, logger="tindeerr.access"):
+    with caplog.at_level(logging.INFO, logger="tindarr.access"):
         client.get("/api/v1/server/info?api_key=leaky", headers={"X-Request-ID": "req-42"})
-    (record,) = [r for r in caplog.records if r.name == "tindeerr.access"]
+    (record,) = [r for r in caplog.records if r.name == "tindarr.access"]
     assert record.__dict__["path"] == "/api/v1/server/info"
     assert record.__dict__["status"] == 200
     assert "leaky" not in caplog.text
@@ -308,7 +308,7 @@ def test_setting_locked_is_a_409_problem(test_client: TestClient) -> None:
         "title": "Conflict",
         "status": 409,
         "code": "setting_locked",
-        "detail": "server_name is set by TINDEERR_SERVER_NAME and cannot be changed here",
+        "detail": "server_name is set by TINDARR_SERVER_NAME and cannot be changed here",
     }
 
 

@@ -7,11 +7,11 @@ import httpx2
 import pytest
 
 from tests.support.upstream import MACHINE_ID, FakePlexTv
-from tindeerr.adapters.plex import PlexServer
-from tindeerr.adapters.plextv import DEFAULT_BACKOFF_MS, PlexTvClient
-from tindeerr.core.errors import ProblemError, RateLimitedError
-from tindeerr.ports.media_server import MediaServerConnection
-from tindeerr.ports.plextv import PlexAccount, PlexPin, PlexResource, as_media_user, find_server
+from tindarr.adapters.plex import PlexServer
+from tindarr.adapters.plextv import DEFAULT_BACKOFF_MS, PlexTvClient
+from tindarr.core.errors import ProblemError, RateLimitedError
+from tindarr.ports.media_server import MediaServerConnection
+from tindarr.ports.plextv import PlexAccount, PlexPin, PlexResource, as_media_user, find_server
 
 pytestmark = pytest.mark.anyio
 
@@ -69,33 +69,33 @@ def plex_media_server(
 async def test_a_pin_is_created_with_the_client_identifier_and_device_name(
     plex_tv: FakePlexTv,
 ) -> None:
-    pin = await client(plex_tv).create_pin("client-1", "Tindeerr (Home)")
+    pin = await client(plex_tv).create_pin("client-1", "Tindarr (Home)")
     assert (pin.client_id, pin.code) == ("client-1", "CODE1")
     created = plex_tv.requests[-1]
     assert created.url.params["strong"] == "true"
     assert created.headers["x-plex-client-identifier"] == "client-1"
-    assert created.headers["x-plex-device-name"] == "Tindeerr (Home)"
-    assert created.headers["x-plex-product"] == "Tindeerr"
+    assert created.headers["x-plex-device-name"] == "Tindarr (Home)"
+    assert created.headers["x-plex-product"] == "Tindarr"
     assert pin.expires_at > datetime.now(UTC)
 
 
-async def test_the_approval_link_names_tindeerr(plex_tv: FakePlexTv) -> None:
-    pin = await client(plex_tv).create_pin("client-1", "Tindeerr (Home)")
+async def test_the_approval_link_names_tindarr(plex_tv: FakePlexTv) -> None:
+    pin = await client(plex_tv).create_pin("client-1", "Tindarr (Home)")
     link = client(plex_tv).auth_url(pin)
     assert link.startswith("https://app.plex.tv/auth#?clientID=client-1&code=CODE1")
-    assert link.endswith("context%5Bdevice%5D%5Bproduct%5D=Tindeerr")
+    assert link.endswith("context%5Bdevice%5D%5Bproduct%5D=Tindarr")
 
 
 async def test_a_pin_carries_no_token_until_it_is_approved(plex_tv: FakePlexTv) -> None:
     plex_tv_client = client(plex_tv)
-    pin = await plex_tv_client.create_pin("client-1", "Tindeerr")
+    pin = await plex_tv_client.create_pin("client-1", "Tindarr")
     assert await plex_tv_client.check_pin(pin) is None
     plex_tv.approve(pin.code, "user-token")
     assert await plex_tv_client.check_pin(pin) == "user-token"
 
 
 async def test_a_pin_is_polled_with_its_own_client_identifier(plex_tv: FakePlexTv) -> None:
-    pin = await client(plex_tv).create_pin("client-1", "Tindeerr")
+    pin = await client(plex_tv).create_pin("client-1", "Tindarr")
     other = PlexPin(id=pin.id, code=pin.code, client_id="someone-else", expires_at=pin.expires_at)
     assert await client(plex_tv).check_pin(other) is None
 
@@ -108,7 +108,7 @@ async def test_an_unknown_pin_is_simply_not_approved(plex_tv: FakePlexTv) -> Non
 async def test_plex_tv_being_unreachable_is_reported(plex_tv: FakePlexTv) -> None:
     plex_tv.offline = True
     with pytest.raises(ProblemError) as caught:
-        await client(plex_tv).create_pin("client-1", "Tindeerr")
+        await client(plex_tv).create_pin("client-1", "Tindarr")
     assert (caught.value.status, caught.value.code) == (503, "plex_tv_unreachable")
 
 
@@ -117,7 +117,7 @@ async def test_a_pin_without_an_id_is_unusable(plex_tv: FakePlexTv) -> None:
         return httpx2.Response(201, json={"code": "ABCD"})
 
     with pytest.raises(ProblemError) as caught:
-        await PlexTvClient(httpx2.MockTransport(handle)).create_pin("c", "Tindeerr")
+        await PlexTvClient(httpx2.MockTransport(handle)).create_pin("c", "Tindarr")
     assert caught.value.code == "plex_tv_unreachable"
 
 
@@ -133,7 +133,7 @@ async def test_the_pin_expiry_falls_back_when_plex_tv_gives_none(payload: dict[s
     def handle(_request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(201, json=payload)
 
-    pin = await PlexTvClient(httpx2.MockTransport(handle)).create_pin("c", "Tindeerr")
+    pin = await PlexTvClient(httpx2.MockTransport(handle)).create_pin("c", "Tindarr")
     assert pin.expires_at > datetime.now(UTC)
 
 
@@ -142,14 +142,14 @@ async def test_a_naive_expiry_is_read_as_utc() -> None:
         moment = (datetime.now(UTC) + timedelta(minutes=9)).replace(tzinfo=None)
         return httpx2.Response(201, json={"id": 1, "code": "A", "expiresAt": moment.isoformat()})
 
-    pin = await PlexTvClient(httpx2.MockTransport(handle)).create_pin("c", "Tindeerr")
+    pin = await PlexTvClient(httpx2.MockTransport(handle)).create_pin("c", "Tindarr")
     assert pin.expires_at.tzinfo is not None
 
 
 async def test_plex_tv_asking_us_to_slow_down_is_a_rate_limit(plex_tv: FakePlexTv) -> None:
     plex_tv.rate_limited.add("/api/v2/pins")
     with pytest.raises(RateLimitedError) as caught:
-        await client(plex_tv).create_pin("client-1", "Tindeerr")
+        await client(plex_tv).create_pin("client-1", "Tindarr")
     assert caught.value.retry_after_ms == DEFAULT_BACKOFF_MS
 
 
@@ -158,7 +158,7 @@ async def test_a_retry_after_header_sets_the_backoff() -> None:
         return httpx2.Response(429, json={}, headers={"Retry-After": "3"})
 
     with pytest.raises(RateLimitedError) as caught:
-        await PlexTvClient(httpx2.MockTransport(handle)).create_pin("c", "Tindeerr")
+        await PlexTvClient(httpx2.MockTransport(handle)).create_pin("c", "Tindarr")
     assert caught.value.retry_after_ms == 3000
 
 

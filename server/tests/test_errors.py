@@ -1,7 +1,7 @@
 import pytest
 
-from tindeerr.core.errors import ProblemError, RateLimitedError
-from tindeerr.storage.settings import SettingLockedError
+from tindarr.core.errors import ProblemError, RateLimitedError
+from tindarr.storage.settings import SettingLockedError
 
 
 def test_problem_error_carries_its_fields() -> None:
@@ -28,7 +28,7 @@ def test_setting_locked_error_is_a_problem() -> None:
     error = SettingLockedError("media_server_url")
     assert isinstance(error, ProblemError)
     assert (error.status, error.code, error.name) == (409, "setting_locked", "media_server_url")
-    assert "TINDEERR_MEDIA_SERVER_URL" in (error.detail or "")
+    assert "TINDARR_MEDIA_SERVER_URL" in (error.detail or "")
 
 
 def test_extensions_are_extra_members_of_the_problem() -> None:

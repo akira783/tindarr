@@ -1530,7 +1530,7 @@ wheels = [
 ]
 
 [[package]]
-name = "tindeerr"
+name = "tindarr"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

@@ -1,7 +1,7 @@
 [project]
-name = "tindeerr"
+name = "tindarr"
 version = "0.1.0"
-description = "Self-hosted server behind the Tindeerr app: AI-picked movie and series cards to swipe, requests filed to Seerr."
+description = "Self-hosted server behind the Tindarr app: AI-picked movie and series cards to swipe, requests filed to Seerr."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-tindeerr = "tindeerr.main.cli:main"
+tindarr = "tindarr.main.cli:main"
 
 [dependency-groups]
 dev = [
@@ -87,7 +87,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "PLR2004", "D", "S105", "S106", "SLF001", "FBT001"]
-"src/tindeerr/storage/migrations/versions/*" = ["D103"]
+"src/tindarr/storage/migrations/versions/*" = ["D103"]
 
 [tool.pyright]
 include = ["src", "tests"]
@@ -107,7 +107,7 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["src/tindeerr"]
+source = ["src/tindarr"]
 branch = true
 omit = ["*/__main__.py"]
 
@@ -118,13 +118,13 @@ skip_covered = true
 exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]
 
 [tool.importlinter]
-root_package = "tindeerr"
+root_package = "tindarr"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Layers: imports only point downwards"
 type = "layers"
-containers = ["tindeerr"]
+containers = ["tindarr"]
 layers = [
     "main",
     "api",
@@ -139,41 +139,41 @@ exhaustive = true
 exhaustive_ignores = ["adapters", "__main__"]
 
 [[tool.importlinter.contracts]]
-name = "Only tindeerr.main imports adapters"
+name = "Only tindarr.main imports adapters"
 type = "forbidden"
 source_modules = [
-    "tindeerr.api",
-    "tindeerr.jobs",
-    "tindeerr.auth",
-    "tindeerr.swipe",
-    "tindeerr.storage",
-    "tindeerr.ports",
-    "tindeerr.core",
+    "tindarr.api",
+    "tindarr.jobs",
+    "tindarr.auth",
+    "tindarr.swipe",
+    "tindarr.storage",
+    "tindarr.ports",
+    "tindarr.core",
 ]
-forbidden_modules = ["tindeerr.adapters"]
+forbidden_modules = ["tindarr.adapters"]
 
 [[tool.importlinter.contracts]]
 name = "Adapters depend on ports and core only"
 type = "forbidden"
-source_modules = ["tindeerr.adapters"]
+source_modules = ["tindarr.adapters"]
 forbidden_modules = [
-    "tindeerr.main",
-    "tindeerr.api",
-    "tindeerr.jobs",
-    "tindeerr.auth",
-    "tindeerr.swipe",
-    "tindeerr.storage",
+    "tindarr.main",
+    "tindarr.api",
+    "tindarr.jobs",
+    "tindarr.auth",
+    "tindarr.swipe",
+    "tindarr.storage",
 ]
 
 [[tool.importlinter.contracts]]
 name = "Domain and auth stay free of HTTP"
 type = "forbidden"
 source_modules = [
-    "tindeerr.swipe",
-    "tindeerr.auth",
-    "tindeerr.jobs",
-    "tindeerr.storage",
-    "tindeerr.ports",
-    "tindeerr.core",
+    "tindarr.swipe",
+    "tindarr.auth",
+    "tindarr.jobs",
+    "tindarr.storage",
+    "tindarr.ports",
+    "tindarr.core",
 ]
 forbidden_modules = ["fastapi", "starlette", "uvicorn"]

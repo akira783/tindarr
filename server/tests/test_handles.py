@@ -5,14 +5,14 @@ from datetime import timedelta
 import pytest
 
 from tests.support import FakeClock
-from tindeerr.auth.handles import (
+from tindarr.auth.handles import (
     MAX_LIFETIME,
     Binding,
     HandleRegistry,
     pkce_challenge,
 )
-from tindeerr.auth.ratelimit import Limit, SlidingWindow
-from tindeerr.core.errors import PendingError, ProblemError, RateLimitedError
+from tindarr.auth.ratelimit import Limit, SlidingWindow
+from tindarr.core.errors import PendingError, ProblemError, RateLimitedError
 
 VERIFIER = "v" * 43
 CLIENT = "192.168.1.20"

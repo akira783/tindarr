@@ -26,10 +26,10 @@ from tests.support import (
     web_login,
 )
 from tests.test_contract import assert_is_problem, assert_matches_contract
-from tindeerr.api.cookies import SECURE_NAMES
-from tindeerr.auth.sync import UserSync
-from tindeerr.storage import users as user_repository
-from tindeerr.storage.db import write_transaction
+from tindarr.api.cookies import SECURE_NAMES
+from tindarr.auth.sync import UserSync
+from tindarr.storage import users as user_repository
+from tindarr.storage.db import write_transaction
 
 CONNECTOR = f"{API}/admin/connectors/media_server"
 OTHER_SERVER_ID = "1" * 32

@@ -35,7 +35,7 @@ from tests.support import (
 )
 from tests.support.flows import configure_media_server
 from tests.test_contract import assert_is_problem, assert_matches_contract
-from tindeerr.api.cookies import SECURE_NAMES
+from tindarr.api.cookies import SECURE_NAMES
 
 PUBLIC_PEER = "203.0.113.5"
 
@@ -86,7 +86,7 @@ def test_the_first_administrator_completes_setup(app: FastAPI, internet: FakeInt
         assert body["kind"] == "web"
         assert client.cookies.get(SECURE_NAMES.session) is not None
         assert client.cookies.get(SECURE_NAMES.setup) is None
-        # The media server session Tindeerr opened to check the password was closed.
+        # The media server session Tindarr opened to check the password was closed.
         assert internet.media.logouts == [f"user-token-{ADMIN_NAME}"]
 
 
@@ -210,7 +210,7 @@ def test_at_most_two_failures_per_username_reach_the_media_server(
         assert_is_problem(response, 429, "rate_limited")
         assert response.json()["retry_after_ms"] > 0
         assert response.headers["Retry-After"]
-        # The third attempt never left Tindeerr: that is what protects the lockout.
+        # The third attempt never left Tindarr: that is what protects the lockout.
         assert sign_in_attempts(internet) - before == 2
         # It is a pause, not a lock: the window empties on its own.
         clock.advance(15 * 60 + 1)

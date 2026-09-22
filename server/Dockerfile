@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1
 
-# Tindeerr server image, with the web console inside it.
+# Tindarr server image, with the web console inside it.
 # - Build context: the REPOSITORY ROOT, because the console needs web/,
 #   shared/i18n/ and api/openapi.yaml:
-#       docker build -f server/Dockerfile -t tindeerr-server .
+#       docker build -f server/Dockerfile -t tindarr-server .
 #   The root .dockerignore says what the build may read.
 # - Runs as UID/GID 10001, works with a read-only root filesystem: state lives in the
 #   /data volume, scratch space in a tmpfs on /tmp.
-# - Listens on port 8787 (TINDEERR_PORT). The runtime stage has no Node.
+# - Listens on port 8787 (TINDARR_PORT). The runtime stage has no Node.
 
 ARG PYTHON_IMAGE=python:3.13-slim-trixie@sha256:8d9d0b8bcf6506481eae4907c18f5e3e7902e629f5f6d684f9e7c32e85e3ddf0
 ARG UV_IMAGE=astral/uv:0.12.17@sha256:10787c682e4184e4f290de1171fd4703dc63de99221f10fe1c99002ce7fa9acc
@@ -55,14 +55,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ---------------------------------------------------------------- runtime
 FROM ${PYTHON_IMAGE} AS runtime
 
-LABEL org.opencontainers.image.title="Tindeerr server" \
+LABEL org.opencontainers.image.title="Tindarr server" \
       org.opencontainers.image.description="AI-picked movie and series cards to swipe, requests filed to Seerr." \
-      org.opencontainers.image.source="https://github.com/akira783/tindeerr" \
+      org.opencontainers.image.source="https://github.com/akira783/tindarr" \
       org.opencontainers.image.licenses="MIT"
 
-RUN groupadd --system --gid 10001 tindeerr \
+RUN groupadd --system --gid 10001 tindarr \
  && useradd --system --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent \
-        --shell /usr/sbin/nologin tindeerr \
+        --shell /usr/sbin/nologin tindarr \
  && install -d -o 10001 -g 10001 -m 0700 /data
 
 COPY --from=build /app/.venv /app/.venv
@@ -72,10 +72,10 @@ COPY --from=web --chown=root:root --chmod=755 /src/web/dist /app/web
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    TINDEERR_DATA_DIR=/data \
-    TINDEERR_WEB_DIR=/app/web \
-    TINDEERR_HOST=0.0.0.0 \
-    TINDEERR_PORT=8787
+    TINDARR_DATA_DIR=/data \
+    TINDARR_WEB_DIR=/app/web \
+    TINDARR_HOST=0.0.0.0 \
+    TINDARR_PORT=8787
 
 USER 10001:10001
 WORKDIR /data
@@ -83,7 +83,7 @@ VOLUME ["/data"]
 EXPOSE 8787
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD ["tindeerr", "healthcheck"]
+    CMD ["tindarr", "healthcheck"]
 
-ENTRYPOINT ["tindeerr"]
+ENTRYPOINT ["tindarr"]
 CMD ["serve"]

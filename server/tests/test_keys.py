@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from tindeerr.core import keys
-from tindeerr.core.keys import (
+from tindarr.core import keys
+from tindarr.core.keys import (
     KEY_FILE_NAME,
     KeyPurpose,
     SecretKeyError,

@@ -3,8 +3,8 @@
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from tindeerr.core.errors import ProblemError
-from tindeerr.ports.media_server import (
+from tindarr.core.errors import ProblemError
+from tindarr.ports.media_server import (
     ConnectionCheck,
     ConnectorHealth,
     MediaServerConnection,

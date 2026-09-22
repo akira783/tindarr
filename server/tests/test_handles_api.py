@@ -26,8 +26,8 @@ from tests.support import (
 )
 from tests.support.flows import configure_media_server
 from tests.test_contract import assert_is_problem, assert_matches_contract
-from tindeerr.api.cookies import SECURE_NAMES
-from tindeerr.auth.handles import MAX_TOTAL, Binding, pkce_challenge
+from tindarr.api.cookies import SECURE_NAMES
+from tindarr.auth.handles import MAX_TOTAL, Binding, pkce_challenge
 
 VERIFIER = "a" * 43
 CHALLENGE = pkce_challenge(VERIFIER)

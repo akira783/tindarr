@@ -8,11 +8,11 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tests.support import FakeClock
-from tindeerr.auth.sessions import SessionService
-from tindeerr.jobs.purge import PURGE_FIRST_DELAY, PURGE_INTERVAL, PeriodicJob, purge_job
-from tindeerr.storage import users as user_repository
-from tindeerr.storage.db import write_transaction
-from tindeerr.storage.sessions import Device
+from tindarr.auth.sessions import SessionService
+from tindarr.jobs.purge import PURGE_FIRST_DELAY, PURGE_INTERVAL, PeriodicJob, purge_job
+from tindarr.storage import users as user_repository
+from tindarr.storage.db import write_transaction
+from tindarr.storage.sessions import Device
 
 pytestmark = pytest.mark.anyio
 

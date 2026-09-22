@@ -3,8 +3,8 @@ import os
 
 import pytest
 
-from tindeerr.core.crypto import DecryptionError, SecretCipher
-from tindeerr.core.keys import KeyMaterial, KeyPurpose
+from tindarr.core.crypto import DecryptionError, SecretCipher
+from tindarr.core.keys import KeyMaterial, KeyPurpose
 
 KEY = os.urandom(32)
 

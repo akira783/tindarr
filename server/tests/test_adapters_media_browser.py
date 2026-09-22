@@ -6,11 +6,11 @@ import httpx2
 import pytest
 
 from tests.support.upstream import ADMIN_API_KEY, ADMIN_ID, SERVER_ID, FakeMediaBrowser
-from tindeerr.adapters.emby import EmbyServer
-from tindeerr.adapters.jellyfin import JellyfinServer
-from tindeerr.adapters.mediabrowser import MediaBrowserServer, authorization_header, parse_version
-from tindeerr.core.errors import ProblemError
-from tindeerr.ports.media_server import MediaServerConnection
+from tindarr.adapters.emby import EmbyServer
+from tindarr.adapters.jellyfin import JellyfinServer
+from tindarr.adapters.mediabrowser import MediaBrowserServer, authorization_header, parse_version
+from tindarr.core.errors import ProblemError
+from tindarr.ports.media_server import MediaServerConnection
 
 pytestmark = pytest.mark.anyio
 
@@ -48,7 +48,7 @@ def server() -> FakeMediaBrowser:
 def test_the_authorization_header_carries_the_four_client_fields() -> None:
     header = authorization_header("device-1", "token-1")
     assert header == (
-        'MediaBrowser Client="Tindeerr", Device="Tindeerr server", '
+        'MediaBrowser Client="Tindarr", Device="Tindarr server", '
         'DeviceId="device-1", Version="1", Token="token-1"'
     )
 
@@ -58,10 +58,10 @@ def test_the_authorization_header_leaves_the_token_out_when_there_is_none() -> N
 
 
 def test_the_authorization_header_falls_back_to_a_device_id() -> None:
-    assert 'DeviceId="tindeerr"' in authorization_header("")
+    assert 'DeviceId="tindarr"' in authorization_header("")
 
 
-async def test_every_call_identifies_tindeerr_the_same_way(server: FakeMediaBrowser) -> None:
+async def test_every_call_identifies_tindarr_the_same_way(server: FakeMediaBrowser) -> None:
     await jellyfin(server).identify()
     header = server.requests[-1].headers["authorization"]
     assert header.startswith("MediaBrowser ")

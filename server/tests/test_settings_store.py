@@ -5,10 +5,10 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from tindeerr.core.config import ConfigError, ServerConfig
-from tindeerr.core.crypto import DecryptionError, SecretCipher
-from tindeerr.core.logs import REDACTED, redact_text
-from tindeerr.storage.settings import (
+from tindarr.core.config import ConfigError, ServerConfig
+from tindarr.core.crypto import DecryptionError, SecretCipher
+from tindarr.core.logs import REDACTED, redact_text
+from tindarr.storage.settings import (
     SETTINGS,
     InvalidSettingValueError,
     JsonValue,
@@ -18,7 +18,7 @@ from tindeerr.storage.settings import (
     UnknownSettingError,
     environment_overrides,
 )
-from tindeerr.storage.tables import settings as settings_table
+from tindarr.storage.tables import settings as settings_table
 
 pytestmark = pytest.mark.anyio
 
@@ -51,7 +51,7 @@ async def raw_value(engine: AsyncEngine, name: str) -> str:
 async def test_unset_setting_returns_its_default(engine: AsyncEngine) -> None:
     store = make_store(engine)
     name = await store.get("server_name")
-    assert (name.value, name.source, name.locked) == ("Tindeerr", "default", False)
+    assert (name.value, name.source, name.locked) == ("Tindarr", "default", False)
     assert (await store.get("media_server_kind")).value is None
     assert (await store.get("filters")).value == {"exclude_adult": True}
 
@@ -161,9 +161,9 @@ def test_environment_overrides_read_variables_and_files(tmp_path: Path) -> None:
     secret_file.write_text("file-secret-value\n")
     overrides = environment_overrides(
         environ={
-            "TINDEERR_SERVER_NAME": "Home",
-            "TINDEERR_MEDIA_SERVER_API_KEY_FILE": str(secret_file),
-            "TINDEERR_NOT_A_SETTING": "ignored",
+            "TINDARR_SERVER_NAME": "Home",
+            "TINDARR_MEDIA_SERVER_API_KEY_FILE": str(secret_file),
+            "TINDARR_NOT_A_SETTING": "ignored",
         }
     )
     assert overrides == {"server_name": "Home", "media_server_api_key": "file-secret-value"}
@@ -190,7 +190,7 @@ def test_environment_values_are_parsed_to_the_setting_type(
     variable: str, raw: str, expected: object
 ) -> None:
     name = variable.lower()
-    overrides = environment_overrides(DEFINITIONS, {f"TINDEERR_{variable}": raw})
+    overrides = environment_overrides(DEFINITIONS, {f"TINDARR_{variable}": raw})
     assert overrides == {name: expected}
     assert type(overrides[name]) is type(expected)
 
@@ -207,22 +207,20 @@ def test_environment_values_are_parsed_to_the_setting_type(
 )
 def test_invalid_environment_values_are_a_config_error(variable: str, raw: str) -> None:
     with pytest.raises(ConfigError) as caught:
-        environment_overrides(DEFINITIONS, {f"TINDEERR_{variable}": raw})
-    assert f"TINDEERR_{variable}" in str(caught.value)
+        environment_overrides(DEFINITIONS, {f"TINDARR_{variable}": raw})
+    assert f"TINDARR_{variable}" in str(caught.value)
     assert "hunter2" not in str(caught.value)
 
 
 def test_every_invalid_variable_is_reported_at_once() -> None:
     with pytest.raises(ConfigError) as caught:
-        environment_overrides(
-            DEFINITIONS, {"TINDEERR_EXCLUDE_ADULT": "x", "TINDEERR_DAILY_CAP": "y"}
-        )
-    assert "TINDEERR_EXCLUDE_ADULT" in str(caught.value)
-    assert "TINDEERR_DAILY_CAP" in str(caught.value)
+        environment_overrides(DEFINITIONS, {"TINDARR_EXCLUDE_ADULT": "x", "TINDARR_DAILY_CAP": "y"})
+    assert "TINDARR_EXCLUDE_ADULT" in str(caught.value)
+    assert "TINDARR_DAILY_CAP" in str(caught.value)
 
 
 async def test_typed_override_is_returned_typed(engine: AsyncEngine) -> None:
-    overrides = environment_overrides(DEFINITIONS, {"TINDEERR_EXCLUDE_ADULT": "false"})
+    overrides = environment_overrides(DEFINITIONS, {"TINDARR_EXCLUDE_ADULT": "false"})
     store = make_store(engine, dict(overrides))
     value = await store.get("exclude_adult")
     assert (value.value, value.locked) == (False, True)
@@ -284,5 +282,5 @@ def test_defaults_fit_their_type(definition: SettingDefinition) -> None:
 
 
 def test_setting_names_never_collide_with_bootstrap_configuration() -> None:
-    # Both read TINDEERR_<NAME>: one variable must never mean two things.
+    # Both read TINDARR_<NAME>: one variable must never mean two things.
     assert set(SETTINGS).isdisjoint(ServerConfig.model_fields)

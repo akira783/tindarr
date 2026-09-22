@@ -20,11 +20,11 @@ from tests.support import (
     sign_in_console,
 )
 from tests.test_contract import assert_is_problem, assert_matches_contract
-from tindeerr.api.cookies import SECURE_NAMES
-from tindeerr.auth.sessions import MobileGrant
-from tindeerr.storage.db import write_transaction
-from tindeerr.storage.sessions import Device
-from tindeerr.storage.users import get_by_media_server_id, update_fields
+from tindarr.api.cookies import SECURE_NAMES
+from tindarr.auth.sessions import MobileGrant
+from tindarr.storage.db import write_transaction
+from tindarr.storage.sessions import Device
+from tindarr.storage.users import get_by_media_server_id, update_fields
 
 REFRESH_PATH = "/api/v1/auth/refresh"
 LOGOUT_PATH = "/api/v1/auth/logout"

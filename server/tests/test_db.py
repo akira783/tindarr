@@ -10,13 +10,13 @@ import pytest
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from tindeerr.storage.db import (
+from tindarr.storage.db import (
     create_sync_engine,
     database_path,
     sync_write_transaction,
     write_transaction,
 )
-from tindeerr.storage.tables import settings
+from tindarr.storage.tables import settings
 
 pytestmark = pytest.mark.anyio
 
