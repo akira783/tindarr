@@ -12,11 +12,11 @@ Tired of scrolling Netflix for 45 minutes before giving up and rewatching The Of
 
 Under the hood, Tindarr is a self-hosted server plus an Android app (iOS is still playing hard to get). The server learns your type from your swipes and your media server's watch history, asks an AI provider to play matchmaker, and files requests through Seerr. It also serves a small web console for setup and administration. Pairing your phone takes one QR code scan, which is less awkward than asking for a number.
 
-> **Relationship status: it's complicated.** Server foundation (step 1): the server starts and answers `/healthz` and `/api/v1/server/info`, but it's not ready to commit to anything usable yet. See the [roadmap](https://github.com/akira783/tindeerr/blob/main/docs/roadmap.md) and [server/README.md](https://github.com/akira783/tindeerr/blob/main/server/README.md).
+> **Relationship status: it's complicated.** Server foundation (step 1): the server starts and answers `/healthz` and `/api/v1/server/info`, but it's not ready to commit to anything usable yet. See the [roadmap](https://github.com/akira783/tindarr/blob/main/docs/roadmap.md) and [server/README.md](https://github.com/akira783/tindarr/blob/main/server/README.md).
 
 ## How it fits together
 
-- **Media servers:** Jellyfin (10.10 or newer), Emby, Plex. Used to sign in (Tindeerr
+- **Media servers:** Jellyfin (10.10 or newer), Emby, Plex. Used to sign in (Tindarr
   has no passwords of its own) and to read watch history.
 - **Requests:** Seerr v3 (Jellyseerr still works as a legacy deployment; Overseerr
   only with Plex).
@@ -26,7 +26,7 @@ Under the hood, Tindarr is a self-hosted server plus an Android app (iOS is stil
 
 Your data stays on your server. The AI provider you choose receives titles from your
 votes and history, your taste profile and the mood you type. Nothing is sent to the
-Tindeerr authors.
+Tindarr authors.
 
 ## Documentation
 

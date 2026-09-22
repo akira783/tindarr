@@ -2,7 +2,7 @@
 
 ## The server must, for the console to work
 
-- Serve `TINDEERR_WEB_DIR` (default `/app/web`) under `/`.
+- Serve `TINDARR_WEB_DIR` (default `/app/web`) under `/`.
 - `index.html` fallback for every GET/HEAD outside `/api` and `/healthz`.
 - `/assets/…` immutable cache, real 404 (no fallback there).
 - Headers per path — index: `no-store`, the console CSP, COOP `same-origin`,
@@ -44,7 +44,7 @@
    sign-in page should re-read `server/info` when it is shown, not once per boot.
 8. `docs/architecture.md` sketches `PlexTv.create_pin(self, client_id)` and a
    `MediaServer` port without `quick_connect_enabled`. Both moved: `create_pin`
-   also takes the device name that names Tindeerr on the plex.tv approval page
+   also takes the device name that names Tindarr on the plex.tv approval page
    (docs/auth.md §4 requires it), and `quick_connect_enabled` is what feeds the
    cache `server/info` reads. The sketch should be updated with the rest of step 2.
 9. `POST /admin/connectors/{kind}/test` can answer `403 plex_owner_required` — a

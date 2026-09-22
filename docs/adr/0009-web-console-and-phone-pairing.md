@@ -8,7 +8,7 @@
 - Amended by: [0011](0011-hardening-after-the-pre-step-2-review.md)
 
 > **Note (2026-09-22, [ADR 0011](0011-hardening-after-the-pre-step-2-review.md)):**
-> - The setup session has its own cookie, `__Host-tindeerr_setup`; a new claim revokes
+> - The setup session has its own cookie, `__Host-tindarr_setup`; a new claim revokes
 >   the previous setup session, and completion requires that cookie and issues a new
 >   web session.
 > - The `Origin` must be the server's own origin, built from a `Host` that passed the
@@ -80,7 +80,7 @@ Plex PIN, plus **Jellyfin Quick Connect**.
 
 **Console sessions use a cookie, the app keeps bearer tokens.**
 
-- The cookie is `__Host-tindeerr_session`: `HttpOnly`, `Secure`, `SameSite=Strict`,
+- The cookie is `__Host-tindarr_session`: `HttpOnly`, `Secure`, `SameSite=Strict`,
   `Path=/`, no `Domain`. Its value is an opaque 256-bit token, stored hashed in the
   `sessions` table with `kind` = `web`. No token the console holds can be read by
   JavaScript. A web session expires after 24 h without activity and 7 days after
@@ -121,8 +121,8 @@ Plex PIN, plus **Jellyfin Quick Connect**.
   as a secure context. Over plain HTTP from another host, the console refuses to sign
   in (`code` = `https_required`) and explains how to put it behind TLS or reach it
   through an SSH tunnel. An operator can opt in to plain HTTP on a private network
-  with `TINDEERR_ALLOW_HTTP_CONSOLE=true`: the cookie then drops `Secure` and the
-  `__Host-` prefix (it is named `tindeerr_session`), only for requests from private
+  with `TINDARR_ALLOW_HTTP_CONSOLE=true`: the cookie then drops `Secure` and the
+  `__Host-` prefix (it is named `tindarr_session`), only for requests from private
   and link-local addresses, and the server logs a warning at startup.
 
 **Content-Security-Policy for the console:**
@@ -146,8 +146,8 @@ directly; if the console shows them, the server proxies them under `/api`. API r
    characters), stored as a SHA-256 hash, single-use, valid 5 minutes. A user has at
    most 3 pending pairings.
 2. The console shows a QR code for
-   `tindeerr://pair?server=<public_url>&code=<code>`. On a phone browser, it shows an
-   "Open in Tindeerr" button with the same link instead.
+   `tindarr://pair?server=<public_url>&code=<code>`. On a phone browser, it shows an
+   "Open in Tindarr" button with the same link instead.
 3. The app scans the QR code with its own scanner (a link opened from the system
    camera works too). It calls `POST /api/v1/auth/pair/preview`, which returns the
    server name and the user name without consuming the code. It shows the server URL
@@ -170,7 +170,7 @@ directly; if the console shows them, the server proxies them under `/api`. API r
   did.
 
 **Public URL.** A server setting `public_url` (admin-set, or
-`TINDEERR_PUBLIC_URL`), used only to build the QR link. It is an origin
+`TINDARR_PUBLIC_URL`), used only to build the QR link. It is an origin
 (scheme, host, optional port, no path): `https`, or `http` only for a private,
 link-local, `.local` or `localhost` host. The setup wizard proposes the origin the
 console is open on. Without it, the console cannot create pairings

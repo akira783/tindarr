@@ -19,17 +19,17 @@ cookie flags, CSRF) uses this context and never reads the raw headers again.
 
 ### Client IP and scheme
 
-- `TINDEERR_TRUSTED_PROXIES` is a comma-separated list of IPs or CIDRs (bootstrap
+- `TINDARR_TRUSTED_PROXIES` is a comma-separated list of IPs or CIDRs (bootstrap
   configuration, empty by default). It is the existing `trusted_proxies` setting of
   `ServerConfig`.
 - **Peer not trusted** (or the list is empty): the client IP is the TCP peer address.
   `X-Forwarded-For`, `X-Forwarded-Proto`, `Forwarded` and `X-Request-ID` are ignored.
   When such a header arrives from a peer in a private range, the server logs one
   warning per peer and per hour ("forwarded headers from an untrusted peer: add it to
-  TINDEERR_TRUSTED_PROXIES?"), without the header values.
+  TINDARR_TRUSTED_PROXIES?"), without the header values.
 - **Peer trusted:** the client IP is the **rightmost untrusted hop**: walk
   `X-Forwarded-For` from right to left, skip every address inside
-  `TINDEERR_TRUSTED_PROXIES`, and take the first one outside it. If every hop is
+  `TINDARR_TRUSTED_PROXIES`, and take the first one outside it. If every hop is
   trusted, take the leftmost. If the hop reached is not a valid IP address (a
   misconfigured proxy), the client IP is the peer itself and a warning is logged.
 - **Scheme:** the scheme of the connection, replaced by `X-Forwarded-Proto` only when
@@ -62,13 +62,13 @@ The `Host` header of every request except `/healthz` must be one of:
 
 - an IP literal (IPv4, or IPv6 in brackets), with any port;
 - `localhost`, with any port;
-- a host name listed in `TINDEERR_ALLOWED_HOSTS` (bootstrap configuration,
+- a host name listed in `TINDARR_ALLOWED_HOSTS` (bootstrap configuration,
   comma-separated host names, compared case-insensitively, any port);
 - the host of `public_url`, once it is set.
 
 Anything else gets `400` with `code` = `host_not_allowed`, before routing, for the API
 and the console alike. A server reached by a domain name must therefore have
-`TINDEERR_PUBLIC_URL` or `TINDEERR_ALLOWED_HOSTS` set before its first start, or be set
+`TINDARR_PUBLIC_URL` or `TINDARR_ALLOWED_HOSTS` set before its first start, or be set
 up through its IP address.
 
 ### Origin
@@ -83,9 +83,9 @@ origin: the console must be used at the origin it was loaded from.
 | Credential | Carried as | Kind | Accepted by |
 |---|---|---|---|
 | Access token | `Authorization: Bearer <JWT>` | `mobile` session | Shared endpoints: `GET /me`, `GET /me/sessions`, `/swipe/…`, `POST /auth/logout` |
-| Web session | cookie `__Host-tindeerr_session` | `web` session | Shared endpoints and console endpoints |
-| Setup session | cookie `__Host-tindeerr_setup` | `setup` session | Setup endpoints, `GET /auth/web/session`, the web sign-ins while setup is pending, Plex PINs with purpose `owner_token` during setup (`POST /auth/plex/pins`, `POST /auth/plex/pins/status`) |
-| Pre-auth cookie | cookie `__Host-tindeerr_preauth` | none | Binds console sign-in handles to the browser (section 5) |
+| Web session | cookie `__Host-tindarr_session` | `web` session | Shared endpoints and console endpoints |
+| Setup session | cookie `__Host-tindarr_setup` | `setup` session | Setup endpoints, `GET /auth/web/session`, the web sign-ins while setup is pending, Plex PINs with purpose `owner_token` during setup (`POST /auth/plex/pins`, `POST /auth/plex/pins/status`) |
+| Pre-auth cookie | cookie `__Host-tindarr_preauth` | none | Binds console sign-in handles to the browser (section 5) |
 
 Rules, applied in this order:
 
@@ -119,9 +119,9 @@ Rules, applied in this order:
 
 | Name | Value | Attributes | Lifetime |
 |---|---|---|---|
-| `__Host-tindeerr_session` | 256-bit random, base64url; SHA-256 stored | `Secure; HttpOnly; SameSite=Strict; Path=/` | session cookie (no `Max-Age`); server-side 24 h idle, 7 days absolute |
-| `__Host-tindeerr_setup` | same | same | server-side 30 min absolute |
-| `__Host-tindeerr_preauth` | same; SHA-256 kept in the handle | same, `Max-Age=900` | 15 min; cleared by a successful web sign-in |
+| `__Host-tindarr_session` | 256-bit random, base64url; SHA-256 stored | `Secure; HttpOnly; SameSite=Strict; Path=/` | session cookie (no `Max-Age`); server-side 24 h idle, 7 days absolute |
+| `__Host-tindarr_setup` | same | same | server-side 30 min absolute |
+| `__Host-tindarr_preauth` | same; SHA-256 kept in the handle | same, `Max-Age=900` | 15 min; cleared by a successful web sign-in |
 
 **Plain HTTP.** Cookie-setting endpoints answer `403` `https_required` unless one of
 these holds:
@@ -129,9 +129,9 @@ these holds:
 - the effective scheme is `https`;
 - the client IP is loopback and the `Host` is `localhost`, `127.0.0.1` or `[::1]`
   (browsers treat these as secure contexts, so the `__Host-` cookies still work);
-- `TINDEERR_ALLOW_HTTP_CONSOLE=true` (bootstrap configuration, off by default, logged as
+- `TINDARR_ALLOW_HTTP_CONSOLE=true` (bootstrap configuration, off by default, logged as
   a warning at startup) **and** the client IP is private. Only then are the cookies
-  named `tindeerr_session`, `tindeerr_setup` and `tindeerr_preauth`, without `Secure`.
+  named `tindarr_session`, `tindarr_setup` and `tindarr_preauth`, without `Secure`.
   The server reads the unprefixed names only on such requests.
 
 ## 3. First-run setup
@@ -152,7 +152,7 @@ these holds:
 
 **Claim.** `POST /setup/claim` with the code (compared by hash, constant time). It
 creates a `setup` session (30 minutes, absolute, no user, its own CSRF token), sets
-`__Host-tindeerr_setup`, and **revokes every earlier setup session**: there is only
+`__Host-tindarr_setup`, and **revokes every earlier setup session**: there is only
 one active setup session at a time, and the newest claim wins. After completion the
 endpoint answers `409` `setup_completed`.
 
@@ -161,7 +161,7 @@ whether the media server is configured, whether environment variables lock it, a
 which sign-in methods the configured server offers.
 
 **Media server.** `PUT /setup/media-server` (setup session + CSRF) tests and saves the
-connection (section 6). When `TINDEERR_MEDIA_SERVER_KIND`, `_URL` and `_API_KEY` are all
+connection (section 6). When `TINDARR_MEDIA_SERVER_KIND`, `_URL` and `_API_KEY` are all
 set, the wizard skips this step; a request that gives a locked field a different
 value answers `409` `setting_locked`. For Plex, the owner token comes from a Plex PIN
 created with purpose `owner_token` under the setup session (section 5), whose status
@@ -185,7 +185,7 @@ after the commit. The app's sign-in endpoints answer `503` `setup_required` unti
 restart until its 30 minutes run out. Plex PINs and Quick Connect handles live in
 memory (section 5) and are lost: the wizard starts a new PIN.
 
-**Reset.** `tindeerr media-server reset` (CLI, run inside the container, so it needs
+**Reset.** `tindarr media-server reset` (CLI, run inside the container, so it needs
 host access) clears the media server settings and its identity, revokes every
 session, unlinks every user, clears `setup_completed_at` and generates a new setup
 code. It is the recovery path when the media server was reinstalled or replaced
@@ -198,7 +198,7 @@ pair and a `mobile` session, or a cookie and a `web` session). After a successfu
 check the server:
 
 1. finds the user by `media_server_user_id` (normalised, below), or creates it;
-2. refuses a user disabled in Tindeerr (`403` `account_disabled`), except one disabled
+2. refuses a user disabled in Tindarr (`403` `account_disabled`), except one disabled
    only because the media server had disabled or removed them
    (`disabled_reason = media_server`), who is re-enabled since the media server now
    accepts them;
@@ -211,18 +211,18 @@ removed. Plex users are keyed by their plex.tv account id (decimal string from
 `GET https://plex.tv/api/v2/user`), never by user name or email.
 
 **Remote access.** Jellyfin and Emby enforce `Policy.EnableRemoteAccess` against the
-caller's IP, and for them the caller is Tindeerr, usually on the LAN. Tindeerr applies
+caller's IP, and for them the caller is Tindarr, usually on the LAN. Tindarr applies
 the rule itself: a user whose policy says `EnableRemoteAccess = false` is refused
 (`403` `remote_access_denied`) when the client IP is not private, at sign-in and on
 every later request (section 2). Plex users always have `remote_access = true`.
-Jellyfin's parental access schedules are not enforced by Tindeerr.
+Jellyfin's parental access schedules are not enforced by Tindarr.
 
 ### Media server client identity
 
 Every call to Jellyfin or Emby carries:
 
 ```
-Authorization: MediaBrowser Client="Tindeerr", Device="Tindeerr server",
+Authorization: MediaBrowser Client="Tindarr", Device="Tindarr server",
   DeviceId="<server_state.install_id>", Version="1", Token="<token>"
 ```
 
@@ -232,17 +232,17 @@ Authorization: MediaBrowser Client="Tindeerr", Device="Tindeerr server",
 - `Token` is the admin API key for admin calls, the user's fresh token for
   `POST /Sessions/Logout`, and absent for `AuthenticateByName` and Quick Connect calls.
 - `DeviceId` is stable per install (generated with the install id). `Version` is a
-  constant, not the Tindeerr version: Emby identifies a device by all four values,
+  constant, not the Tindarr version: Emby identifies a device by all four values,
   and Jellyfin revokes a user's older tokens with the same `DeviceId` at each login,
-  which also cleans up any leftover Tindeerr session.
+  which also cleans up any leftover Tindarr session.
 - A Jellyfin user limited to specific devices (`EnableAllDevices = false`) must be
-  allowed the "Tindeerr server" device, or the media server refuses the sign-in.
+  allowed the "Tindarr server" device, or the media server refuses the sign-in.
 - **Supported versions:** Jellyfin 10.10 or newer (10.10, 10.11 and 12.x are tested);
   Emby: the version pinned in the end-to-end workflow, older ones best effort. The
   version and product come from `GET /System/Info/Public`; an older Jellyfin makes the
   connection test fail with `media_server_unsupported`.
 
-Calls to plex.tv always send `X-Plex-Product: Tindeerr` and an
+Calls to plex.tv always send `X-Plex-Product: Tindarr` and an
 `X-Plex-Client-Identifier`; Plex tokens always travel in the `X-Plex-Token` header,
 never in a query string.
 
@@ -261,13 +261,13 @@ never in a query string.
    `User.Policy.EnableRemoteAccess`, then call `POST /Sessions/Logout` with the returned
    `AccessToken`. The password and the token are dropped; nothing is stored.
 
-**Lockout through Tindeerr.** Jellyfin disables an account after
+**Lockout through Tindarr.** Jellyfin disables an account after
 `LoginAttemptsBeforeLockout` failures (by default 3 for a user, 5 for an
 administrator), and only a successful login resets its counter. Every failure
-forwarded by Tindeerr counts. So:
+forwarded by Tindarr counts. So:
 
 - per **case-folded username** (NFKC, then `str.casefold`), all clients and IPs
-  together, Tindeerr forwards at most **2 failures per rolling 15 minutes**. Beyond
+  together, Tindarr forwards at most **2 failures per rolling 15 minutes**. Beyond
   that it answers `429` `rate_limited` with `retry_after_ms` without calling the media
   server. It is a pause, not a lock: it ends when the oldest failure leaves the window,
   and a successful sign-in for that username clears the count;
@@ -290,11 +290,11 @@ forwarded by Tindeerr counts. So:
    `Authenticated` is true: `POST /Users/AuthenticateWithQuickConnect`
    `{"Secret": …}`, then the same steps as a password sign-in from step 4, including
    the logout of the Jellyfin session.
-4. **Cleanup:** Jellyfin creates the session when the user approves, not when Tindeerr
+4. **Cleanup:** Jellyfin creates the session when the user approves, not when Tindarr
    collects it. A background sweep (every 30 s) takes each Quick Connect handle that
    expired or was abandoned unused, checks it once more, and if it was approved,
    authenticates and logs that session out. If the server restarted in between, the
-   leftover Jellyfin session is revoked at that user's next Tindeerr sign-in (same
+   leftover Jellyfin session is revoked at that user's next Tindarr sign-in (same
    `DeviceId`).
 5. Whether Quick Connect is on (`GET /QuickConnect/Enabled`, no token) is cached for
    5 minutes; the cached value drives `auth_methods`, so `server/info` never calls the
@@ -303,13 +303,13 @@ forwarded by Tindeerr counts. So:
 ### Plex PIN
 
 1. `POST /auth/plex/pins` → server calls `POST https://plex.tv/api/v2/pins?strong=true`
-   and `X-Plex-Device-Name` set to "Tindeerr (<server name>)", so the plex.tv approval
+   and `X-Plex-Device-Name` set to "Tindarr (<server name>)", so the plex.tv approval
    page names the server. The client identifier is **generated for this PIN** (random
    UUID, kept in the handle) for purpose `sign_in` and `reauth`; only an `owner_token`
    PIN uses the install's stable identifier (`install_id`), which every later call made
    with the owner token also sends. So revoking a sign-in device (step 4) can never
    revoke the owner token. The response's `expiresAt` bounds the handle.
-2. The client opens `https://app.plex.tv/auth#?clientID=<id>&code=<code>&context%5Bdevice%5D%5Bproduct%5D=Tindeerr`.
+2. The client opens `https://app.plex.tv/auth#?clientID=<id>&code=<code>&context%5Bdevice%5D%5Bproduct%5D=Tindarr`.
 3. Each call to the login endpoint polls `GET https://plex.tv/api/v2/pins/{id}` with the
    same client identifier, at most once per second per handle, backing off on `429`.
 4. Once the PIN has an `authToken`:
@@ -321,18 +321,18 @@ forwarded by Tindeerr counts. So:
    - administrator = `owned` is true on **that** resource;
    - then the token is revoked: find the device with this PIN's client identifier
      (`GET https://plex.tv/devices.xml`) and delete it
-     (`DELETE https://plex.tv/devices/{id}.xml`), so no live "Tindeerr" device stays in
+     (`DELETE https://plex.tv/devices/{id}.xml`), so no live "Tindarr" device stays in
      the user's plex.tv account. These two calls are what python-plexapi uses; they are
      not in Plex's official documentation. If they fail, the sign-in still succeeds,
      a warning is logged (without the token), and the device stays listed in the
-     user's plex.tv "Authorized devices", where they can remove it. Tindeerr keeps no
+     user's plex.tv "Authorized devices", where they can remove it. Tindarr keeps no
      copy of that token either way.
 5. plex.tv unreachable: `503` `plex_tv_unreachable`.
 
-- Tindeerr never registers a JWK with plex.tv (the newer JWT flow): doing so with the
+- Tindarr never registers a JWK with plex.tv (the newer JWT flow): doing so with the
   owner token would expire that token. The classic PIN flow is not deprecated.
 - **Limitation:** managed Plex Home profiles cannot use the PIN flow, so they cannot
-  sign in to Tindeerr.
+  sign in to Tindarr.
 
 ## 5. Handles (Plex PINs and Quick Connect)
 
@@ -411,10 +411,10 @@ merging accounts is not part of v1.
 
 **Unexpected identity.** When the identity read before a sign-in or by the sync does not
 match the stored one (the server was reinstalled, or something else answers at that
-address), Tindeerr refuses sign-ins with `503` `media_server_changed` and logs an error.
+address), Tindarr refuses sign-ins with `503` `media_server_changed` and logs an error.
 It never re-links on its own. The admin fixes the URL from the console if a signed-in
 media server administrator can still re-authenticate, otherwise the operator runs
-`tindeerr media-server reset` (section 3).
+`tindarr media-server reset` (section 3).
 
 ## 7. Sessions and tokens
 
@@ -431,10 +431,10 @@ the earlier of 60 days after issue and the session's absolute end.
 
 ### Access tokens (JWT)
 
-- `HS256` only, with the HKDF sub-key `tindeerr/v1/jwt-signing` of the master key
+- `HS256` only, with the HKDF sub-key `tindarr/v1/jwt-signing` of the master key
   (`KeyPurpose.JWT_SIGNING`). Library: PyJWT, with `algorithms=["HS256"]`.
 - Header: `typ` = `at+jwt`, `kid` = the key id (`KeyMaterial.key_id`).
-- Claims: `iss` = `tindeerr:<install_id>`, `aud` = `tindeerr-api`, `sub` (user id),
+- Claims: `iss` = `tindarr:<install_id>`, `aud` = `tindarr-api`, `sub` (user id),
   `sid` (session id), `iat`, `exp` (15 minutes), `jti`. No role claim.
 - Verification requires `typ`, `kid`, `iss`, `aud`, `sub`, `sid`, `iat` and `exp`, with at
   most 30 s of leeway. An expired token gives `401` `token_expired`; any other failure
@@ -483,7 +483,7 @@ token:
   disabled with `disabled_reason = media_server` and their sessions are revoked.
 - `media_server_admin` is **cleared** when the media server no longer says
   administrator; it is never set by the sync (only a sign-in sets it, so a demotion done
-  in Tindeerr lasts until that user's next sign-in, as ADR 0010 says).
+  in Tindarr lasts until that user's next sign-in, as ADR 0010 says).
 - `remote_access` and `name` are updated.
 - If the media server or plex.tv is unreachable, nothing changes and the sync retries
   at the next run. The identity is checked first (section 6).
@@ -535,8 +535,8 @@ the traffic lasts, never lock anyone out.
 1. **Create** (console, any signed-in user): `POST /pairings` needs `public_url`
    (`409` `public_url_not_set`). It returns the code (128 random bits, 22 base64url
    characters, stored as SHA-256, never shown again) and the link
-   `tindeerr://pair?server=<public_url>&code=<code>`. The console shows the QR code with
-   the host of `public_url` written next to it ("connects to tindeerr.example.com").
+   `tindarr://pair?server=<public_url>&code=<code>`. The console shows the QR code with
+   the host of `public_url` written next to it ("connects to tindarr.example.com").
    Status `pending`, expires 5 minutes after creation whatever happens next.
 2. **Preview** (app): `POST /auth/pair/preview` with the code returns only what the app
    must display: server name, user name, expiry. Anything other than a `pending`,
@@ -570,19 +570,19 @@ Pairing does not contact the media server, so it does not re-sync the admin flag
 - An origin: `https://host[:port]`, or `http` only when the host is an IP literal in a
   private range, `localhost` or a `.local` name. No path, query, fragment or user info.
 - Set during setup (after the first sign-in, the wizard proposes the origin the console
-  is open on), later from the settings page, or by `TINDEERR_PUBLIC_URL` (then locked).
+  is open on), later from the settings page, or by `TINDARR_PUBLIC_URL` (then locked).
 - **Only a media server administrator with a fresh re-authentication** can change it
   (section 7).
 - **Verified before saving.** The server creates a random nonce (kept in memory for
   60 s), requests `GET <public_url>/api/v1/server/info` with the header
-  `Tindeerr-Verify-Nonce: <nonce>`, without following redirects, with TLS verification
+  `Tindarr-Verify-Nonce: <nonce>`, without following redirects, with TLS verification
   and a 5 s timeout, and expects `public_url_proof` = base64url(HMAC-SHA256(key, nonce))
-  with the HKDF sub-key `tindeerr/v1/public-url-proof`. `server/info` only includes
+  with the HKDF sub-key `tindarr/v1/public-url-proof`. `server/info` only includes
   `public_url_proof` when the nonce is one it is currently waiting for. Failure:
   `409` `public_url_unverified`, with a coarse reason. A reverse proxy in front of this
   same instance passes; another server does not.
 - Servers that cannot reach their own public address (no NAT hairpinning) cannot pass
-  the check from the console; the operator sets `TINDEERR_PUBLIC_URL` instead. An
+  the check from the console; the operator sets `TINDARR_PUBLIC_URL` instead. An
   environment value is checked once after startup and only logged when it fails.
 - Its host becomes an allowed host (section 1). It is not an extra accepted `Origin`.
 
@@ -676,7 +676,7 @@ in each section.
   `pairing_code`, `code_verifier`, `code_challenge`, `pin_id`, `handle`, `secret`,
   `refresh_token`, `access_token`, `session`, `sid`, `jwt`, `csrf`, `otp`, `pin`,
   `nonce`.
-- Credentials never go in a URL path or query string Tindeerr serves: codes, handles
+- Credentials never go in a URL path or query string Tindarr serves: codes, handles
   and tokens travel in bodies, cookies or headers. Outbound calls that need one in a
   query (Quick Connect's `secret`) go through an HTTP client whose logger stays at
   `WARNING`, and URLs are redacted before any log line.

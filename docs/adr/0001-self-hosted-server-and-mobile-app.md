@@ -16,9 +16,9 @@ media server. The app is meant for the public, so for many households.
 
 ## Decision
 
-Each household runs its own Tindeerr server, next to its media server, typically as a
+Each household runs its own Tindarr server, next to its media server, typically as a
 Docker container. The mobile app is a client of that server: the user types the server
-URL and signs in. There is no central Tindeerr service.
+URL and signs in. There is no central Tindarr service.
 
 ## Consequences
 

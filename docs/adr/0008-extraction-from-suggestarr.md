@@ -20,12 +20,12 @@ fork must stay untouched until the app replaces it.
   engagement, TMDb search/filters/providers/trailers, OMDb ratings, Seerr request,
   translation. They are rewritten into adapters.
 - **Hacks removed.** For example `AiSearchService.__new__` used to reach a TMDb client.
-- **Migration path.** An optional one-shot command, `tindeerr import suggestarr`, copies
+- **Migration path.** An optional one-shot command, `tindarr import suggestarr`, copies
   votes, profiles and preferences from a SuggestArr database file (read-only),
   matching users by media server user id.
 
 ## Consequences
 
-- Tindeerr no longer depends on SuggestArr releases. Engine fixes made in one can be
+- Tindarr no longer depends on SuggestArr releases. Engine fixes made in one can be
   ported to the other by hand, as long as both exist.
 - Fork users keep their history when they switch.

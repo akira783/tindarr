@@ -3,7 +3,7 @@
 ## Overview
 
 ```
- Android app (Expo)                     Tindeerr server (one per household)
+ Android app (Expo)                     Tindarr server (one per household)
 ┌─────────────────────┐  HTTPS, JSON   ┌──────────────────────────────────────┐
 │ Deck · Likes ·      │  /api/v1       │  HTTP API (FastAPI)                   │
 │ Taste · Settings ·  │ ─────────────▶ │   auth · pairing · swipe · admin     │
@@ -32,7 +32,7 @@
 
 Every household runs its own server ([ADR 0001](adr/0001-self-hosted-server-and-mobile-app.md)).
 The app only knows the server URL the user typed (or scanned) and the tokens that
-server issued. There is no central Tindeerr service.
+server issued. There is no central Tindarr service.
 
 The server has two clients ([ADR 0009](adr/0009-web-console-and-phone-pairing.md)):
 
@@ -47,17 +47,17 @@ The server has two clients ([ADR 0009](adr/0009-web-console-and-phone-pairing.md
 
 | Layer | Package | Depends on | Rule |
 |---|---|---|---|
-| Main | `tindeerr.main` | everything | Composition root: builds the adapters, hands them to the domain as ports, starts the jobs. |
-| API | `tindeerr.api` | domain, auth, storage, ports, core | HTTP only: request context (client IP, scheme, allowed hosts), cookies, CSRF and `Origin` checks, parsing, status codes, problem details, security headers, serving the console's static files. No business logic. |
-| Jobs | `tindeerr.jobs` | domain, auth, storage | Background work with persisted state. |
-| Auth | `tindeerr.auth` | ports (media server, plex.tv), storage, core | Pure functions and services: sessions (mobile, web, setup), tokens, handles, pairing, roles, rate-limit decisions, user sync. No Starlette or FastAPI import (import-linter enforces it): it never sees a request, a cookie or a header, only values the API layer extracted. |
-| Domain | `tindeerr.swipe` | ports (interfaces), storage | Swipe engine, prompts, scoring. No HTTP, no vendor SDK. |
-| Adapters | `tindeerr.adapters.*` | ports, vendor SDKs, httpx | One package per external system. |
-| Ports | `tindeerr.ports` | nothing | `Protocol` classes the domain and auth talk to. |
-| Storage | `tindeerr.storage` | SQLAlchemy Core | Tables, repositories, Alembic migrations. |
-| Core | `tindeerr.core` | nothing | Bootstrap configuration, key derivation, encryption, logging, and `ProblemError(status, code, detail)`, which auth and storage raise and one API handler renders. Usable by every layer. |
+| Main | `tindarr.main` | everything | Composition root: builds the adapters, hands them to the domain as ports, starts the jobs. |
+| API | `tindarr.api` | domain, auth, storage, ports, core | HTTP only: request context (client IP, scheme, allowed hosts), cookies, CSRF and `Origin` checks, parsing, status codes, problem details, security headers, serving the console's static files. No business logic. |
+| Jobs | `tindarr.jobs` | domain, auth, storage | Background work with persisted state. |
+| Auth | `tindarr.auth` | ports (media server, plex.tv), storage, core | Pure functions and services: sessions (mobile, web, setup), tokens, handles, pairing, roles, rate-limit decisions, user sync. No Starlette or FastAPI import (import-linter enforces it): it never sees a request, a cookie or a header, only values the API layer extracted. |
+| Domain | `tindarr.swipe` | ports (interfaces), storage | Swipe engine, prompts, scoring. No HTTP, no vendor SDK. |
+| Adapters | `tindarr.adapters.*` | ports, vendor SDKs, httpx | One package per external system. |
+| Ports | `tindarr.ports` | nothing | `Protocol` classes the domain and auth talk to. |
+| Storage | `tindarr.storage` | SQLAlchemy Core | Tables, repositories, Alembic migrations. |
+| Core | `tindarr.core` | nothing | Bootstrap configuration, key derivation, encryption, logging, and `ProblemError(status, code, detail)`, which auth and storage raise and one API handler renders. Usable by every layer. |
 
-Imports only point downwards. Only `tindeerr.main` imports adapters. CI enforces this
+Imports only point downwards. Only `tindarr.main` imports adapters. CI enforces this
 with `import-linter`.
 
 ### Ports
@@ -231,30 +231,30 @@ the file wins when both are set.
 
 | Bootstrap variable | Default | Meaning |
 |---|---|---|
-| `TINDEERR_DATA_DIR` | `data` (`/data` in the image) | Database, backups, key, setup code. |
-| `TINDEERR_SECRET_KEY` | generated into `<data>/secret.key` | Master key material. |
-| `TINDEERR_HOST`, `TINDEERR_PORT` | `127.0.0.1` (`0.0.0.0` in the image), `8787` | Listening address. |
-| `TINDEERR_LOG_LEVEL` | `INFO` | |
-| `TINDEERR_API_DOCS` | `false` | Interactive docs at `/api/docs`. |
-| `TINDEERR_DB_BACKUPS_KEEP` | `5` | Pre-migration backups kept. |
-| `TINDEERR_TRUSTED_PROXIES` | none | IPs/CIDRs whose `X-Forwarded-For`/`-Proto` are honoured ([rules](auth.md#client-ip-and-scheme)). |
-| `TINDEERR_ALLOWED_HOSTS` | none | Extra host names accepted in `Host`, besides IP literals, `localhost` and the host of `public_url` ([rules](auth.md#allowed-hosts-dns-rebinding)). Step 2. |
-| `TINDEERR_ALLOW_HTTP_CONSOLE` | `false` | Console over plain HTTP from private client IPs ([rules](auth.md#cookies)). Step 2. |
-| `TINDEERR_WEB_DIR` | `/app/web` | Built console. When the directory does not exist (development without a build), the console is not served and `/` answers `404`. Step 2. |
+| `TINDARR_DATA_DIR` | `data` (`/data` in the image) | Database, backups, key, setup code. |
+| `TINDARR_SECRET_KEY` | generated into `<data>/secret.key` | Master key material. |
+| `TINDARR_HOST`, `TINDARR_PORT` | `127.0.0.1` (`0.0.0.0` in the image), `8787` | Listening address. |
+| `TINDARR_LOG_LEVEL` | `INFO` | |
+| `TINDARR_API_DOCS` | `false` | Interactive docs at `/api/docs`. |
+| `TINDARR_DB_BACKUPS_KEEP` | `5` | Pre-migration backups kept. |
+| `TINDARR_TRUSTED_PROXIES` | none | IPs/CIDRs whose `X-Forwarded-For`/`-Proto` are honoured ([rules](auth.md#client-ip-and-scheme)). |
+| `TINDARR_ALLOWED_HOSTS` | none | Extra host names accepted in `Host`, besides IP literals, `localhost` and the host of `public_url` ([rules](auth.md#allowed-hosts-dns-rebinding)). Step 2. |
+| `TINDARR_ALLOW_HTTP_CONSOLE` | `false` | Console over plain HTTP from private client IPs ([rules](auth.md#cookies)). Step 2. |
+| `TINDARR_WEB_DIR` | `/app/web` | Built console. When the directory does not exist (development without a build), the console is not served and `/` answers `404`. Step 2. |
 
 Settings, with their environment variable and where they appear in the contract (the
 names differ for historical reasons; this table is the mapping):
 
 | Setting | Environment variable | Contract | Step |
 |---|---|---|---|
-| `server_name` | `TINDEERR_SERVER_NAME` | `ServerSettings.name`, `ServerInfo.name` | 1 |
-| `media_server_kind` | `TINDEERR_MEDIA_SERVER_KIND` | `MediaServerConfigInput.server_type`, `Connector.provider`, `ServerInfo.media_server.kind` | 1 |
-| `media_server_url` | `TINDEERR_MEDIA_SERVER_URL` | `MediaServerConfigInput.url`, `Connector.url` | 1 |
-| `media_server_api_key` | `TINDEERR_MEDIA_SERVER_API_KEY` | `MediaServerConfigInput.api_key` (Jellyfin, Emby) or the token from `plex_pin_id` (Plex); `Connector.secret` | 1 (it also holds the Plex owner token) |
-| `media_server_verify_tls` | `TINDEERR_MEDIA_SERVER_VERIFY_TLS` | `MediaServerConfigInput.verify_tls`, `Connector.verify_tls` | 2 |
-| `public_url` | `TINDEERR_PUBLIC_URL` | `ServerSettings.public_url` | 2 |
-| `password_sign_in` | `TINDEERR_PASSWORD_SIGN_IN` | `ServerSettings.password_sign_in` | 2 |
-| `language`, `streaming_region`, `daily_generation_limit`, `warm_up_enabled`, `content_filters` | `TINDEERR_<NAME>` | `ServerSettings.*` | stored from 2, used from 4 |
+| `server_name` | `TINDARR_SERVER_NAME` | `ServerSettings.name`, `ServerInfo.name` | 1 |
+| `media_server_kind` | `TINDARR_MEDIA_SERVER_KIND` | `MediaServerConfigInput.server_type`, `Connector.provider`, `ServerInfo.media_server.kind` | 1 |
+| `media_server_url` | `TINDARR_MEDIA_SERVER_URL` | `MediaServerConfigInput.url`, `Connector.url` | 1 |
+| `media_server_api_key` | `TINDARR_MEDIA_SERVER_API_KEY` | `MediaServerConfigInput.api_key` (Jellyfin, Emby) or the token from `plex_pin_id` (Plex); `Connector.secret` | 1 (it also holds the Plex owner token) |
+| `media_server_verify_tls` | `TINDARR_MEDIA_SERVER_VERIFY_TLS` | `MediaServerConfigInput.verify_tls`, `Connector.verify_tls` | 2 |
+| `public_url` | `TINDARR_PUBLIC_URL` | `ServerSettings.public_url` | 2 |
+| `password_sign_in` | `TINDARR_PASSWORD_SIGN_IN` | `ServerSettings.password_sign_in` | 2 |
+| `language`, `streaming_region`, `daily_generation_limit`, `warm_up_enabled`, `content_filters` | `TINDARR_<NAME>` | `ServerSettings.*` | stored from 2, used from 4 |
 
 Environment values are parsed and validated with the setting's type at startup (a
 boolean setting accepts `true`/`false`, not any non-empty string). The media server's
@@ -269,7 +269,7 @@ Details in [the authentication reference](auth.md), with the reasons in
 [ADR 0011](adr/0011-hardening-after-the-pre-step-2-review.md).
 
 - **Request context.** Client IP (rightmost untrusted hop behind
-  `TINDEERR_TRUSTED_PROXIES`), scheme, allowed `Host` and origin are resolved once per
+  `TINDARR_TRUSTED_PROXIES`), scheme, allowed `Host` and origin are resolved once per
   request by the API layer.
 - **Sign-in methods** (both clients): Jellyfin / Emby password, Plex PIN, Jellyfin
   Quick Connect. The app can also be paired from the console by QR code, with an
@@ -282,7 +282,7 @@ Details in [the authentication reference](auth.md), with the reasons in
   only this.
 - **Every request** re-reads its session and user, so revocation is immediate.
 - **Roles:** `admin` when the media server says so at the last sign-in, or when a
-  Tindeerr admin promoted them. Checked in the database on every admin request. The
+  Tindarr admin promoted them. Checked in the database on every admin request. The
   media server connector and `public_url` need a media server administrator with a
   fresh re-authentication.
 
@@ -322,7 +322,7 @@ Details in [the authentication reference](auth.md), with the reasons in
   - the QR code is rendered as React SVG elements or on a canvas (for example
     `qrcode.react`'s `QRCodeSVG`), never through `innerHTML`, with the host of
     `public_url` written next to it.
-- **Serving:** the server serves `TINDEERR_WEB_DIR` under `/`:
+- **Serving:** the server serves `TINDARR_WEB_DIR` under `/`:
   - `/api/…` never falls back to the console: unknown API paths answer a `404` problem;
   - `/assets/…` serves hashed files; a missing asset is a plain `404`, never
     `index.html`;
@@ -411,7 +411,7 @@ Details in [the authentication reference](auth.md), with the reasons in
 ## Repository layout
 
 ```
-tindeerr/
+tindarr/
 ├── api/openapi.yaml        contract, source of truth for both sides
 ├── server/                 Python package, Dockerfile (built from the repo root), tests
 ├── web/                    web console (React, Vite), built into the server image

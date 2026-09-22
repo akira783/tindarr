@@ -7,7 +7,7 @@
 
 > **Note (2026-09-22, [ADR 0011](0011-hardening-after-the-pre-step-2-review.md)):**
 > - An hourly sync with the media server also **clears** `media_server_admin` when the
->   flag was removed there (it never sets it, so a demotion done in Tindeerr still lasts
+>   flag was removed there (it never sets it, so a demotion done in Tindarr still lasts
 >   until that user's next sign-in), and disables users removed or disabled there.
 > - Changing the media server connector or `public_url` needs a media server
 >   administrator with a fresh re-authentication, not just an admin.
@@ -16,9 +16,9 @@
 
 ## Context
 
-ADR 0004 says media server administrators become Tindeerr admins and that admins
+ADR 0004 says media server administrators become Tindarr admins and that admins
 can promote or demote others, without saying what happens when the two disagree:
-someone removed as administrator on the media server, or demoted in Tindeerr while
+someone removed as administrator on the media server, or demoted in Tindarr while
 still administrator there. It also says a reused refresh token revokes the session,
 without saying whether a short grace period covers two concurrent refreshes.
 
@@ -30,14 +30,14 @@ without saying whether a short grace period covers two concurrent refreshes.
   - `media_server_admin`: written from the media server at **every sign-in**
     (password, Plex PIN, Quick Connect). Token refresh and phone pairing do not
     contact the media server and leave it as it is.
-  - `promoted`: set by a Tindeerr admin. It is the only role field an admin edits.
+  - `promoted`: set by a Tindarr admin. It is the only role field an admin edits.
 - **Effective role:** `admin` if `media_server_admin` or `promoted`, else `user`.
 - Consequences of the rule:
-  - Someone removed as administrator on the media server loses Tindeerr admin at
-    their next sign-in, unless an admin promoted them in Tindeerr.
+  - Someone removed as administrator on the media server loses Tindarr admin at
+    their next sign-in, unless an admin promoted them in Tindarr.
   - Promoting a non-admin sets `promoted`; it survives sign-ins.
   - Demoting a user clears `promoted`, and clears `media_server_admin` until that
-    user's next sign-in. **A demotion done only in Tindeerr is overridden at the
+    user's next sign-in. **A demotion done only in Tindarr is overridden at the
     next sign-in of a media server administrator.** The console says so before
     demoting one. To remove them for good, remove the flag on the media server.
   - Only an admin who is a media server administrator can demote or disable
@@ -46,7 +46,7 @@ without saying whether a short grace period covers two concurrent refreshes.
 - **Last admin.** An admin cannot demote or disable the last enabled admin, or
   delete their own data while they are that admin (`code` = `last_admin`). A sign-in
   can still leave zero admins, when the only one loses the flag on the media server.
-  That is recoverable without Tindeerr: the next media server administrator who signs
+  That is recoverable without Tindarr: the next media server administrator who signs
   in is an admin again, and every media server has one.
 - **Authorization reads the database.** The access token no longer carries a `role`
   claim. Admin endpoints are console-only ([ADR 0009](0009-web-console-and-phone-pairing.md))
@@ -67,14 +67,14 @@ without saying whether a short grace period covers two concurrent refreshes.
 ## Consequences
 
 - The media server stays the source of truth for who administers it, with
-  Tindeerr promotions on top.
+  Tindarr promotions on top.
 - A reused refresh token is a clear signal of theft or of a client bug, never a race
   the server has to guess about. The price is that a client that refreshes twice in
   parallel signs its user out, hence the tested single-flight requirement.
 
 ## Alternatives considered
 
-- **Role set once at first sign-in, then managed only in Tindeerr.** A media server
+- **Role set once at first sign-in, then managed only in Tindarr.** A media server
   administrator who is removed there would stay admin here indefinitely. Rejected.
 - **Role taken only from the media server, no promotion.** Some households want a
   second admin who is not a media server administrator. Rejected.

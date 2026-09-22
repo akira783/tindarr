@@ -11,7 +11,7 @@
 >   cookie ([ADR 0009](0009-web-console-and-phone-pairing.md)).
 > - Jellyfin Quick Connect and phone pairing by QR code are added as ways to sign in,
 >   and the console uses cookie sessions (ADR 0009).
-> - The admin flag is re-synced at every sign-in, a Tindeerr role is
+> - The admin flag is re-synced at every sign-in, a Tindarr role is
 >   `media_server_admin` or `promoted`, and access tokens drop the `role` claim;
 >   refresh-token reuse has no grace period and the app must refresh single-flight
 >   ([ADR 0010](0010-roles-and-refresh-tokens.md)).
@@ -46,10 +46,10 @@ reachable from the internet before they are configured.
 3. With that token, the admin configures the media server
    (`PUT /setup/media-server`). The server tests the connection before saving.
 4. The first media server **administrator** who signs in completes setup and becomes a
-   Tindeerr admin. The setup code is then deleted.
+   Tindarr admin. The setup code is then deleted.
 
 **Sign-in.**
-- **Jellyfin / Emby.** The app sends username and password to Tindeerr, which checks
+- **Jellyfin / Emby.** The app sends username and password to Tindarr, which checks
   them with `POST /Users/AuthenticateByName` and reads the administrator flag from the
   returned user policy. It then discards the password and ends the media server
   session it just opened (`POST /Sessions/Logout` with the returned token), so no
@@ -74,7 +74,7 @@ reachable from the internet before they are configured.
 
 ## Consequences
 
-- No passwords to store, reset or leak, and no separate Tindeerr accounts.
+- No passwords to store, reset or leak, and no separate Tindarr accounts.
 - Roles follow the media server: admins there are admins here, and admins can promote
   others.
 - An attacker who finds a fresh install still needs the setup code, which only
@@ -84,7 +84,7 @@ reachable from the internet before they are configured.
 
 ## Alternatives considered
 
-- **Local Tindeerr accounts.** Another password to manage, and a manual mapping to
+- **Local Tindarr accounts.** Another password to manage, and a manual mapping to
   media server users. Rejected.
 - **Proxy forward-auth (Authentik…) in front of the API.** Mobile apps cannot follow
   browser redirects, and many users have no identity provider. Could come later as an

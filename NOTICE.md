@@ -2,7 +2,7 @@
 
 ## SuggestArr
 
-Parts of the Tindeerr server are derived from SuggestArr, in particular the "Swipe"
+Parts of the Tindarr server are derived from SuggestArr, in particular the "Swipe"
 feature developed in the fork https://github.com/akira783/SuggestArr (branch
 `feature/discover`) and the SuggestArr code it builds on (media server, TMDb, OMDb,
 Seerr and LLM helpers).

@@ -26,7 +26,7 @@ The main attacks found:
 - plex.tv resources are self-reported: matching the configured Plex server by name or
   URL lets another server pass as it, and any user who can see the PIN link could
   supply the "owner" token during setup.
-- Tindeerr forwards password attempts to the media server, so it exposed a LAN-only
+- Tindarr forwards password attempts to the media server, so it exposed a LAN-only
   Jellyfin's account lockout to the Internet.
 - A leaked setup code (logs shipped to Loki or Portainer) let a stranger swap the media
   server URL just before the owner signed in; pairing codes could be sent to an
@@ -43,11 +43,11 @@ records the decisions and why.
 
 **Network context.**
 - The client IP is the rightmost untrusted `X-Forwarded-For` hop, honoured only from
-  `TINDEERR_TRUSTED_PROXIES`; the scheme comes from `X-Forwarded-Proto` only from a
+  `TINDARR_TRUSTED_PROXIES`; the scheme comes from `X-Forwarded-Proto` only from a
   trusted proxy; `X-Forwarded-Host` is never used.
 - "Private network" is decided on the resolved client IP, by IP ranges only, with no
   DNS lookup. Carrier-grade NAT (`100.64.0.0/10`, Tailscale) is not private.
-- `Host` must be an IP literal, `localhost`, a name in `TINDEERR_ALLOWED_HOSTS` or the
+- `Host` must be an IP literal, `localhost`, a name in `TINDARR_ALLOWED_HOSTS` or the
   host of `public_url`; the expected `Origin` is built from that validated host.
   `public_url` is no longer a second accepted origin.
 
@@ -63,7 +63,7 @@ records the decisions and why.
   unexpected identity stops sign-ins until an admin or the operator (CLI reset) acts.
 - Users whose media server policy forbids remote access are refused when their client
   IP is not private, at sign-in and on every request, since the media server only sees
-  Tindeerr's LAN address.
+  Tindarr's LAN address.
 - Password sign-in forwards at most 2 failures per case-folded username per 15 minutes
   to the media server, below Jellyfin's default lockout of 3. It pauses instead of
   locking. The `password_sign_in` setting (`enabled`, `lan_only`, `disabled`) lets an
@@ -78,7 +78,7 @@ records the decisions and why.
   by plex.tv account id. The owner token must come from an `owned` account.
 - Each sign-in PIN uses its own client identifier, and the resulting plex.tv device is
   deleted after the check (unofficial endpoint, best effort, logged when it fails).
-- Tindeerr never registers a JWK with plex.tv. Managed Plex Home profiles cannot sign
+- Tindarr never registers a JWK with plex.tv. Managed Plex Home profiles cannot sign
   in (documented limitation).
 - Step 2 stores the owner's account-wide token, which the user sync needs. Whether to
   keep it or use server-scoped and per-user tokens is decided at step 3, together with
@@ -91,10 +91,10 @@ IP and a global cap. Setup gets a read-only PIN status endpoint instead of consu
 PIN. Abandoned Quick Connect approvals are cleaned up.
 
 **Setup.** One active setup session (a new claim revokes the previous one), in its own
-cookie `__Host-tindeerr_setup`. Completion requires that cookie, revokes the setup
+cookie `__Host-tindarr_setup`. Completion requires that cookie, revokes the setup
 session and issues a new web session. Logs give the path of the setup code, never the
 code. A media server locked by the environment skips the wizard step
-(`setting_locked`). `tindeerr media-server reset` is the host-side recovery path.
+(`setting_locked`). `tindarr media-server reset` is the host-side recovery path.
 
 **`public_url`** is verified before saving (HMAC proof of a nonce through
 `server/info` on that URL), can only be changed by a media server administrator with a
@@ -143,8 +143,8 @@ that user, auto-approval, overrides and quotas included (checked in Seerr's sour
   step-up re-authentication, pairing approval, the Plex device cleanup, a CLI reset and
   a larger test suite. In return, none of the attacks above works against the design
   as written.
-- Operators behind a reverse proxy must set `TINDEERR_TRUSTED_PROXIES`, and those using
-  a domain name `TINDEERR_PUBLIC_URL` or `TINDEERR_ALLOWED_HOSTS`. Misconfiguration
+- Operators behind a reverse proxy must set `TINDARR_TRUSTED_PROXIES`, and those using
+  a domain name `TINDARR_PUBLIC_URL` or `TINDARR_ALLOWED_HOSTS`. Misconfiguration
   fails closed (wrong client IP, `host_not_allowed`), and the server logs what to fix.
 - An attacker can pause password sign-in for a known username (15 minutes at a time),
   and Jellyfin's cumulative counter can still lock an account over several windows.
@@ -158,13 +158,13 @@ that user, auto-approval, overrides and quotas included (checked in Seerr's sour
 
 ## Alternatives considered
 
-- **Hard per-username lockout in Tindeerr.** Lets anyone lock out the admin. Rejected
+- **Hard per-username lockout in Tindarr.** Lets anyone lock out the admin. Rejected
   for a pause plus the `password_sign_in` setting.
 - **Global hard limits on claim and pairing.** With 60- and 128-bit codes they only help
   an attacker block legitimate use. Rejected for slowdowns.
 - **Forwarding `X-Forwarded-For` to Jellyfin** so it enforces remote access itself.
-  Only works if Tindeerr is a trusted proxy in Jellyfin's own settings, which most
-  setups will not configure. Rejected in favour of Tindeerr checking the policy.
+  Only works if Tindarr is a trusted proxy in Jellyfin's own settings, which most
+  setups will not configure. Rejected in favour of Tindarr checking the policy.
 - **Re-authenticating against the new media server URL** when changing it. The new
   server's identity is self-reported and can be cloned, so a password could be sent to
   a fake server. Rejected: re-authentication always targets the current server.

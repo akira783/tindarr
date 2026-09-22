@@ -29,14 +29,14 @@ The exact rules and numbers for this section are in
 
 - **Spoofed client address.** Behind a reverse proxy, every request comes from the
   proxy's private address. `X-Forwarded-For` and `X-Forwarded-Proto` are honoured only
-  from `TINDEERR_TRUSTED_PROXIES`, and the client IP is the rightmost untrusted hop, so a
+  from `TINDARR_TRUSTED_PROXIES`, and the client IP is the rightmost untrusted hop, so a
   client cannot pick its own address to escape rate limits, look "private" or fake
   HTTPS. Without that setting behind a proxy, all clients share the proxy's address:
   limits get stricter, never looser, and the server logs a hint. "Private network" is
   decided on the resolved client IP, from IP ranges only.
 - **DNS rebinding.** A web page on an attacker's domain that resolves to the server's
   LAN address would reach the console with the attacker's name in `Host`. Every request
-  must carry an allowed `Host` (IP literal, `localhost`, `TINDEERR_ALLOWED_HOSTS`, the
+  must carry an allowed `Host` (IP literal, `localhost`, `TINDARR_ALLOWED_HOSTS`, the
   host of `public_url`), otherwise `host_not_allowed`; the expected `Origin` is built from
   that validated host.
 - **Unclaimed fresh install.** The server starts in setup mode and writes a one-time
@@ -52,9 +52,9 @@ The exact rules and numbers for this section are in
   handles the setup code.
 - **Credential stuffing.** Failed password sign-ins are limited per client IP, with an
   exponential pause. Errors are identical for an unknown user and a wrong password.
-- **Locking real users out through Tindeerr.** Jellyfin disables an account after a few
-  failed logins, and failures sent through Tindeerr count, even for a Jellyfin server
-  that is only reachable on the LAN. Tindeerr forwards at most 2 failures per
+- **Locking real users out through Tindarr.** Jellyfin disables an account after a few
+  failed logins, and failures sent through Tindarr count, even for a Jellyfin server
+  that is only reachable on the LAN. Tindarr forwards at most 2 failures per
   case-folded username per 15 minutes (below Jellyfin's default of 3), then pauses that
   username without contacting the media server. The pause ends on its own: it is never
   a lock an attacker can hold on the admin. Jellyfin's counter only resets on a
@@ -62,14 +62,14 @@ The exact rules and numbers for this section are in
   admin can therefore restrict password sign-in to the LAN or turn it off
   (`password_sign_in`), leaving Quick Connect, Plex PIN and pairing.
 - **Remote-access bypass.** A Jellyfin or Emby user may be barred from remote access,
-  but the media server only sees Tindeerr's LAN address. Tindeerr enforces the policy
+  but the media server only sees Tindarr's LAN address. Tindarr enforces the policy
   itself: such a user is refused whenever the resolved client IP is not private, at
   sign-in and on every request.
 - **Token theft in transit.** HTTPS is expected. Plain HTTP is accepted by the app only
   for private IP literals, `localhost` and `.local` names, after an explicit warning.
   The console refuses to sign in over plain HTTP (`https_required`), except on
   `localhost` from the same machine, or when the operator sets
-  `TINDEERR_ALLOW_HTTP_CONSOLE=true`, which only applies to private client IPs and is
+  `TINDARR_ALLOW_HTTP_CONSOLE=true`, which only applies to private client IPs and is
   logged at startup.
 - **Forged or replayed tokens.** Access tokens are JWTs (HS256 with a dedicated derived
   key, required `typ`, `kid`, `iss` and `aud`), valid 15 minutes and carrying a session
@@ -127,10 +127,10 @@ The exact rules and numbers for this section are in
   running generation at a time. Token usage is recorded in `llm_usage` and shown to the
   admin.
 - **Admin rights.** A user is admin when the media server says so at their last
-  sign-in (re-read at every sign-in) or when a Tindeerr admin promoted them
+  sign-in (re-read at every sign-in) or when a Tindarr admin promoted them
   ([ADR 0010](adr/0010-roles-and-refresh-tokens.md)). Someone removed as administrator
-  on the media server loses Tindeerr admin within the hour (sync) or at their next
-  sign-in, unless promoted here. A demotion done only in Tindeerr lasts until that media server
+  on the media server loses Tindarr admin within the hour (sync) or at their next
+  sign-in, unless promoted here. A demotion done only in Tindarr lasts until that media server
   administrator's next sign-in, and only a media server administrator can demote or
   disable another one, so a promoted admin cannot lock them out. The last enabled
   admin cannot be demoted or disabled. The role is checked in the database on every
@@ -171,11 +171,11 @@ The exact rules and numbers for this section are in
   `connect-src 'self'`, `object-src 'none'`, `base-uri 'none'`,
   `form-action 'self'`, `frame-ancestors 'none'`,
   `require-trusted-types-for 'script'`. No third-party script or font.
-- **Cookie.** `__Host-tindeerr_session`: `Secure`, `HttpOnly`, `SameSite=Strict`,
+- **Cookie.** `__Host-tindarr_session`: `Secure`, `HttpOnly`, `SameSite=Strict`,
   `Path=/`, no `Domain`, so a sibling subdomain cannot set or read it. It holds an
   opaque 256-bit token stored hashed. Web sessions expire after 24 h idle and 7 days
-  after sign-in. The setup session uses a separate cookie, `__Host-tindeerr_setup`, and
-  console sign-in handles a pre-auth cookie, `__Host-tindeerr_preauth`, with the same
+  after sign-in. The setup session uses a separate cookie, `__Host-tindarr_setup`, and
+  console sign-in handles a pre-auth cookie, `__Host-tindarr_preauth`, with the same
   flags.
 - **CSRF.** Three layers: `SameSite=Strict`; a CSRF token bound to the server-side
   session, sent as `X-CSRF-Token` on every `POST`, `PUT`, `PATCH` and `DELETE` and
@@ -208,7 +208,7 @@ The exact rules and numbers for this section are in
   `POST /auth/pair/preview`), asks for confirmation, and warns when it would replace an
   existing connection. It refuses an `http` server URL unless the host is a private IP
   literal, `localhost` or `.local`, decided without any DNS lookup.
-- **Another app catching the link.** Any Android app can register the `tindeerr://`
+- **Another app catching the link.** Any Android app can register the `tindarr://`
   scheme, so a code opened from the system camera could be intercepted. The app's own
   scanner is the main path, and an intercepted code still needs the console approval.
 - **`public_url` abuse.** The QR link carries `public_url`. An admin session pointing it
@@ -228,15 +228,15 @@ The exact rules and numbers for this section are in
 - **Plex PIN phishing.** The same attack with a Plex PIN: an attacker starts a sign-in
   and sends the victim the `app.plex.tv` link. Binding the handle does not help, since
   the attacker is the initiator. The plex.tv approval page names the device
-  "Tindeerr (<server name>)", the PIN expires, and the new session shows in the
+  "Tindarr (<server name>)", the PIN expires, and the new session shows in the
   victim's session list. An attacker cannot get the owner token this way: `owner_token`
   PINs can only be started from the setup session or by a media server administrator,
   and the token must come from the account that owns the configured server.
-- **Leftover media server sessions.** Tindeerr ends the Jellyfin or Emby session opened
+- **Leftover media server sessions.** Tindarr ends the Jellyfin or Emby session opened
   by each sign-in, cleans up Quick Connect approvals nobody collected, and deletes the
   plex.tv device created by each Plex sign-in (an unofficial plex.tv endpoint; when it
   fails, the device stays listed in the user's plex.tv account and can be removed
-  there). Tindeerr never stores a user's media server token.
+  there). Tindarr never stores a user's media server token.
 
 ### 6. Untrusted data from external systems (LLM, TMDb, media server)
 
@@ -283,13 +283,13 @@ URLs, and the server calls them. That is intended and restricted to admins.
 ## Secrets at rest
 
 - **Encryption.** Secrets in the `settings` table are encrypted with AES-256-GCM,
-  using a key read from `TINDEERR_SECRET_KEY` (or `_FILE`). If no key is supplied, one
+  using a key read from `TINDARR_SECRET_KEY` (or `_FILE`). If no key is supplied, one
   is generated into `data/secret.key` (mode 0600).
 - **Backups.** A copy of the database is useless without the key. Back up both, but
   separately.
 - **Signing key.** The JWT signing key is derived from the same key material with its
-  own label (`tindeerr/v1/jwt-signing`), so rotating the key signs everyone out. The
-  `public_url` proof uses another label (`tindeerr/v1/public-url-proof`).
+  own label (`tindarr/v1/jwt-signing`), so rotating the key signs everyone out. The
+  `public_url` proof uses another label (`tindarr/v1/public-url-proof`).
 
 ## Logging
 
@@ -298,7 +298,7 @@ URLs, and the server calls them. That is intended and restricted to admins.
   Plex PIN and Quick Connect handles, Quick Connect secrets and provider error bodies
   are redacted by a logging filter covered by tests. Any value that is not a plain
   string or number is converted to text and redacted before it is written.
-- **No credentials in URLs.** Tindeerr's own endpoints take codes, handles and tokens in
+- **No credentials in URLs.** Tindarr's own endpoints take codes, handles and tokens in
   bodies, cookies or headers, never in a path or query string. Plex tokens go in the
   `X-Plex-Token` header. The outbound HTTP client's own logger stays at `WARNING`, so
   URLs such as Quick Connect's `?secret=` are never logged.
@@ -316,7 +316,7 @@ URLs, and the server calls them. That is intended and restricted to admins.
   is used before the first batch.
 - **No tracking.** No telemetry and no analytics.
 - **Data control.** Users can reset their votes (app or console) and delete their
-  account's Tindeerr data (console).
+  account's Tindarr data (console).
 
 ## Reporting a vulnerability
 

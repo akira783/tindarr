@@ -38,7 +38,7 @@ Server:
 - Setup: setup code (path only in the logs), claim with a single active setup session,
   `GET /setup/state`, `PUT /setup/media-server` (with `setting_locked` for
   environment-set fields), completion bound to the setup cookie with a new web session,
-  `tindeerr media-server reset` CLI.
+  `tindarr media-server reset` CLI.
 - Media server part of the ports, used by auth: `MediaServer.identify`, `test`,
   `authenticate_password`, `quick_connect_start`, `quick_connect_poll`, `list_users` for
   Jellyfin and Emby (the `Authorization: MediaBrowser …` header, Jellyfin 10.10+), and
@@ -69,7 +69,7 @@ Server:
     `generations_today` are `0` until step 4; `request_backend_user_found` is left out
     until step 3.
   - `POST /admin/llm/models` and `GET /admin/usage` come in steps 3 and 4.
-- Serving the console: `TINDEERR_WEB_DIR`, SPA fallback outside `/api`, path-aware
+- Serving the console: `TINDARR_WEB_DIR`, SPA fallback outside `/api`, path-aware
   security headers.
 - Logging: the new redacted key names, no credentials in URLs, security events.
 
@@ -180,8 +180,8 @@ with each AI provider family. `/status` stays under 50 ms during a generation.
 
 - Signed multi-arch image on GHCR (server + built console), SBOM, documented
   `docker-compose.yml` and reverse-proxy notes (HTTPS for the console,
-  `TINDEERR_TRUSTED_PROXIES`, passing `Host`, `TINDEERR_PUBLIC_URL`).
-- `tindeerr import suggestarr`.
+  `TINDARR_TRUSTED_PROXIES`, passing `Host`, `TINDARR_PUBLIC_URL`).
+- `tindarr import suggestarr`.
 - Deployment on the author's homelab next to the fork, which is left untouched.
   Setup and configuration are done in the web console.
 
@@ -255,7 +255,7 @@ is covered by the console.
 
 ## Open questions
 
-- **Trademark risk of the name.** "Tindeerr" plays on a registered trademark. The
+- **Trademark risk of the name.** "Tindarr" plays on a registered trademark. The
   Play Store may reject the listing or receive a complaint. The name only lives in a
   few constants and the Android `applicationId` is neutral, so a rename stays cheap
   until the store listing exists.
