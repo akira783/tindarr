@@ -34,6 +34,7 @@ from tindeerr.adapters.http import (
 )
 from tindeerr.core.errors import ProblemError, RateLimitedError
 from tindeerr.ports import problems
+from tindeerr.ports.media_server import normalize_server_id
 from tindeerr.ports.plextv import PlexAccount, PlexPin, PlexResource
 
 PLEX_TV_URL: Final = "https://plex.tv"
@@ -235,7 +236,12 @@ class PlexTvClient:
 
     @staticmethod
     def _shares(user: Element, machine_id: str) -> bool:
-        return any(server.get("machineIdentifier") == machine_id for server in user.iter("Server"))
+        # Normalised on both sides, like ``find_server``: the stored identity was.
+        wanted = normalize_server_id(machine_id)
+        return wanted is not None and any(
+            normalize_server_id(server.get("machineIdentifier") or "") == wanted
+            for server in user.iter("Server")
+        )
 
     # --- plumbing -------------------------------------------------------------------
 

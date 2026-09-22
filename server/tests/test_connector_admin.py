@@ -205,18 +205,32 @@ def test_the_identity_is_not_re_read_on_every_sign_in(app: FastAPI, internet: Fa
 # --- the test endpoint -------------------------------------------------------------------
 
 
+def stored_connector(client: TestClient, app: FastAPI) -> Any:
+    """The connector as it is stored, read from inside the running application."""
+    services: Any = app.state.services
+    return run(client, services.connector.configured)
+
+
 def test_a_connector_can_be_tested_without_saving(app: FastAPI) -> None:
     with console_client(app) as client:
         csrf = set_up_server(client, app)
-        response = client.post(
+        before = stored_connector(client, app)
+        elsewhere = client.post(
             f"{CONNECTOR}/test",
             json=connector_body(url="http://elsewhere.lan:8096", api_key="another"),
             headers=console_headers(csrf),
         )
-        assert_matches_contract(f"{API}/admin/connectors/{{kind}}/test", "post", response)
-        assert response.json()["health"] == "unauthorized"
-        # Nothing was saved: the connector still points at the working server.
-        assert client.get(f"{API}/auth/web/session").status_code == 200
+        assert_matches_contract(f"{API}/admin/connectors/{{kind}}/test", "post", elsewhere)
+        # Nothing answers at that address, which is what a test is for.
+        assert elsewhere.json()["health"] == "unreachable"
+        wrong_key = client.post(
+            f"{CONNECTOR}/test",
+            json=connector_body(api_key="another"),
+            headers=console_headers(csrf),
+        )
+        assert wrong_key.json()["health"] == "unauthorized"
+        # Neither test wrote anything: the stored connector is untouched.
+        assert stored_connector(client, app) == before
 
 
 def test_an_old_jellyfin_is_reported_as_unsupported(app: FastAPI, internet: FakeInternet) -> None:
@@ -298,6 +312,50 @@ def test_the_sync_clears_an_administrator_flag_but_never_sets_one(
     assert by_name[ADMIN_NAME].media_server_admin is False
     # Granting is a sign-in's job only (docs/adr/0010).
     assert by_name[USER_NAME].media_server_admin is False
+
+
+def test_the_sync_never_overwrites_a_ban_an_administrator_decided(
+    app: FastAPI, internet: FakeInternet
+) -> None:
+    with console_client(app) as client:
+        set_up_server(client, app)
+        assert app_login(client, USER_NAME, USER_PASSWORD).status_code == 200
+        user = next(u for u in users_of(client, app) if u.name == USER_NAME)
+        set_user_fields(client, app, user.id, enabled=False, disabled_reason="admin")
+        del internet.media.users[USER_NAME]
+        assert run(client, sync_of(app).run).disabled == 0
+        assert next(u for u in users_of(client, app) if u.name == USER_NAME).disabled_reason == (
+            "admin"
+        )
+        # Re-added on the media server, the ban still stands: only a user disabled
+        # *by* the media server is re-enabled when it accepts them again.
+        internet.media.add_user(USER_NAME, USER_PASSWORD, user_id="b" * 32, admin=False)
+        response = app_login(client, USER_NAME, USER_PASSWORD)
+    assert_is_problem(response, 403, "account_disabled")
+
+
+def test_the_sync_reports_a_user_it_disabled_only_once(
+    app: FastAPI, internet: FakeInternet
+) -> None:
+    with console_client(app) as client:
+        set_up_server(client, app)
+        assert app_login(client, USER_NAME, USER_PASSWORD).status_code == 200
+        del internet.media.users[USER_NAME]
+        assert run(client, sync_of(app).run).disabled == 1
+        # An hour later the same absence is not news any more.
+        assert run(client, sync_of(app).run).disabled == 0
+
+
+def test_a_media_server_that_lists_nobody_changes_nothing(
+    app: FastAPI, internet: FakeInternet
+) -> None:
+    with console_client(app) as client:
+        set_up_server(client, app)
+        internet.media.users.clear()
+        result = run(client, sync_of(app).run)
+        users = users_of(client, app)
+    assert result.ran is False
+    assert all(user.enabled for user in users)
 
 
 def test_the_sync_follows_the_name_and_the_remote_access_policy(

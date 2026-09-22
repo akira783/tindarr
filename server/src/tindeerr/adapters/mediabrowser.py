@@ -235,8 +235,10 @@ class MediaBrowserServer:
     def _raise_for_sign_in(response: httpx2.Response) -> None:
         """Turn the documented sign-in answers into their problems, in one place."""
         status = response.status_code
-        if status in (HTTPStatus.UNAUTHORIZED, HTTPStatus.BAD_REQUEST):
-            # Unknown user and wrong password are the same answer, by design.
+        if status == HTTPStatus.UNAUTHORIZED:
+            # Unknown user and wrong password are the same answer, by design. Only
+            # ``401`` counts: a ``400`` is a request the server did not understand, and
+            # must not spend the per-username budget that protects its lockout counter.
             raise problems.invalid_credentials()
         if status == HTTPStatus.FORBIDDEN:
             # Disabled on the media server, too many active sessions, or a user limited

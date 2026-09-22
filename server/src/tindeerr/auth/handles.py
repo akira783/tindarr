@@ -24,6 +24,8 @@ down, because it protects a fixed resource (docs/auth.md, section 8).
 import base64
 import hashlib
 from collections import OrderedDict
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Final, Literal
@@ -110,7 +112,6 @@ class Handle:
     #: The owner token an ``owner_token`` PIN collected, and the account that approved it.
     token: str | None = None
     account_name: str | None = None
-    consumed: bool = False
     #: Set once a Quick Connect approval was collected, so the sweep leaves it alone.
     collected: bool = False
     _last_poll: float | None = field(default=None, repr=False)
@@ -118,6 +119,22 @@ class Handle:
     def expired(self, now: datetime) -> bool:
         """Whether the handle has run out of time."""
         return now >= self.expires_at
+
+    def attach(
+        self,
+        *,
+        pin: PlexPin | None = None,
+        secret: str | None = None,
+        upstream_expiry: datetime | None = None,
+    ) -> None:
+        """Fill in what the upstream call returned, once the slot was already taken.
+
+        The expiry can only ever shrink: the cap of ``MAX_LIFETIME`` was applied when
+        the slot was reserved, and plex.tv or Jellyfin may say something shorter.
+        """
+        self.pin, self.secret = pin, secret
+        if upstream_expiry is not None:
+            self.expires_at = min(self.expires_at, upstream_expiry)
 
     def throttle(self, monotonic: float) -> None:
         """Allow one upstream call per second; a faster caller gets ``202`` instead."""
@@ -145,21 +162,16 @@ class HandleRegistry:
 
     # --- creating -------------------------------------------------------------------
 
-    def create(  # noqa: PLR0913 - one per part of a handle, all keyword but the first
-        self,
-        kind: HandleKind,
-        purpose: HandlePurpose,
-        binding: Binding,
-        *,
-        client_key: str,
-        upstream_expiry: datetime | None = None,
-        pin: PlexPin | None = None,
-        secret: str | None = None,
-    ) -> Handle:
-        """Register a handle, after the creation limits and the two caps.
+    @contextmanager
+    def reserving(
+        self, kind: HandleKind, purpose: HandlePurpose, binding: Binding, *, client_key: str
+    ) -> Generator[Handle]:
+        """Take the slot **before** the upstream call, and give it back if that fails.
 
-        ``upstream_expiry`` is what the media server or plex.tv said; the handle never
-        outlives ``MAX_LIFETIME`` whatever that was.
+        The creation limit and both caps have to bound the expensive work, not just the
+        answer: otherwise a refused caller still makes Tindeerr create a plex.tv PIN or
+        a Jellyfin Quick Connect request every time, and the Jellyfin ones would be
+        orphans no sweep could ever find (docs/auth.md, sections 4 and 8).
         """
         now = self._clock.now()
         self._forget_expired(now)
@@ -171,18 +183,31 @@ class HandleRegistry:
             purpose=purpose,
             binding=binding,
             client_key=client_key,
-            expires_at=self._expiry(kind, upstream_expiry, now),
-            pin=pin,
-            secret=secret,
+            expires_at=now + MAX_LIFETIME[kind],
         )
         self._handles[handle.id] = handle
+        try:
+            yield handle
+        except BaseException:
+            self.drop(handle.id)
+            raise
         security_event("handle_created", handle_kind=kind, purpose=purpose)
-        return handle
 
-    @staticmethod
-    def _expiry(kind: HandleKind, upstream: datetime | None, now: datetime) -> datetime:
-        capped = now + MAX_LIFETIME[kind]
-        return min(upstream, capped) if upstream is not None else capped
+    def create(  # noqa: PLR0913 - one per part of a handle, all keyword but the first
+        self,
+        kind: HandleKind,
+        purpose: HandlePurpose,
+        binding: Binding,
+        *,
+        client_key: str,
+        upstream_expiry: datetime | None = None,
+        pin: PlexPin | None = None,
+        secret: str | None = None,
+    ) -> Handle:
+        """Reserve and fill a handle in one go, for a credential already in hand."""
+        with self.reserving(kind, purpose, binding, client_key=client_key) as handle:
+            handle.attach(pin=pin, secret=secret, upstream_expiry=upstream_expiry)
+        return handle
 
     def _check_caps(self, client_key: str) -> None:
         if len(self._handles) >= self._max_total:
@@ -211,10 +236,11 @@ class HandleRegistry:
         now = self._clock.now()
         self._forget_expired(now)
         handle = self._handles.get(handle_id)
+        # A spent handle is not marked used, it is removed: there is one single-use
+        # rule, and it is that the registry no longer knows the id.
         if (
             handle is None
             or handle.kind != kind
-            or handle.consumed
             or handle.expired(now)
             or handle.purpose != purpose
             or not handle.binding.matches(binding)
@@ -227,8 +253,7 @@ class HandleRegistry:
         handle.throttle(self._clock.monotonic())
 
     def spend(self, handle: Handle) -> None:
-        """Mark a handle used and drop it: it can never serve a second sign-in."""
-        handle.consumed = True
+        """Drop a handle that was used: it can never serve a second sign-in."""
         self._handles.pop(handle.id, None)
 
     def drop(self, handle_id: str) -> None:
@@ -272,7 +297,7 @@ class HandleRegistry:
             if not handle.expired(now):
                 continue
             del self._handles[handle_id]
-            if handle.kind == "quick_connect" and not handle.collected and not handle.consumed:
+            if handle.kind == "quick_connect" and not handle.collected:
                 self._to_sweep.append(handle)
         # The sweep runs every 30 seconds; this only bounds the list if it ever stops.
         del self._to_sweep[: -self._max_total]

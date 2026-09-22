@@ -14,6 +14,7 @@ and the Plex owner token from an ``OwnerTokenHandles`` registry, which holds the
 PIN handles (also step 2b).
 """
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -24,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from tindeerr.auth import errors
 from tindeerr.auth.events import security_event
 from tindeerr.core.clock import Clock, SystemClock
+from tindeerr.core.errors import ProblemError
 from tindeerr.ports.media_server import (
     ConnectionCheck,
     MediaServer,
@@ -38,6 +40,8 @@ from tindeerr.storage import sessions as session_repository
 from tindeerr.storage import users as user_repository
 from tindeerr.storage.db import write_transaction
 from tindeerr.storage.settings import SettingLockedError, SettingsStore
+
+logger = logging.getLogger(__name__)
 
 #: Contract field of ``MediaServerConfigInput`` -> the setting that stores it.
 SETTING_FOR_FIELD: Final[Mapping[str, str]] = {
@@ -258,10 +262,25 @@ class MediaServerConnector:
             )
         changed = await self._store(settings, identity, relink=relink)
         if request.plex_pin_id is not None:
-            await self._owner_tokens.consume(request.plex_pin_id, session_id)
+            await self._spend_pin(request.plex_pin_id, session_id)
         self.forget_identity_check()
         security_event("media_server_saved", kind=request.kind, identity_changed=changed)
         return SavedConnector(check, identity, changed)
+
+    async def _spend_pin(self, handle: str, session_id: str) -> None:
+        """Consume the owner-token PIN, tolerating one that expired in the meantime.
+
+        The connector is already stored at this point. A handle whose ten minutes ran
+        out during the connection test is simply gone, and answering ``410`` — which
+        the contract reads as "nothing happened" — would be a lie.
+        """
+        try:
+            await self._owner_tokens.consume(handle, session_id)
+        except ProblemError as problem:
+            logger.warning(
+                "the Plex PIN was already gone when the connector was saved",
+                extra={"problem": problem.code},
+            )
 
     def _check_locks(self, request: MediaServerInput) -> None:
         values: Mapping[str, object] = {

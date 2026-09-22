@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Final, Protocol
 
-from tindeerr.ports.media_server import MediaUser, normalize_user_id
+from tindeerr.ports.media_server import MediaUser, normalize_server_id, normalize_user_id
 from tindeerr.ports.problems import plex_tv_unreachable
 
 #: What plex.tv resources call a media server in ``provides``.
@@ -83,12 +83,19 @@ def find_server(resources: list[PlexResource], machine_id: str) -> PlexResource 
     A resource counts only when it provides ``server``: a player advertising the same
     identifier must not decide who administers anything. Names and advertised URLs are
     self-reported and decide nothing (docs/auth.md, section 4).
+
+    Both sides are normalised, because the stored identity was: comparing a normalised
+    identifier with a raw one would refuse every sign-in the day Plex issues an
+    identifier with a capital letter or a dash in it.
     """
+    wanted = normalize_server_id(machine_id)
     return next(
         (
             resource
             for resource in resources
-            if resource.is_server and resource.client_identifier == machine_id
+            if resource.is_server
+            and wanted is not None
+            and normalize_server_id(resource.client_identifier) == wanted
         ),
         None,
     )

@@ -92,15 +92,13 @@ class PlexPinFlow:
             await self._require_plex(caller)
         client_id = self._install_id if purpose == "owner_token" else str(uuid4())
         name = await self._sign_in.server_name()
-        pin = await self._plex_tv.create_pin(client_id, f"Tindeerr ({name})")
-        handle = self._handles.create(
-            "plex_pin",
-            purpose,
-            binding,
-            client_key=caller.client_key,
-            upstream_expiry=pin.expires_at,
-            pin=pin,
-        )
+        # The slot is taken first: a refused caller must not still make plex.tv issue a
+        # PIN, and this endpoint needs no credential at all for an app sign-in.
+        with self._handles.reserving(
+            "plex_pin", purpose, binding, client_key=caller.client_key
+        ) as handle:
+            pin = await self._plex_tv.create_pin(client_id, f"Tindeerr ({name})")
+            handle.attach(pin=pin, upstream_expiry=pin.expires_at)
         return StartedPin(handle.id, self._plex_tv.auth_url(pin), handle.expires_at)
 
     async def _require_plex(self, caller: Caller) -> None:
@@ -174,7 +172,9 @@ class PlexPinFlow:
         state = await self._server_state.read()
         machine_id = ServerIdentity.server_id_of(state.media_server_identity, "plex")
         if machine_id is None:
-            raise errors.sign_in_method_unavailable("This server does not sign in with Plex.")
+            # The connector was repointed at something that is not Plex while this PIN
+            # was waiting: from the client's side the media server changed under it.
+            raise errors.media_server_changed()
         return machine_id
 
     async def _account_for(self, token: str, client_id: str, machine_id: str) -> MediaUser:
@@ -204,21 +204,19 @@ class QuickConnectFlow:
         if settings.kind != "jellyfin":
             raise errors.quick_connect_unavailable()
         adapter = await self._sign_in.adapter()
-        try:
-            started = await adapter.quick_connect_start()
-        except ProblemError:
-            # Switched off, or the server no longer offers it: stop advertising it.
-            self._sign_in.quick_connect.remember(enabled=None)
-            raise
+        # The slot first: a Quick Connect request created for a caller who is then
+        # refused would be an orphan no sweep could ever find.
+        with self._handles.reserving(
+            "quick_connect", purpose, binding, client_key=caller.client_key
+        ) as handle:
+            try:
+                started = await adapter.quick_connect_start()
+            except ProblemError:
+                # Switched off, or the server no longer offers it: stop advertising it.
+                self._sign_in.quick_connect.remember(enabled=None)
+                raise
+            handle.attach(secret=started.secret, upstream_expiry=started.expires_at)
         self._sign_in.quick_connect.remember(enabled=True)
-        handle = self._handles.create(
-            "quick_connect",
-            purpose,
-            binding,
-            client_key=caller.client_key,
-            upstream_expiry=started.expires_at,
-            secret=started.secret,
-        )
         return StartedQuickConnect(handle.id, started.code, handle.expires_at)
 
     async def collect(self, handle_id: str, purpose: HandlePurpose, binding: Binding) -> MediaUser:

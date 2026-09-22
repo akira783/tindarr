@@ -27,7 +27,10 @@ from tindeerr.jobs.purge import PeriodicJob
 USER_SYNC_INTERVAL: Final = timedelta(hours=1)
 USER_SYNC_FIRST_DELAY: Final = timedelta(seconds=60)
 HANDLE_SWEEP_INTERVAL: Final = timedelta(seconds=30)
-QUICK_CONNECT_INTERVAL: Final = timedelta(minutes=5)
+#: Comfortably shorter than ``QUICK_CONNECT_CACHE``: a probe that ran exactly as often
+#: as the cache expires would leave a window before each run where ``auth_methods``
+#: drops a Quick Connect that is in fact switched on.
+QUICK_CONNECT_INTERVAL: Final = timedelta(minutes=2)
 QUICK_CONNECT_FIRST_DELAY: Final = timedelta(seconds=15)
 
 logger = logging.getLogger(__name__)

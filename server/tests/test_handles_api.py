@@ -211,13 +211,46 @@ def test_a_sign_in_handle_cannot_be_used_as_a_step_up(app: FastAPI) -> None:
 # --- the caps on outstanding handles -----------------------------------------------------------
 
 
-def test_only_five_handles_may_be_outstanding_per_address(app: FastAPI) -> None:
+def test_only_five_handles_may_be_outstanding_per_address(
+    app: FastAPI, internet: FakeInternet
+) -> None:
     with console_client(app) as client:
         set_up_server(client, app)
         for _ in range(5):
             assert start_quick_connect(client).status_code == 201
+        started = len(internet.media.quick_connect)
         response = start_quick_connect(client)
     assert_is_problem(response, 429, "rate_limited")
+    # The refusal bounds the work too: Jellyfin was not asked for a sixth code, which
+    # would have been an orphan request no sweep could ever find.
+    assert len(internet.media.quick_connect) == started
+
+
+def test_a_refused_plex_pin_never_reaches_plex_tv(
+    app: FastAPI, internet: FakeInternet, clock: FakeClock
+) -> None:
+    with console_client(app) as client:
+        set_up_plex(client, app, internet, clock)
+        for _ in range(5):
+            assert start_plex_pin(client).status_code == 201
+        created = len(internet.plex_tv.pins)
+        response = start_plex_pin(client)
+    assert_is_problem(response, 429, "rate_limited")
+    assert len(internet.plex_tv.pins) == created
+
+
+def test_a_failed_upstream_call_gives_the_slot_back(
+    app: FastAPI, internet: FakeInternet, clock: FakeClock
+) -> None:
+    with console_client(app) as client:
+        set_up_plex(client, app, internet, clock)
+        services: Any = app.state.services
+        outstanding = services.handles.outstanding
+        internet.plex_tv.offline = True
+        assert_is_problem(start_plex_pin(client), 503, "plex_tv_unreachable")
+        assert services.handles.outstanding == outstanding
+        internet.plex_tv.offline = False
+        assert start_plex_pin(client).status_code == 201
 
 
 def test_handle_creation_is_limited_over_time(app: FastAPI, clock: FakeClock) -> None:

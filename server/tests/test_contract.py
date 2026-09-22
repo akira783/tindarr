@@ -77,15 +77,55 @@ def resolve(location: str) -> Mapping[str, Any]:
     return cast("Mapping[str, Any]", node)
 
 
+def operation_of(response: httpx2.Response) -> Mapping[str, Any] | None:
+    """The contract operation a response came from, or ``None`` if there is none.
+
+    The request's own URL is matched against the contract's paths, templated segments
+    included, so an error-path assertion checks the documented operation without the
+    test having to name it. A request to something the contract does not describe at
+    all (an unknown path, a method that operation does not have) has no operation, and
+    only the ``Problem`` schema applies to it.
+    """
+    wanted = response.request.url.path.strip("/").split("/")
+    for candidate, item in contract()["paths"].items():
+        parts = candidate.strip("/").split("/")
+        if len(parts) != len(wanted):
+            continue
+        pairs = zip(parts, wanted, strict=True)
+        if all(part.startswith("{") or part == seen for part, seen in pairs):
+            method = response.request.method.lower()
+            return cast("Mapping[str, Any] | None", item.get(method))
+    return None
+
+
 def assert_is_problem(response: httpx2.Response, status: int, code: str) -> None:
+    """Assert the response is the documented problem, with the documented status."""
     assert response.status_code == status
     assert response.headers["content-type"] == "application/problem+json"
+    operation = operation_of(response)
+    if operation is not None:
+        documented = operation["responses"]
+        assert str(status) in documented, (
+            f"{response.request.method} {response.request.url.path}: {status} is not documented"
+        )
+        description = str(resolve_description(documented[str(status)]))
+        assert code in description, (
+            f"{response.request.method} {response.request.url.path}: "
+            f"{status} does not document `{code}`"
+        )
     validator = Draft202012Validator(
         {"$ref": f"{CONTRACT_URI}#/components/schemas/Problem"}, registry=registry()
     )
     body = response.json()
     assert [error.message for error in validator.iter_errors(body)] == []
     assert body["code"] == code
+
+
+def resolve_description(documented: Mapping[str, Any]) -> object:
+    """The description of a documented response, following a ``$ref`` if there is one."""
+    ref = documented.get("$ref")
+    node = resolve(ref.removeprefix("#/")) if ref else documented
+    return node.get("description", "")
 
 
 def exposed_operations(app: FastAPI) -> Iterator[tuple[str, str, str | None]]:
@@ -165,3 +205,13 @@ def test_no_route_is_hidden_from_the_generated_spec() -> None:
 def test_contract_paths_use_known_methods() -> None:
     for path, item in contract()["paths"].items():
         assert set(item) <= HTTP_METHODS | {"parameters", "summary", "description"}, path
+
+
+def test_a_problem_the_contract_does_not_document_fails_the_assertion(
+    client: TestClient,
+) -> None:
+    # The guard of assert_is_problem itself: an undocumented code must not pass.
+    response = client.post("/api/v1/setup/claim", json={"setup_code": "x" * 12})
+    assert_is_problem(response, 403, "https_required")
+    with pytest.raises(AssertionError, match="does not document"):
+        assert_is_problem(response, 403, "not_a_server_user")

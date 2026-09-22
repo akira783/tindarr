@@ -9,7 +9,10 @@ users are and reconciles.
 The rules are deliberately one-way:
 
 - a linked user who is **missing** from the list, or disabled there, is disabled here
-  with ``disabled_reason = media_server``, and their sessions are revoked at once;
+  with ``disabled_reason = media_server``, and their sessions are revoked at once. A
+  user an administrator has already disabled keeps *that* reason: writing
+  ``media_server`` over it would let their next sign-in re-enable them, since a user
+  disabled only by the media server is re-enabled when it accepts them again (§4);
 - ``media_server_admin`` is **cleared** when the media server no longer says
   administrator. It is never set: only a sign-in grants it, so a demotion done inside
   Tindeerr lasts until that user signs in again (ADR 0010);
@@ -78,6 +81,12 @@ class UserSync:
                 "the media server user sync was skipped", extra={"problem": problem.code}
             )
             return SyncResult()
+        if not media_users:
+            # A media server with no users at all is not a media server that lost them:
+            # it is a credential that can no longer see them. Disabling everyone on that
+            # answer would lock the household out of its own server.
+            logger.warning("the media server listed no users at all; nothing was changed")
+            return SyncResult()
         return await self._reconcile({user.id: user for user in media_users})
 
     async def _reconcile(self, media_users: dict[str, MediaUser]) -> SyncResult:
@@ -89,6 +98,11 @@ class UserSync:
                     continue
                 media_user = media_users.get(user.media_server_user_id)
                 if media_user is None or media_user.disabled:
+                    if not user.enabled:
+                        # Already gone, for this reason or an administrator's: say so
+                        # once, not every hour.
+                        await repository.update_fields(connection, user.id, synced_at=now)
+                        continue
                     revoked += await self._disable(connection, user, now)
                     disabled += 1
                     continue

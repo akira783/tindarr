@@ -411,6 +411,7 @@ class FakePlexTv:
 #: Where the tests place each server. The names never resolve: every call is mocked.
 MEDIA_SERVER_URL: Final = "http://media.lan:8096"
 PLEX_SERVER_URL: Final = "http://plex.lan:32400"
+_MEDIA_HOST: Final = "media.lan"
 _PLEX_HOST: Final = "plex.lan"
 
 
@@ -429,10 +430,17 @@ class FakeInternet:
     plex_offline: bool = False
 
     def handle(self, request: httpx2.Request) -> httpx2.Response:
-        """Route a request to the server that answers at its host."""
+        """Route a request to the server that answers at its host.
+
+        Only the two known hosts answer: any other address is as unreachable as it
+        would be in reality, so a test that points the connector somewhere else really
+        points it somewhere else.
+        """
         if request.url.host == _PLEX_HOST:
             return self._plex(request)
-        return self.media.handle(request)
+        if request.url.host == _MEDIA_HOST:
+            return self.media.handle(request)
+        raise httpx2.ConnectError(f"nothing answers at {request.url.host}")
 
     def _plex(self, request: httpx2.Request) -> httpx2.Response:
         if self.plex_offline:

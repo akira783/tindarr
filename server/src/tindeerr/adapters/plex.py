@@ -46,7 +46,7 @@ from tindeerr.ports.media_server import (
 )
 from tindeerr.ports.plextv import PlexResource, PlexTv, as_media_user, find_server
 
-#: Plex sends its version in ``MediaContainer.version``.
+#: What the server answers its own ``machineIdentifier`` and version on.
 _IDENTITY_PATH: Final = "/identity"
 
 logger = logging.getLogger(__name__)
