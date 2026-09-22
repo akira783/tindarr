@@ -7,20 +7,38 @@
     ":semanticCommits"
   ],
   "timezone": "Europe/Paris",
-  "schedule": ["before 6am on monday"],
-  "labels": ["dependencies"],
+  "schedule": [
+    "before 6am on monday"
+  ],
+  "labels": [
+    "dependencies"
+  ],
   "minimumReleaseAge": "3 days",
   "lockFileMaintenance": {
     "enabled": true,
-    "schedule": ["before 6am on monday"]
+    "schedule": [
+      "before 6am on monday"
+    ]
   },
-  "enabledManagers": ["pep621", "dockerfile", "docker-compose", "github-actions", "npm", "custom.regex"],
+  "enabledManagers": [
+    "pep621",
+    "dockerfile",
+    "docker-compose",
+    "github-actions",
+    "npm",
+    "nvm",
+    "custom.regex"
+  ],
   "customManagers": [
     {
       "customType": "regex",
       "description": "uv version pinned in workflows",
-      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
-      "matchStrings": ["UV_VERSION: \"(?<currentValue>[^\"]+)\""],
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "UV_VERSION: \"(?<currentValue>[^\"]+)\""
+      ],
       "depNameTemplate": "astral-sh/uv",
       "datasourceTemplate": "github-releases"
     }
@@ -28,19 +46,46 @@
   "packageRules": [
     {
       "description": "Group Python dev tooling",
-      "matchManagers": ["pep621"],
-      "matchDepTypes": ["dependency-groups"],
+      "matchManagers": [
+        "pep621"
+      ],
+      "matchDepTypes": [
+        "dependency-groups"
+      ],
       "groupName": "python dev tooling"
     },
     {
       "description": "Group GitHub Actions",
-      "matchManagers": ["github-actions"],
+      "matchManagers": [
+        "github-actions"
+      ],
       "groupName": "github actions"
     },
     {
       "description": "Keep uv, its image and the build backend in step",
-      "matchPackageNames": ["astral-sh/uv", "astral/uv", "uv_build"],
+      "matchPackageNames": [
+        "astral-sh/uv",
+        "astral/uv",
+        "uv_build"
+      ],
       "groupName": "uv"
+    },
+    {
+      "description": "Group the web console's dependencies",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchFileNames": [
+        "web/package.json"
+      ],
+      "groupName": "web console dependencies"
+    },
+    {
+      "description": "Keep the Node build stage and .nvmrc in step",
+      "matchPackageNames": [
+        "node"
+      ],
+      "groupName": "node"
     }
   ]
 }

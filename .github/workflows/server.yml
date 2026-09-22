@@ -5,7 +5,11 @@ on:
     branches: [main]
     paths: &paths
       - "server/**"
+      # The image contains the web console, built from these.
+      - "web/**"
+      - "shared/**"
       - "api/openapi.yaml"
+      - ".dockerignore"
       - ".github/workflows/server.yml"
       - ".github/scripts/docker-smoke-test.sh"
   pull_request:
@@ -99,7 +103,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Build (no push)
-        run: docker build --pull --tag tindeerr-server:ci .
+        # From the repository root: the image contains the console.
+        working-directory: .
+        run: docker build --pull --file server/Dockerfile --tag tindeerr-server:ci .
       - name: Smoke test (read-only, no capabilities)
         working-directory: .
         run: .github/scripts/docker-smoke-test.sh tindeerr-server:ci
