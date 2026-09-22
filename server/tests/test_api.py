@@ -121,15 +121,26 @@ def test_server_info_on_a_fresh_install(client: TestClient) -> None:
     [("jellyfin", ["password"]), ("emby", ["password"]), ("plex", ["plex_pin"])],
 )
 def test_server_info_reflects_the_media_server(
-    config: ServerConfig, monkeypatch: pytest.MonkeyPatch, kind: str, methods: list[str]
+    config: ServerConfig,
+    data_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    methods: list[str],
 ) -> None:
     monkeypatch.setenv("TINDEERR_MEDIA_SERVER_KIND", kind)
     monkeypatch.setenv("TINDEERR_SERVER_NAME", "Chez nous")
     with TestClient(create_app(config)) as client:
         body = client.get("/api/v1/server/info").json()
-    assert body["media_server"] == {"kind": kind}
-    assert body["auth_methods"] == methods
-    assert body["name"] == "Chez nous"
+        assert body["media_server"] == {"kind": kind}
+        assert body["name"] == "Chez nous"
+        # Nobody signs in before setup completes.
+        assert body["auth_methods"] == []
+        with closing(sqlite3.connect(database_path(data_dir))) as connection, connection:
+            connection.execute(
+                "UPDATE server_state SET setup_completed_at = ?",
+                (datetime.now(UTC).replace(tzinfo=None).isoformat(" "),),
+            )
+        assert client.get("/api/v1/server/info").json()["auth_methods"] == methods
 
 
 def test_unknown_media_server_kind_prevents_startup(

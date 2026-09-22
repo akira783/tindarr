@@ -48,14 +48,16 @@ async def get_server_info(services: Services) -> ServerInfo:
     name = (await services.settings.get("server_name")).value
     kind_value = (await services.settings.get("media_server_kind")).value
     kind = as_media_server_kind(kind_value)
+    setup_required = not await services.server_state.setup_completed()
     return ServerInfo(
         name=name if isinstance(name, str) and name else "Tindeerr",
         version=__version__,
         api_version=API_VERSION,
         min_app_version=MIN_APP_VERSION,
-        setup_required=not await services.server_state.setup_completed(),
+        setup_required=setup_required,
         media_server=MediaServerInfo(kind=kind) if kind is not None else None,
-        auth_methods=sign_in_methods(kind),
+        # Nobody signs in before setup completes: the console claims the server first.
+        auth_methods=[] if setup_required else sign_in_methods(kind),
         capabilities=[],
         tmdb_image_base_url=TMDB_IMAGE_BASE_URL,
     )
