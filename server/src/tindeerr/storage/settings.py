@@ -20,9 +20,17 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import cached_property
 from http import HTTPStatus
-from typing import Any, Final, Literal, cast
+from typing import Annotated, Any, Final, Literal, cast
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    TypeAdapter,
+    ValidationError,
+)
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -31,12 +39,29 @@ from tindeerr.core.config import ConfigError, env_var_name, read_env
 from tindeerr.core.crypto import SecretCipher
 from tindeerr.core.errors import ProblemError
 from tindeerr.core.logs import register_secret
+from tindeerr.core.net import normalize_public_url
 from tindeerr.ports.media_server import MediaServerKind
 from tindeerr.storage.db import write_transaction
 from tindeerr.storage.tables import settings as settings_table
 
 type JsonValue = str | int | float | bool | list[JsonValue] | dict[str, JsonValue] | None
 type SettingSource = Literal["default", "database", "environment"]
+#: Whether Jellyfin / Emby password sign-in is offered, and from where.
+type PasswordSignIn = Literal["enabled", "lan_only", "disabled"]
+#: An origin the phones reach this server at (docs/auth.md, section 10).
+type PublicUrl = Annotated[str, AfterValidator(normalize_public_url)]
+type StreamingRegion = Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]
+
+
+class ContentFilters(BaseModel):
+    """Titles the swipe engine must never offer (stored in step 2, used from step 4)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    exclude_adult: bool = True
+    min_year: int | None = None
+    excluded_genres: list[str] = Field(default_factory=list)
+    excluded_original_languages: list[str] = Field(default_factory=list)
 
 
 logger = logging.getLogger(__name__)
@@ -96,6 +121,19 @@ SETTINGS: Final[Mapping[str, SettingDefinition]] = {
         SettingDefinition("media_server_kind", MediaServerKind | None),
         SettingDefinition("media_server_url", str | None),
         SettingDefinition("media_server_api_key", str | None, secret=True),
+        SettingDefinition("media_server_verify_tls", bool, default=True),
+        SettingDefinition("public_url", PublicUrl | None),
+        SettingDefinition("password_sign_in", PasswordSignIn, default="enabled"),
+        # Stored from step 2, used by the swipe engine from step 4.
+        SettingDefinition("language", str, default="en"),
+        SettingDefinition("streaming_region", StreamingRegion | None),
+        SettingDefinition("daily_generation_limit", Annotated[int, Field(ge=0)], default=10),
+        SettingDefinition("warm_up_enabled", bool, default=True),
+        SettingDefinition(
+            "content_filters",
+            ContentFilters,
+            default=cast("JsonValue", ContentFilters().model_dump(mode="json")),
+        ),
     )
 }
 
@@ -240,6 +278,40 @@ class SettingsStore:
         Raises ``InvalidSettingValueError`` for a value of the wrong type and
         ``SettingLockedError`` for an environment-set setting.
         """
+        statement = insert(settings_table).values(self._row(name, value))
+        statement = statement.on_conflict_do_update(
+            index_elements=[settings_table.c.name],
+            set_={key: statement.excluded[key] for key in ("value", "encrypted", "updated_at")},
+        )
+        async with write_transaction(self._engine) as connection:
+            await connection.execute(statement)
+
+    async def set_many(self, values: Mapping[str, object]) -> None:
+        """Validate and store several settings in one transaction (all or nothing)."""
+        rows = [self._row(name, value) for name, value in values.items()]
+        async with write_transaction(self._engine) as connection:
+            for row in rows:
+                statement = insert(settings_table).values(row)
+                await connection.execute(
+                    statement.on_conflict_do_update(
+                        index_elements=[settings_table.c.name],
+                        set_={
+                            key: statement.excluded[key]
+                            for key in ("value", "encrypted", "updated_at")
+                        },
+                    )
+                )
+
+    async def delete(self, name: str) -> None:
+        """Remove the stored value, falling back to the default."""
+        self._definition(name)
+        if name in self._overrides:
+            raise SettingLockedError(name)
+        async with write_transaction(self._engine) as connection:
+            await connection.execute(delete(settings_table).where(settings_table.c.name == name))
+
+    def _row(self, name: str, value: object) -> dict[str, object]:
+        """Return the row to store for ``name``, encrypting a secret setting."""
         definition = self._definition(name)
         if name in self._overrides:
             raise SettingLockedError(name)
@@ -249,27 +321,12 @@ class SettingsStore:
             if isinstance(value, str):
                 register_secret(value)
             serialized = self._cipher.encrypt(serialized, context=self._context(name))
-        row = {
+        return {
             "name": name,
             "value": serialized,
             "encrypted": definition.secret,
             "updated_at": datetime.now(UTC),
         }
-        statement = insert(settings_table).values(row)
-        statement = statement.on_conflict_do_update(
-            index_elements=[settings_table.c.name],
-            set_={key: statement.excluded[key] for key in ("value", "encrypted", "updated_at")},
-        )
-        async with write_transaction(self._engine) as connection:
-            await connection.execute(statement)
-
-    async def delete(self, name: str) -> None:
-        """Remove the stored value, falling back to the default."""
-        self._definition(name)
-        if name in self._overrides:
-            raise SettingLockedError(name)
-        async with write_transaction(self._engine) as connection:
-            await connection.execute(delete(settings_table).where(settings_table.c.name == name))
 
     @staticmethod
     def _context(name: str) -> str:

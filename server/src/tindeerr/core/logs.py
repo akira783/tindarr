@@ -67,9 +67,14 @@ _SENSITIVE_PARTS: Final = (
     "signature",
     "pairingcode",
     "setupcode",
+    "codeverifier",
+    "codechallenge",
+    "nonce",
 )
 # Short names that are only sensitive as a whole name: ``code`` is, ``status_code`` is not.
-_SENSITIVE_NAMES: Final = frozenset({"sid", "jwt", "otp", "pin", "code", "key", "sig"})
+_SENSITIVE_NAMES: Final = frozenset(
+    {"sid", "jwt", "otp", "pin", "code", "key", "sig", "handle", "pinid"}
+)
 
 # ``name=value`` or ``name: value`` in free text. Long names match anywhere in a word
 # (``clientSecret``, ``X-Plex-Token``) and take ``=`` or ``:``; their value runs to the
@@ -78,7 +83,8 @@ _SENSITIVE_NAMES: Final = frozenset({"sid", "jwt", "otp", "pin", "code", "key", 
 # "status code: 404" stays readable. Every repetition is bounded: no ReDoS.
 _LONG_PAIR = re.compile(
     r"(?i)((?:password|passwd|passphrase|secret|api[_-]?key|token|authorization|cookie"
-    r"|credential|session|csrf|refresh|pairing[_-]?code|setup[_-]?code)[\w-]{0,32}"
+    r"|credential|session|csrf|refresh|pairing[_-]?code|setup[_-]?code|nonce"
+    r"|code[_-]?verifier|code[_-]?challenge|handle)[\w-]{0,32}"
     r"[\"']?\s{0,8}[:=]\s{0,8})"
     r"(?!\s{0,8}[\"']?\[REDACTED\])"
     r"(\"[^\"\r\n]{1,512}|'[^'\r\n]{1,512}|(?:\[REDACTED\]|[^\r\n,;&\"'}\]]){1,512})"

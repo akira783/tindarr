@@ -149,19 +149,16 @@ def test_upgrade_takes_a_consistent_backup_first(
             "INSERT INTO settings VALUES ('server_name', '\"Home\"', 0, '2026-01-01 00:00:00')"
         )
 
-    newer = tmp_path / "migrations"
-    shutil.copytree(migrate.MIGRATIONS_DIR, newer)
-    (newer / "versions" / "9999_test.py").write_text(EXTRA_REVISION.format(head=head_revision()))
-    monkeypatch.setattr(migrate, "MIGRATIONS_DIR", newer)
-
+    head = head_revision()
+    install_revision(tmp_path, monkeypatch, EXTRA_REVISION)
     result = upgrade_database(db_path, backups, keep=3)
 
-    assert (result.from_revision, result.to_revision) == ("0001", "9999")
+    assert (result.from_revision, result.to_revision) == (head, "9999")
     assert result.backup is not None
     assert result.backup.parent == backups
-    assert result.backup.name.endswith("-rev-0001.db")
+    assert result.backup.name.endswith(f"-rev-{head}.db")
     assert stat.S_IMODE(result.backup.stat().st_mode) == 0o600
-    assert query(result.backup, "SELECT version_num FROM alembic_version") == [("0001",)]
+    assert query(result.backup, "SELECT version_num FROM alembic_version") == [(head,)]
     assert query(result.backup, "SELECT name FROM settings") == [("server_name",)]
     assert query(db_path, "SELECT version_num FROM alembic_version") == [("9999",)]
     assert "note" in {row[1] for row in query(db_path, "PRAGMA table_info(settings)")}
@@ -239,13 +236,14 @@ def test_failed_migration_leaves_the_database_unchanged(
             "INSERT INTO settings VALUES ('server_name', '\"Home\"', 0, '2026-01-01 00:00:00')"
         )
     before = schema(db_path)
+    head = head_revision()
     install_revision(tmp_path, monkeypatch, FAILING_REVISION)
 
     with pytest.raises(RuntimeError, match="halfway"):
         upgrade_database(db_path, data_dir / "backups", keep=3)
 
     assert schema(db_path) == before
-    assert query(db_path, "SELECT version_num FROM alembic_version") == [("0001",)]
+    assert query(db_path, "SELECT version_num FROM alembic_version") == [(head,)]
     assert query(db_path, "SELECT name FROM settings") == [("server_name",)]
 
 
@@ -334,6 +332,7 @@ def test_upgrade_is_aborted_when_the_backup_is_bad(
     db_path = database_path(data_dir)
     backups = data_dir / "backups"
     upgrade_database(db_path, backups, keep=3)
+    head = head_revision()
     install_revision(tmp_path, monkeypatch, EXTRA_REVISION)
 
     def failing_verify(path: Path) -> None:
@@ -343,7 +342,7 @@ def test_upgrade_is_aborted_when_the_backup_is_bad(
     with pytest.raises(BackupError, match="integrity"):
         upgrade_database(db_path, backups, keep=3)
     assert list(backups.iterdir()) == []
-    assert query(db_path, "SELECT version_num FROM alembic_version") == [("0001",)]
+    assert query(db_path, "SELECT version_num FROM alembic_version") == [(head,)]
 
 
 def test_backup_io_errors_are_reported(
@@ -361,3 +360,75 @@ def test_backup_io_errors_are_reported(
     with pytest.raises(BackupError, match="cannot back up"):
         upgrade_database(db_path, backups, keep=3)
     assert list(backups.iterdir()) == []
+
+
+def upgrade_to(db_path: Path, revision: str) -> None:
+    from alembic import command  # noqa: PLC0415
+    from alembic.config import Config  # noqa: PLC0415
+
+    config = Config()
+    config.set_main_option("script_location", str(migrate.MIGRATIONS_DIR))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    command.upgrade(config, revision)
+
+
+def test_a_step_one_database_is_migrated_and_keeps_its_data(data_dir: Path) -> None:
+    db_path = database_path(data_dir)
+    backups = data_dir / "backups"
+    upgrade_to(db_path, "0001")
+    with closing(sqlite3.connect(db_path)) as connection, connection:
+        connection.execute(
+            "INSERT INTO settings VALUES ('server_name', '\"Home\"', 0, '2026-01-01 00:00:00')"
+        )
+        connection.execute("UPDATE server_state SET setup_completed_at = '2026-01-01 00:00:00'")
+
+    result = upgrade_database(db_path, backups, keep=3)
+
+    assert (result.from_revision, result.to_revision) == ("0001", head_revision())
+    assert result.backup is not None
+    assert result.backup.name.endswith("-rev-0001.db")
+    tables = {row[0] for row in query(db_path, "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert {"users", "sessions", "refresh_tokens", "pairings"} <= tables
+    assert query(db_path, "SELECT name FROM settings") == [("server_name",)]
+    ((completed, install_id, code_hash, identity),) = query(
+        db_path,
+        "SELECT setup_completed_at, install_id, setup_code_hash, media_server_identity "
+        "FROM server_state",
+    )
+    assert completed == "2026-01-01 00:00:00"
+    assert isinstance(install_id, str)
+    assert len(install_id) >= 16
+    assert (code_hash, identity) == (None, None)
+    # The single-row constraint survives the table rewrite.
+    with (
+        pytest.raises(sqlite3.IntegrityError),
+        closing(sqlite3.connect(db_path)) as connection,
+        connection,
+    ):
+        connection.execute("INSERT INTO server_state (id, created_at) VALUES (2, '2026-01-01')")
+
+
+def test_each_database_gets_its_own_install_id(data_dir: Path, tmp_path: Path) -> None:
+    first = database_path(data_dir)
+    second = tmp_path / "other.db"
+    upgrade_database(first, data_dir / "backups", keep=3)
+    upgrade_database(second, tmp_path / "backups", keep=3)
+    assert query(first, "SELECT install_id FROM server_state") != query(
+        second, "SELECT install_id FROM server_state"
+    )
+
+
+def test_the_second_revision_downgrades_cleanly(data_dir: Path) -> None:
+    from alembic import command  # noqa: PLC0415
+    from alembic.config import Config  # noqa: PLC0415
+
+    db_path = database_path(data_dir)
+    upgrade_database(db_path, data_dir / "backups", keep=3)
+    config = Config()
+    config.set_main_option("script_location", str(migrate.MIGRATIONS_DIR))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    command.downgrade(config, "0001")
+    tables = {row[0] for row in query(db_path, "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert tables == {"settings", "server_state", "alembic_version"}
+    columns = {row[1] for row in query(db_path, "PRAGMA table_info(server_state)")}
+    assert columns == {"id", "created_at", "setup_completed_at"}

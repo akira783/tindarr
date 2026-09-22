@@ -13,6 +13,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.54,<2.1",
     "aiosqlite>=0.22",
     "uvicorn>=0.53",
+    "pyjwt>=2.10",
 ]
 
 [project.scripts]

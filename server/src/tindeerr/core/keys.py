@@ -37,7 +37,7 @@ class KeyPurpose(StrEnum):
     """HKDF ``info`` labels. Changing one invalidates everything derived from it."""
 
     SETTINGS_ENCRYPTION = "tindeerr/v1/settings-encryption"
-    JWT_SIGNING = "tindeerr/v1/jwt-signing"  # reserved for step 2 (access tokens)
+    JWT_SIGNING = "tindeerr/v1/jwt-signing"  # access tokens (HS256)
     KEY_ID = "tindeerr/v1/key-id"
 
 

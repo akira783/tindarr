@@ -4,7 +4,7 @@ Clients switch on ``code``, never on ``title`` or ``detail``. Exception messages
 tracebacks are logged (redacted), never sent to the client.
 
 - ``ProblemError`` (``tindeerr.core.errors``), raised by any layer, keeps its status,
-  code, detail and headers; for a 5xx its detail is logged, not sent.
+  code, detail, headers and extensions; for a 5xx its detail is logged, not sent.
 - ``DecryptionError`` (a stored secret that no longer decrypts, usually after a change of
   secret key) is logged with its own message and answered as a generic 500.
 - Framework errors (404, 405, 429...) get a code from their status; invalid input is a
@@ -48,16 +48,18 @@ class FieldError(TypedDict):
     message: str
 
 
-def problem_response(
+def problem_response(  # noqa: PLR0913 - one parameter per documented problem member
     status: int,
     code: str,
     *,
     detail: str | None = None,
     errors: Sequence[FieldError] | None = None,
     headers: Mapping[str, str] | None = None,
+    extensions: Mapping[str, str | int] | None = None,
 ) -> JSONResponse:
     """Build an ``application/problem+json`` response."""
-    body: dict[str, object] = {
+    body: dict[str, object] = dict(extensions or {})
+    body |= {
         "type": "about:blank",
         "title": HTTPStatus(status).phrase,
         "status": status,
@@ -103,8 +105,12 @@ async def _problem_error_handler(_request: Request, exc: Exception) -> JSONRespo
     assert isinstance(exc, ProblemError)  # noqa: S101 - registered for this type
     if exc.status >= HTTPStatus.INTERNAL_SERVER_ERROR:
         logger.error("request failed", exc_info=exc, extra={"problem": exc.code})
-        return problem_response(exc.status, exc.code, headers=exc.headers)
-    return problem_response(exc.status, exc.code, detail=exc.detail, headers=exc.headers)
+        return problem_response(
+            exc.status, exc.code, headers=exc.headers, extensions=exc.extensions
+        )
+    return problem_response(
+        exc.status, exc.code, detail=exc.detail, headers=exc.headers, extensions=exc.extensions
+    )
 
 
 async def _decryption_error_handler(_request: Request, exc: Exception) -> JSONResponse:

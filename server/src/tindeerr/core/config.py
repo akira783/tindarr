@@ -18,6 +18,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator
 
+from tindeerr.core.net import parse_host
+
 ENV_PREFIX = "TINDEERR_"
 FILE_SUFFIX = "_FILE"
 DEFAULT_PORT = 8787
@@ -85,6 +87,15 @@ class ServerConfig(BaseModel):
         default=(),
         description="Comma-separated IPs or CIDRs whose X-Forwarded-* headers are honoured.",
     )
+    allowed_hosts: tuple[str, ...] = Field(
+        default=(),
+        description="Comma-separated host names accepted in the Host header, besides IP "
+        "literals, localhost and the host of public_url.",
+    )
+    allow_http_console: bool = Field(
+        default=False,
+        description="Allow console sessions over plain HTTP from private client addresses.",
+    )
     db_backups_keep: int = Field(
         default=5, ge=1, le=100, description="Pre-migration database backups to keep."
     )
@@ -93,6 +104,23 @@ class ServerConfig(BaseModel):
     @classmethod
     def _upper_log_level(cls, value: object) -> object:
         return value.upper() if isinstance(value, str) else value
+
+    @field_validator("allowed_hosts", mode="before")
+    @classmethod
+    def _parse_allowed_hosts(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        hosts: list[str] = []
+        for item in value.split(","):
+            name = item.strip()
+            if not name:
+                continue
+            host = parse_host(name)
+            if host is None or host.port is not None:
+                msg = "must be a comma-separated list of host names, without port or scheme"
+                raise ValueError(msg)
+            hosts.append(host.host)
+        return tuple(hosts)
 
     @field_validator("trusted_proxies", mode="before")
     @classmethod
