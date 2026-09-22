@@ -34,15 +34,17 @@ There is no central Tindeerr service.
 
 | Layer | Package | Depends on | Rule |
 |---|---|---|---|
+| Main | `tindeerr.main` | everything | Composition root: builds the adapters, hands them to the domain as ports, starts the jobs. |
 | API | `tindeerr.api` | domain, auth | HTTP only: parsing, status codes, problem details. No business logic. |
-| Auth | `tindeerr.auth` | adapters (media server), storage | Sessions, tokens, roles. |
-| Domain | `tindeerr.swipe` | ports (interfaces), storage | Swipe engine, prompts, scoring. No HTTP, no vendor SDK. |
-| Ports | `tindeerr.ports` | nothing | `Protocol` classes the domain talks to. |
-| Adapters | `tindeerr.adapters.*` | ports, vendor SDKs, httpx | One package per external system. |
 | Jobs | `tindeerr.jobs` | domain, storage | Background work with persisted state. |
+| Auth | `tindeerr.auth` | ports (media server), storage | Sessions, tokens, roles. |
+| Domain | `tindeerr.swipe` | ports (interfaces), storage | Swipe engine, prompts, scoring. No HTTP, no vendor SDK. |
+| Adapters | `tindeerr.adapters.*` | ports, vendor SDKs, httpx | One package per external system. |
+| Ports | `tindeerr.ports` | nothing | `Protocol` classes the domain and auth talk to. |
 | Storage | `tindeerr.storage` | SQLAlchemy Core | Tables, repositories, Alembic migrations. |
 
-Imports only point downwards. CI enforces this with `import-linter`.
+Imports only point downwards. Only `tindeerr.main` imports adapters. CI enforces this
+with `import-linter`.
 
 ### Ports
 
@@ -83,10 +85,10 @@ This is the feature's logic as it exists in the SuggestArr fork, already tested 
 use:
 
 1. **Signals.** Engagement from the media server (watched, abandoned, in progress,
-   "mostly watched" at 60 % or more), the library, past votes and the taste profile.
+   "mostly watched" for a series at 60 % of its episodes or more), the library, past votes and the taste profile.
    Media server play counts are never used as a rewatch signal: debrid setups inflate
    them.
-2. **Batch prompt.** Mode (`calibration` until 25 votes, then `normal`), novelty
+2. **Batch prompt.** Mode (`calibration` until 15 votes, then `normal`), novelty
    (`familiar` / `balanced` / `bold`), optional mood. The prompt also lists the
    library and the cards already shown, so the model avoids them in the first place.
 3. **Resolution.** Every suggestion is matched on TMDb, then filtered (already voted,
@@ -97,9 +99,13 @@ use:
 5. **Profile.** Rewritten in the background every N votes, as short "Loves / Avoids /
    Nuances" bullets. Text written by the user is kept and never contradicted.
 
-**Change from the fork:** batches and cards are stored in the database
-([ADR 0007](adr/0007-server-side-cards.md)). They survive a restart, and a vote only
-sends `card_id` instead of the whole card.
+**Changes from the fork:**
+
+- Batches and cards are stored in the database
+  ([ADR 0007](adr/0007-server-side-cards.md)). They survive a restart, and a vote only
+  sends `card_id` instead of the whole card.
+- The fork only reads engagement and library contents from Jellyfin / Emby. The Plex
+  side of the `MediaServer` port is new code, not a port.
 
 ### Background jobs
 
@@ -109,13 +115,13 @@ startup, jobs left `running` by a crash are marked failed. There is no Redis or 
 at this scale. If a second process ever becomes necessary, the table already serves as
 the queue.
 
-- **Batch generation.** Started when a batch is consumed or requested, one per user
-  and filter set at a time.
+- **Batch generation.** Started when a batch is consumed or requested. One per user at
+  a time: a request for another filter set waits (`202`) until it is done.
 - **Warm-up.** 30 s after startup, then every 6 h, only for users active in the last
   14 days.
 - **Profile rewrite.** Debounced, one per user at a time.
-- **Per-user limits.** Maximum generations per day and a concurrency cap, both set by
-  the admin (see [security](security.md)).
+- **Per-user limits.** A maximum number of generations per day, set by the admin, on
+  top of the one-at-a-time rule above (see [security](security.md)).
 
 ### Storage
 

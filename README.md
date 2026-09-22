@@ -19,7 +19,8 @@ for fitting titles, and files requests through Seerr / Jellyseerr / Overseerr.
   endpoint, Ollama.
 
 Your data stays on your server. The AI provider you choose receives titles from your
-votes and history. Nothing is sent to the Tindeerr authors.
+votes and history, your taste profile and the mood you type. Nothing is sent to the
+Tindeerr authors.
 
 ## Documentation
 

@@ -19,9 +19,11 @@ Targets: OWASP ASVS 4 level 2 for the server, OWASP MASVS L1 for the app.
 ### 1. Internet attacker against an exposed server
 
 - **Unclaimed fresh install.** The server starts in setup mode and prints a one-time
-  **setup code** to its logs, and writes it to `data/setup-code` with mode 0600. Every
-  setup endpoint requires that code, so the first stranger to find the URL cannot claim
-  the instance. The code expires as soon as setup completes
+  **setup code** to its logs, and writes it to `data/setup-code` with mode 0600. The
+  code is random, at least 60 bits (12 base32 characters), and claim attempts are
+  rate-limited per IP and globally, so it cannot be brute-forced. Every setup endpoint
+  requires that code (or the setup token it is exchanged for), so the first stranger to
+  find the URL cannot claim the instance. The code expires as soon as setup completes
   ([ADR 0004](adr/0004-authentication.md)).
 - **Credential stuffing.** The login rate limit applies per IP and per username, with
   exponential backoff. Errors are identical for an unknown user and a wrong password.
@@ -32,21 +34,28 @@ Targets: OWASP ASVS 4 level 2 for the server, OWASP MASVS L1 for the app.
   with a server key and carrying a session id. Refresh tokens are opaque (256 bits) and
   stored as SHA-256 hashes. They rotate on every use: presenting a refresh token that
   was already used revokes the whole session (reuse detection).
-- **Surface.** Only `/healthz`, `/api/v1/server/info` and the login / setup endpoints
-  are public. `server/info` returns no user data and no internal URLs.
+- **Surface.** Only `/healthz`, `/api/v1/server/info`, the sign-in endpoints
+  (password, Plex PIN), token refresh and the setup claim are public. `server/info`
+  returns no user data and no internal URLs.
+- **Plex PIN hijacking.** The `pin_id` the app polls with is a random server-side
+  handle (at least 128 bits), not the plex.tv PIN id, and it works once. Guessing it to
+  catch someone else's sign-in is not practical.
 
 ### 2. Another user of the same server
 
 - **Isolation.** Every row carries `user_id`. Repositories take the user from the
   session, never from the request body. Tests check that one user cannot read or
   change another user's votes, likes, profile or sessions.
-- **Request queue abuse.** Requests are filed **on behalf of the matching
-  request-backend user**, so that user's quotas and auto-approval rules apply. No user
-  gets the admin key's rights. A title can only be requested if it was served to that
-  user or voted on by them, so Tindeerr cannot bypass the backend's own request screen.
-- **Cost abuse.** Each user has a daily generation cap and one running generation at a
-  time. Both limits are set by the admin. Token usage is recorded in `llm_usage` and
-  shown to the admin.
+- **Request queue abuse.** Requests are filed **as the matching request-backend
+  user**: the admin API key is sent with `X-API-User: <backend user id>`, so the backend
+  applies that user's request permissions, quotas, auto-approval and override rules.
+  The `userId` field of the request body is not used: the backend then still checks
+  auto-approval against the API key's admin, so every request would be approved
+  without review. No user gets the admin key's rights. A title can only be requested if
+  it was served to that user or voted on by them.
+- **Cost abuse.** Each user has a daily generation cap, set by the admin, and one
+  running generation at a time. Token usage is recorded in `llm_usage` and shown to the
+  admin.
 - **Admin rights.** Media server administrators become Tindeerr admins; the admin can
   promote or demote other users. Only admins can see settings (secrets are masked:
   `set` + last 4 characters, never the value), change connectors or run connection
@@ -75,11 +84,18 @@ Targets: OWASP ASVS 4 level 2 for the server, OWASP MASVS L1 for the app.
 
 ### 5. Admin-configured URLs (SSRF)
 
-The admin supplies the media server, request backend and Ollama URLs, and the server
-calls them. That is intended and restricted to admins. Connection tests return a
-coarse result (`ok`, `unauthorized`, `unreachable`, `unexpected_response`) and no
-response body, so they cannot be used to read internal pages. Redirects are not
-followed to another host.
+The admin supplies the media server, request backend, OpenAI-compatible and Ollama
+URLs, and the server calls them. That is intended and restricted to admins.
+
+- **No reflection.** Connection tests return a coarse result (`ok`, `unauthorized`,
+  `unreachable`, `unexpected_response`) plus, at most, the remote product name and
+  version, never a response body. The model list only returns ids parsed from the
+  provider's expected JSON shape. Neither can be used to read internal pages.
+- **No secret replay.** When a test, a model listing or a save omits a secret, the
+  stored one is reused only if the URL is unchanged. A new URL requires the secret
+  again (`code` = `secret_required`), so a stolen admin session cannot send the stored
+  keys to a host of its choice.
+- **Redirects** are not followed to another host.
 
 ### 6. Supply chain
 

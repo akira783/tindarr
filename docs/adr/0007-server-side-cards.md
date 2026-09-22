@@ -13,9 +13,12 @@ poster, pick type. The server then trusts that client data.
 
 - A generated batch is stored (`batches`), and so is each card (`cards`), with an
   opaque id, the owner, the TMDb reference, the enriched metadata and the pick type.
-  Cards expire 24 h after being served, unless they were voted on.
+  Cards leave the deck 24 h after being served. Votes on them are still accepted
+  after that, so a vote queued offline is not lost; unvoted cards are purged 30 days
+  after being served.
 - Votes reference `card_id`. The server copies the title data from its own card row.
-  Requests reference a title the user was served or voted on
+  Undo works on the title (`media_type` + `tmdb_id`). Requests reference a title the
+  user was served or voted on
   ([security](../security.md)).
 - Returning a batch marks its cards as served, which feeds the "already shown" list of
   the next prompt.
@@ -25,4 +28,4 @@ poster, pick type. The server then trusts that client data.
 - Clients cannot forge card contents or pick types, and statistics stay trustworthy.
 - A batch prepared by the warm-up is still there after a restart, so no generation is
   paid twice.
-- A little more storage, which a periodic purge of unvoted expired cards keeps small.
+- A little more storage, which the periodic purge of old unvoted cards keeps small.

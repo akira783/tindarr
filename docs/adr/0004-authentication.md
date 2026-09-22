@@ -12,10 +12,12 @@ reachable from the internet before they are configured.
 ## Decision
 
 **First run (claim).**
-1. On first start, the server generates a one-time setup code, logs it, and writes it
-   to `data/setup-code` (0600).
+1. On first start, the server generates a one-time setup code (random, at least
+   60 bits), logs it, and writes it to `data/setup-code` (0600).
 2. The app detects `setup_required` in `server/info` and asks for the code.
-   `POST /setup/claim` exchanges the code for a short-lived setup token.
+   `POST /setup/claim` exchanges the code for a short-lived setup token. A setup token
+   is a different token type from an access token: each is rejected where the other is
+   expected.
 3. With that token, the admin configures the media server
    (`PUT /setup/media-server`). The server tests the connection before saving.
 4. The first media server **administrator** who signs in completes setup and becomes a
@@ -23,11 +25,18 @@ reachable from the internet before they are configured.
 
 **Sign-in.**
 - **Jellyfin / Emby.** The app sends username and password to Tindeerr, which checks
-  them with `Users/AuthenticateByName` and then discards the password and the
-  returned user token.
-- **Plex.** A PIN flow brokered by the server: the server creates a plex.tv PIN, the
-  app opens the plex.tv link, and the server polls the PIN. The server keeps no user
-  token. It checks that the Plex account has access to the configured server.
+  them with `POST /Users/AuthenticateByName` and reads the administrator flag from the
+  returned user policy. It then discards the password and ends the media server
+  session it just opened (`POST /Sessions/Logout` with the returned token), so no
+  stray device is left in the user's media server account.
+- **Plex.** A PIN flow brokered by the server: the server creates a strong plex.tv PIN
+  (`POST https://plex.tv/api/v2/pins`) with its own client identifier, and gives the
+  app the `app.plex.tv/auth` link and a random, single-use handle for it (never the
+  plex.tv PIN id). Each time the app polls with that handle, the server checks the PIN
+  on plex.tv. Once it carries a token, the server uses it once to check that the Plex
+  account can access the configured server (`owned` there means administrator), then
+  discards it. The only Plex token ever stored is the owner token entered during
+  setup or by an admin.
 - Only users of the configured media server can sign in. Admins can disable a user.
 
 **Tokens.**

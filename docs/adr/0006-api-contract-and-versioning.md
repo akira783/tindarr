@@ -18,9 +18,9 @@ their owners' schedule. A phone may talk to an older or newer server.
   unknown fields and treat unknown enum values gracefully. A breaking change means
   `/api/v2`, served alongside v1 for at least one minor release.
 - **Negotiation.** `GET /api/v1/server/info` returns `version`, `api_version`,
-  `min_app_version` and `capabilities` (strings such as `plex_login`, `trailers`,
-  `notifications`). The app enables features by capability and asks the user to update
-  when either side is too old.
+  `min_app_version`, `auth_methods` (`password`, `plex_pin`) and `capabilities`
+  (strings such as `trailers`, `ratings`, `notifications`). The app enables features
+  by capability and asks the user to update when either side is too old.
 - **Errors.** `application/problem+json` (RFC 9457) with a stable `code`. The app
   switches on `code`, never on the message text.
 - **Pagination.** Opaque cursors (`cursor`, `next_cursor`).

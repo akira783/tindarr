@@ -89,7 +89,7 @@ paths:
               type: object
               required: [setup_code]
               properties:
-                setup_code: { type: string, minLength: 6, maxLength: 64 }
+                setup_code: { type: string, minLength: 12, maxLength: 64 }
       responses:
         "200":
           description: Setup token, valid 30 minutes.
@@ -187,11 +187,16 @@ paths:
       tags: [auth]
       summary: Start a Plex PIN sign-in
       description: |
-        The server creates a plex.tv PIN. The app opens `auth_url` in the browser,
-        then calls `POST /auth/plex/login` until it succeeds or the PIN expires.
-        Also used during setup (with a setup token) to obtain the owner token.
+        The server creates a strong plex.tv PIN. The app opens `auth_url` in the
+        browser, then calls `POST /auth/plex/login` until it succeeds or the PIN
+        expires. The same PIN flow gives the owner token for the media server
+        connector: during setup (with a setup token, then `PUT /setup/media-server`)
+        or later by an admin (`PUT /admin/connectors/media_server`). A PIN is
+        consumed by the first call that uses it.
       operationId: createPlexPin
-      security: []
+      security:
+        - {}
+        - setupToken: []
       responses:
         "201":
           description: PIN created.
@@ -201,7 +206,9 @@ paths:
                 type: object
                 required: [pin_id, auth_url, expires_at]
                 properties:
-                  pin_id: { type: string }
+                  pin_id:
+                    type: string
+                    description: Random single-use handle (at least 128 bits), not the plex.tv PIN id.
                   auth_url: { type: string, format: uri }
                   expires_at: { type: string, format: date-time }
         "429": { $ref: "#/components/responses/Problem" }
@@ -230,13 +237,22 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AuthResult" }
         "202": { $ref: "#/components/responses/Pending" }
-        "403": { $ref: "#/components/responses/Problem" }
+        "403":
+          description: "`account_disabled`, `not_a_server_user`, or `admin_required` while setup is pending."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "410":
-          description: "`pin_expired`."
+          description: "`pin_expired` (also for an unknown or already used `pin_id`)."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
         "429": { $ref: "#/components/responses/Problem" }
+        "503":
+          description: "`setup_required` or `media_server_unreachable`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
 
   /api/v1/auth/refresh:
     post:
@@ -300,6 +316,11 @@ paths:
       responses:
         "204": { description: Deleted. }
         "401": { $ref: "#/components/responses/Problem" }
+        "409":
+          description: "`last_admin`: promote another admin first."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
 
   /api/v1/me/sessions:
     get:
@@ -351,9 +372,12 @@ paths:
       tags: [swipe]
       summary: Next cards, or pending while a batch is generated
       description: |
-        Returns cards not yet voted on. When no batch is ready, starts one in the
-        background and answers `202`; poll after `retry_after_ms`. A finished but
-        empty batch answers `200` with no cards and does not start another one.
+        Returns the served cards not yet voted on and still in the deck, then
+        fresh ones. Calling it again returns the same unvoted cards, so a client
+        that lost its state loses nothing. When no card is ready, starts a batch in
+        the background and answers `202`; poll after `retry_after_ms`. A finished
+        but empty batch answers `200` with no cards and does not start another one.
+        The next batch is prepared in the background as the deck runs low.
       operationId: getDeck
       parameters:
         - name: media_type
@@ -460,7 +484,9 @@ paths:
     delete:
       tags: [swipe]
       summary: Undo the vote on one title
-      description: The card goes back to the top of the deck if it has not expired.
+      description: |
+        The card goes back to the top of the deck if it is less than 24 h old. A
+        request already filed for the title (auto-request) is not cancelled.
       operationId: undoVote
       parameters:
         - $ref: "#/components/parameters/MediaTypePath"
@@ -475,9 +501,11 @@ paths:
       tags: [swipe]
       summary: Request a title through the request backend
       description: |
-        Filed on behalf of the caller's request-backend user, so their quotas and
-        approval rules apply. Only titles served to or voted on by the caller can
-        be requested (`code` = `title_not_offered` otherwise).
+        Filed as the caller's request-backend user (`X-API-User`), so their
+        permissions, quotas, auto-approval and override rules apply. Only titles
+        served to or voted on by the caller can be requested (`code` =
+        `title_not_offered` otherwise). A title not voted on yet is recorded as a
+        `like`. Requesting a title twice answers `already_requested`.
       operationId: requestTitle
       requestBody:
         required: true
@@ -496,7 +524,7 @@ paths:
                   request_status: { $ref: "#/components/schemas/RequestStatus" }
         "401": { $ref: "#/components/responses/Problem" }
         "403":
-          description: "`title_not_offered`, `no_backend_user`, `quota_exceeded`."
+          description: "`title_not_offered`, `no_backend_user`, `request_not_allowed` (the backend user may not request this media type), `quota_exceeded`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -665,8 +693,9 @@ paths:
       tags: [admin]
       summary: Configure a connector
       description: |
-        Omitted secret fields keep their stored value. Fields locked by an
-        environment variable are rejected (`code` = `setting_locked`).
+        Omitted secret fields keep their stored value, unless the URL changes
+        (`code` = `secret_required`). Fields locked by an environment variable are
+        rejected (`code` = `setting_locked`).
       operationId: saveConnector
       parameters:
         - $ref: "#/components/parameters/ConnectorKind"
@@ -701,7 +730,10 @@ paths:
     post:
       tags: [admin]
       summary: Test a connector without saving
-      description: Returns a coarse result only, never the remote response body.
+      description: |
+        Returns a coarse result only, never the remote response body. Omitted
+        secrets fall back to the stored ones only when the URL is unchanged
+        (`code` = `secret_required` otherwise).
       operationId: testConnector
       parameters:
         - $ref: "#/components/parameters/ConnectorKind"
@@ -724,7 +756,10 @@ paths:
     post:
       tags: [admin]
       summary: List the models a provider offers
-      description: Uses the given settings, or the stored ones for omitted fields.
+      description: |
+        Uses the given settings, or the stored ones for omitted fields. The stored
+        API key is only reused when `base_url` is unchanged (`code` =
+        `secret_required` otherwise). Returns model ids only.
       operationId: listLlmModels
       requestBody:
         required: true
@@ -953,10 +988,12 @@ components:
             invalid_setup_code, invalid_credentials, account_disabled,
             not_a_server_user, pin_expired, media_server_unreachable,
             connector_unreachable, connector_unauthorized, setting_locked,
+            secret_required,
             llm_not_configured, tmdb_not_configured, llm_auth_failed, llm_quota,
             llm_model_not_found, llm_unreachable, llm_invalid_output,
             daily_limit_reached, requests_not_configured, no_backend_user,
-            title_not_offered, quota_exceeded, request_backend_error,
+            title_not_offered, request_not_allowed, quota_exceeded,
+            request_backend_error,
             last_admin, internal_error.
           examples: [llm_quota]
         retry_after_ms: { type: integer, minimum: 0 }
@@ -1125,6 +1162,7 @@ components:
       type: object
       required: [name, offer]
       properties:
+        provider_id: { type: integer, description: TMDb watch provider id. }
         name: { type: string }
         logo_path: { type: [string, "null"] }
         offer: { type: string, enum: [subscription, free, ads, rent, buy] }
@@ -1135,6 +1173,7 @@ components:
       properties:
         site: { type: string, const: youtube }
         key: { type: string, pattern: "^[A-Za-z0-9_-]{6,20}$" }
+        name: { type: [string, "null"], description: "Video title, e.g. for an accessible label." }
         language: { type: [string, "null"] }
 
     Card:
@@ -1165,7 +1204,10 @@ components:
         rationale: { type: [string, "null"], description: Why the AI picked it. Plain text. }
         pick_type: { $ref: "#/components/schemas/PickType" }
         availability: { $ref: "#/components/schemas/Availability" }
-        expires_at: { type: string, format: date-time }
+        expires_at:
+          type: string
+          format: date-time
+          description: When the card leaves the deck. It can still be voted on after that.
 
     Deck:
       type: object
@@ -1225,7 +1267,7 @@ components:
         outcome: { type: string, enum: [stored, duplicate, rejected] }
         code:
           type: [string, "null"]
-          description: "For `rejected`: `card_not_found`, `card_expired`, `validation_error`."
+          description: "For `rejected`: `card_not_found` (unknown, purged or another user's card), `validation_error`. A card that left the deck can still be voted on."
         request_status:
           oneOf:
             - type: "null"
@@ -1375,6 +1417,11 @@ components:
         url: { type: string, format: uri, maxLength: 512 }
         api_key: { type: string, maxLength: 512 }
         verify_tls: { type: boolean, default: true }
+        tv_seasons:
+          type: string
+          enum: [all, first]
+          default: all
+          description: Seasons requested for a series.
 
     ApiKeyInput:
       type: object
@@ -1407,7 +1454,9 @@ components:
         configured: { type: boolean }
         provider: { type: [string, "null"], description: "Media server kind or LLM provider kind." }
         url: { type: [string, "null"] }
+        verify_tls: { type: [boolean, "null"] }
         model: { type: [string, "null"] }
+        tv_seasons: { type: [string, "null"], enum: [all, first, null], description: Requests connector only. }
         secret: { $ref: "#/components/schemas/SecretState" }
         locked_fields: { type: array, items: { type: string } }
         status: { $ref: "#/components/schemas/ConnectorStatus" }

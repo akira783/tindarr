@@ -19,7 +19,12 @@ endpoints, Ollama). More will be asked for (Radarr/Sonarr direct, Trakt, other L
   - Jellyfin and Emby share most of one adapter, with small overrides.
   - Plex has its own adapter: X-Plex-Token, plex.tv PIN, the owner token for history.
 - **Request backend.** One adapter for Seerr, Jellyseerr and Overseerr (same API).
-  Radarr/Sonarr direct may come later behind the same port.
+  Requests are sent with the admin API key and `X-API-User: <backend user id>`, which
+  all three honour: the request is then made as that user, with their permissions,
+  quotas, auto-approval and override rules. Backend users are matched by their
+  `jellyfinUserId` (Jellyfin, Emby) or `plexId`. Series are requested for all seasons
+  or the first one only, as the admin chooses. Radarr/Sonarr direct may come later
+  behind the same port.
 - **AI providers**, with official SDKs only:
   - **OpenAI:** `openai`, structured outputs (JSON schema).
   - **Anthropic:** `anthropic`, forced tool use carrying the JSON schema.
