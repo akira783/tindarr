@@ -53,6 +53,13 @@ type PublicUrl = Annotated[str, AfterValidator(normalize_public_url)]
 type StreamingRegion = Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]
 
 
+def as_password_sign_in(value: object) -> PasswordSignIn:
+    """Return a stored ``password_sign_in`` value as its type, defaulting to ``enabled``."""
+    if value in ("enabled", "lan_only", "disabled"):
+        return value
+    return "enabled"
+
+
 class ContentFilters(BaseModel):
     """Titles the swipe engine must never offer (stored in step 2, used from step 4)."""
 
@@ -239,6 +246,11 @@ class SettingsStore:
         """Whether an environment variable sets ``name``."""
         self._definition(name)
         return name in self._overrides
+
+    def locked_value(self, name: str) -> JsonValue:
+        """Return the value an environment variable forces on ``name`` (else ``None``)."""
+        self._definition(name)
+        return self._overrides.get(name)
 
     async def get(self, name: str) -> SettingValue:
         """Return the effective value: environment, then database, then default."""
