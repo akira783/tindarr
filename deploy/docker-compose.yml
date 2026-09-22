@@ -1,0 +1,42 @@
+# Example deployment of the Tindeerr server.
+#
+# Until images are published (roadmap step 5), this builds the image from ../server:
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#
+# The first start generates /data/secret.key (mode 0600). Back up the volume and the key
+# separately: a database copy is useless without the key. To manage the key yourself,
+# provide it as a Docker secret instead (see the commented lines below).
+name: tindeerr
+
+services:
+  tindeerr:
+    build: ../server
+    image: tindeerr-server:local
+    restart: unless-stopped
+    ports:
+      # Put a TLS-terminating reverse proxy in front for anything beyond the LAN.
+      - "8787:8787"
+    environment:
+      TINDEERR_LOG_LEVEL: INFO
+      # Honour X-Forwarded-For/-Proto only from your reverse proxy (IPs or CIDRs).
+      # TINDEERR_TRUSTED_PROXIES: 172.16.0.0/12
+      # TINDEERR_SECRET_KEY_FILE: /run/secrets/tindeerr_secret_key
+    # secrets:
+    #   - tindeerr_secret_key
+    volumes:
+      - tindeerr-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:10001"
+
+volumes:
+  tindeerr-data:
+
+# secrets:
+#   tindeerr_secret_key:
+#     file: ./secret_key.txt   # at least 32 characters, e.g. `openssl rand -base64 32`
