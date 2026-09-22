@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from tindeerr.core.config import read_env
 from tindeerr.core.crypto import SecretCipher
 from tindeerr.core.logs import register_secret
+from tindeerr.storage.db import write_transaction
 from tindeerr.storage.tables import settings as settings_table
 
 type JsonValue = str | int | float | bool | list[JsonValue] | dict[str, JsonValue] | None
@@ -159,7 +160,7 @@ class SettingsStore:
             index_elements=[settings_table.c.name],
             set_={key: statement.excluded[key] for key in ("value", "encrypted", "updated_at")},
         )
-        async with self._engine.begin() as connection:
+        async with write_transaction(self._engine) as connection:
             await connection.execute(statement)
 
     async def delete(self, name: str) -> None:
@@ -167,7 +168,7 @@ class SettingsStore:
         self._definition(name)
         if name in self._overrides:
             raise SettingLockedError(name)
-        async with self._engine.begin() as connection:
+        async with write_transaction(self._engine) as connection:
             await connection.execute(delete(settings_table).where(settings_table.c.name == name))
 
     @staticmethod
