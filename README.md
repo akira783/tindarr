@@ -5,7 +5,9 @@ like straight to your request queue.
 
 Tindeerr is a self-hosted server plus an Android app (iOS later). The server learns
 your taste from your votes and your media server's watch history, asks an AI provider
-for fitting titles, and files requests through Seerr / Jellyseerr / Overseerr.
+for fitting titles, and files requests through Seerr / Jellyseerr / Overseerr. It also
+serves a small web console for setup and administration, from which you connect your
+phone by scanning a QR code.
 
 > **Status:** server foundation (step 1): the server starts and answers `/healthz` and
 > `/api/v1/server/info`, nothing usable yet. See the [roadmap](docs/roadmap.md) and

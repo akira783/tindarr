@@ -59,7 +59,7 @@ values count as unset.
 | `TINDEERR_DB_BACKUPS_KEEP` | `5` | Pre-migration backups to keep. |
 
 Settings stored in the database can be forced the same way; they then show as locked
-in the app. Today: `TINDEERR_SERVER_NAME`, `TINDEERR_MEDIA_SERVER_KIND`
+in the web console. Today: `TINDEERR_SERVER_NAME`, `TINDEERR_MEDIA_SERVER_KIND`
 (`jellyfin`, `emby`, `plex`), `TINDEERR_MEDIA_SERVER_URL`,
 `TINDEERR_MEDIA_SERVER_API_KEY`.
 

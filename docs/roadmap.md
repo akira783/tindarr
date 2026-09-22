@@ -6,7 +6,7 @@ previous step's checks are red.
 ## Step 0: framing ✅ done
 
 - Name, license, repository, v1 scope.
-- Architecture, security model, ADRs 0001–0008.
+- Architecture, security model, ADRs 0001–0008 (0009 and 0010 added before step 2).
 - HTTP API contract `api/openapi.yaml` (v1).
 
 ## Step 1: server foundation ✅ done
@@ -21,16 +21,34 @@ previous step's checks are red.
 **Check:** CI green. The image starts, `server/info` answers, and a contract test
 passes on the implemented endpoints.
 
-## Step 2: setup and authentication
+## Step 2: setup, authentication and web console shell
 
-- Setup code, claim, media server configuration.
-- Jellyfin / Emby password sign-in, Plex PIN sign-in.
-- JWT + rotating refresh tokens, sessions per device, roles, rate limits.
-- Admin: settings with masked secrets, connector tests, users.
+Server:
 
-**Check:** a security test suite covering the claim without a code, token reuse,
-cross-user access, lockout and redaction. Tested against real Jellyfin, Emby and Plex
-test instances in containers.
+- Setup code, claim (setup session), media server configuration.
+- Jellyfin / Emby password, Plex PIN and Jellyfin Quick Connect sign-in, for the app
+  (token pair) and the console (cookie).
+- JWT + rotating refresh tokens with strict reuse detection, sessions per device,
+  web sessions with CSRF token and `Origin` check, roles re-synced at every sign-in
+  (ADR 0010), rate limits.
+- Phone pairing: create, poll and revoke from the console, preview and exchange for
+  the app. `public_url` setting.
+- Admin: settings with masked secrets, users (promote, demote, disable, limits).
+- Serving the console's static files with its Content-Security-Policy.
+
+Web console (`web/`, [ADR 0009](adr/0009-web-console-and-phone-pairing.md)):
+
+- React + Vite + TypeScript strict, ESLint, Vitest, generated API client,
+  `shared/i18n` (en, fr), built into the server image.
+- Pages: setup wizard (claim, media server, `public_url`), sign-in (all three
+  methods), server settings, users, "Connect a phone", my sessions.
+
+**Check:** a security test suite covering the claim without a code, refresh-token
+reuse, cross-user access, CSRF (missing token, wrong `Origin`), bearer tokens refused
+on console endpoints, admin role re-sync and the last-admin rule, pairing (expiry,
+single use, brute-force limit), lockout and redaction. In a browser, the console
+claims a fresh server and signs in with each method against real Jellyfin, Emby and
+Plex test instances in containers; pairing is exercised through the API.
 
 ## Step 3: adapters
 
@@ -39,59 +57,75 @@ test instances in containers.
 - Request backend: Seerr family, requests on behalf of the matching user.
 - AI providers: OpenAI, Anthropic, Gemini, Mistral, OpenAI-compatible, Ollama, each
   with a model list and error mapping.
+- Console: connector pages with connection tests, AI provider and model picker.
 
 **Check:** contract tests per adapter (recorded responses), plus one live run per AI
-provider with a small schema.
+provider with a small schema. Every connector can be configured and tested from the
+console.
 
 ## Step 4: swipe engine
 
 - Port of the fork's engine and its tests: batches, calibration, novelty, mood,
-  balancing, enrichment, translation, profile, likes, stats, reset.
+  balancing, enrichment, translation, profile, likes (`like` votes only), stats,
+  reset.
+- `skip` vote (60-day cool-down, ignored by the profile, the prompt and the stats).
+- Region's streaming providers (TMDb, cached), users' streaming services, the
+  `subscribed` flag on card providers.
 - Stored batches and cards, persisted jobs, warm-up, per-user daily cap and
   concurrency.
+- Console: AI usage page.
 
 **Check:** the ported tests pass. A real batch is generated end to end through the API
 with each AI provider family. `/status` stays under 50 ms during a generation.
 
 ## Step 5: packaging and first deployment
 
-- Signed multi-arch image on GHCR, SBOM, documented `docker-compose.yml`.
+- Signed multi-arch image on GHCR (server + built console), SBOM, documented
+  `docker-compose.yml` and reverse-proxy notes (HTTPS for the console).
 - `tindeerr import suggestarr`.
 - Deployment on the author's homelab next to the fork, which is left untouched.
+  Setup and configuration are done in the web console.
 
-**Check:** the author's votes and profile are imported. Monitoring is in place (Uptime
-Kuma).
+**Check:** the server is claimed and configured from the console only. The author's
+votes and profile are imported. Monitoring is in place (Uptime Kuma).
 
 ## Step 6: app foundation
 
 - Clickable mockups of the main screens, validated before any screen is built.
 - Expo + TypeScript strict, ESLint, Jest, i18n (en, fr), theme (dark first), generated
   API client.
-- Connect flow: server URL → `server/info` → setup (claim) or sign-in (password /
-  Plex).
-- Secure token storage, automatic refresh, compatibility checks.
+- Connect flow: scan a pairing QR code (confirmation screen with server URL and user
+  name), or server URL → `server/info` → sign-in (password / Plex PIN / Quick
+  Connect). A server with `setup_required` gets a message to open its console.
+- Secure token storage, single-flight token refresh, compatibility checks.
 
-**Check:** sign-in works on a real phone against the deployed server, for all three
-media server types.
+**Check:** sign-in and QR pairing work on a real phone against the deployed server,
+for all three media server types. A unit test shows that concurrent requests with an
+expired token cause exactly one refresh.
 
 ## Step 7: the deck
 
 - Card stack with the four gestures (right like, left dislike, up "seen, liked", down
-  "seen, not for me"), buttons with the same actions, haptics, undo of the last vote.
+  "seen, not for me"), buttons with the same actions, a "Not now" button for `skip`
+  (the four swipe directions are taken), haptics, undo of the last vote (skip
+  included).
 - Media type and novelty switches, mood, calibration progress, badges (pick type,
-  providers, ratings), trailer.
+  providers with "on your services", ratings), trailer.
 - Like → request dialog, or direct request when enabled.
 
 **Check:** the same scenarios as the web version, as Maestro flows. A smooth 60 fps
 swipe on a mid-range phone.
 
-## Step 8: likes, taste, settings, admin
+## Step 8: likes, taste, settings
 
-- "My likes" (to request / requested), taste profile (bullets, edit, refresh), stats.
-- Preferences, sessions, sign-out, data reset.
-- Admin screens: connectors, AI provider and model picker, users, usage.
+- "My likes" (to request / requested, `like` votes only), taste profile (bullets,
+  edit, refresh), stats.
+- Preferences (including "my streaming services"), sessions, sign-out, data reset.
+- No admin screens: admin work is in the web console. At most a read-only server
+  status.
 
-**Check:** feature parity with the fork's `swipe.3`, plus the admin screens.
+**Check:** feature parity with the fork's `swipe.3` on the user side; admin parity
+is covered by the console.
 
 ## Step 9: mobile extras
 
