@@ -42,6 +42,7 @@ There is no central Tindeerr service.
 | Adapters | `tindeerr.adapters.*` | ports, vendor SDKs, httpx | One package per external system. |
 | Ports | `tindeerr.ports` | nothing | `Protocol` classes the domain and auth talk to. |
 | Storage | `tindeerr.storage` | SQLAlchemy Core | Tables, repositories, Alembic migrations. |
+| Core | `tindeerr.core` | nothing | Bootstrap configuration, key derivation, encryption, logging. Usable by every layer. |
 
 Imports only point downwards. Only `tindeerr.main` imports adapters. CI enforces this
 with `import-linter`.
@@ -163,8 +164,10 @@ directory and the encryption key have to come from outside the database.
 - **Compatibility:** `GET /api/v1/server/info` returns the server version, the API
   version, the minimum app version and a list of capabilities. The app hides what the
   server cannot do and asks the user to update when needed.
-- **Contract checking:** the contract is written first. FastAPI then generates its own
-  spec, and CI fails when it drifts from `api/openapi.yaml`.
+- **Contract checking:** the contract is written first. Contract tests validate the
+  responses of implemented endpoints against the committed schemas, and fail when the
+  server exposes a route or method that `api/openapi.yaml` does not document. The
+  generated spec is not compared byte for byte: that proved brittle.
 
 ## Repository layout
 

@@ -5,7 +5,8 @@ info:
   summary: Self-hosted server behind the Tindeerr mobile app.
   description: |
     Contract between the Tindeerr app and a Tindeerr server. Written before the
-    implementation; the server's generated spec is compared with this file in CI.
+    implementation; CI validates the server's responses against this file and rejects
+    routes it does not document.
 
     Rules (see docs/adr/0006):
     - Additive changes only within v1. Clients ignore unknown fields and treat

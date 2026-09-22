@@ -11,8 +11,9 @@ their owners' schedule. A phone may talk to an older or newer server.
 ## Decision
 
 - **Source of truth.** `api/openapi.yaml` (OpenAPI 3.1) is written first. The server
-  implements it, CI compares the spec FastAPI generates with the committed one, and
-  the app client is generated from it.
+  implements it, and the app client is generated from it. CI validates the server's
+  real responses against the committed schemas and rejects any route missing from the
+  contract (a byte-for-byte comparison of generated specs was dropped as too brittle).
 - **Versioning.** Every endpoint lives under `/api/v1`. Inside v1, changes are additive
   only: new endpoints, new optional fields, new enum values. Clients must ignore
   unknown fields and treat unknown enum values gracefully. A breaking change means
