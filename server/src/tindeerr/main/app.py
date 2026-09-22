@@ -156,6 +156,7 @@ async def start(
         sign_in=sign_in,
         plex_pins=plex_pins,
         quick_connect=quick_connect,
+        handles=handles,
         limits=limits,
         hosts=hosts,
         install_id=state.install_id,

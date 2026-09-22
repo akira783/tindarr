@@ -29,7 +29,7 @@ from uuid import uuid4
 from tindeerr.auth import errors
 from tindeerr.auth.handles import Binding, HandlePurpose, HandleRegistry
 from tindeerr.auth.signin import Caller, SignInService
-from tindeerr.core.errors import PendingError
+from tindeerr.core.errors import PendingError, ProblemError
 from tindeerr.core.logs import register_secret
 from tindeerr.ports.media_server import MediaUser, ServerIdentity
 from tindeerr.ports.plextv import PlexTv, as_media_user, find_server
@@ -205,7 +205,7 @@ class QuickConnectFlow:
         adapter = await self._sign_in.adapter()
         try:
             started = await adapter.quick_connect_start()
-        except Exception:
+        except ProblemError:
             # Switched off, or the server no longer offers it: stop advertising it.
             self._sign_in.quick_connect.remember(enabled=None)
             raise
@@ -257,14 +257,27 @@ class QuickConnectFlow:
         abandoned = self._handles.sweep()
         if not abandoned:
             return 0
-        adapter = await self._sign_in.adapter()
+        try:
+            adapter = await self._sign_in.adapter()
+        except ProblemError as problem:
+            # The handles are gone either way; the leftover Jellyfin sessions are
+            # revoked at those users' next sign-in, which reuses the same ``DeviceId``.
+            logger.warning(
+                "could not clean up abandoned Quick Connect approvals",
+                extra={"count": len(abandoned), "problem": problem.code},
+            )
+            return 0
         closed = 0
         for handle in abandoned:
             try:
                 if await adapter.quick_connect_poll(handle.secret or "") is not None:
                     closed += 1
-            except Exception:  # noqa: BLE001 - one dead handle must not stop the others
-                logger.warning("could not clean up an abandoned Quick Connect approval")
+            except ProblemError as problem:
+                # One dead handle must not stop the others.
+                logger.warning(
+                    "could not clean up an abandoned Quick Connect approval",
+                    extra={"problem": problem.code},
+                )
         if closed:
             logger.info("ended abandoned Quick Connect sessions", extra={"count": closed})
         return closed

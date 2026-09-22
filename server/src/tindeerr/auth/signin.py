@@ -110,11 +110,6 @@ class QuickConnectAvailability:
             return None
         return self._enabled
 
-    @property
-    def stale(self) -> bool:
-        """Whether the media server should be asked again."""
-        return self.cached is None
-
     def remember(self, *, enabled: bool | None) -> None:
         """Record what the media server answered, or ``None`` to forget it."""
         self._enabled = enabled
@@ -277,10 +272,6 @@ class SignInService:
         )
 
     # --- step-up re-authentication --------------------------------------------------
-
-    async def reauth_password(self, session_user: User, password: str, caller: Caller) -> MediaUser:
-        """Check the session user's own password, under the same limits as a sign-in."""
-        return await self.password(session_user.name, password, caller)
 
     async def complete_reauth(
         self, session: Session, session_user: User, media_user: MediaUser, caller: Caller

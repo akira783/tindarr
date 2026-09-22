@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tindeerr.api.context import HostPolicy
 from tindeerr.auth.brokered import PlexPinFlow, QuickConnectFlow
+from tindeerr.auth.handles import HandleRegistry
 from tindeerr.auth.mediaserver import MediaServerConnector
 from tindeerr.auth.ratelimit import RateLimits
 from tindeerr.auth.sessions import SessionService
@@ -36,6 +37,8 @@ class AppServices:
     sign_in: SignInService
     plex_pins: PlexPinFlow
     quick_connect: QuickConnectFlow
+    #: The in-memory registry both brokered flows share (docs/auth.md, section 5).
+    handles: HandleRegistry
     limits: RateLimits
     hosts: HostPolicy
     #: Random per database: the JWT issuer and the media server ``DeviceId``.
