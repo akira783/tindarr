@@ -1,5 +1,6 @@
 import logging
 import sqlite3
+import time
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
@@ -221,3 +222,11 @@ def test_forwarded_headers_are_honoured_only_from_trusted_proxies(
             "/test/whoami", headers={"X-Forwarded-For": "198.51.100.1, 203.0.113.7"}
         )
     assert response.json() == {"client": expected}
+
+
+def test_huge_hyphenated_path_does_not_block_the_server(client: TestClient) -> None:
+    # Regression: the access log's redaction was quadratic on such paths (16 s for 16 KB).
+    started = time.perf_counter()
+    response = client.get("/" + "a-" * 8192)
+    assert response.status_code == 404
+    assert time.perf_counter() - started < 1
