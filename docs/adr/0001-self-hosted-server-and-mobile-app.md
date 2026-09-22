@@ -2,6 +2,11 @@
 
 - Status: accepted
 - Date: 2026-09-22
+- Amended by: [0009](0009-web-console-and-phone-pairing.md)
+
+> **Note (2026-09-22):** the server also serves a web console, which does setup and
+> all admin work; the app keeps the daily features. See ADR 0009. The decision below
+> (one server per household, no central service) is unchanged.
 
 ## Context
 

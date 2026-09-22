@@ -2,6 +2,20 @@
 
 - Status: accepted
 - Date: 2026-09-22
+- Amended by: [0009](0009-web-console-and-phone-pairing.md),
+  [0010](0010-roles-and-refresh-tokens.md)
+
+> **Note (2026-09-22):** superseded in part.
+> - First run happens in the web console, and the setup token became a setup session
+>   cookie ([ADR 0009](0009-web-console-and-phone-pairing.md)).
+> - Jellyfin Quick Connect and phone pairing by QR code are added as ways to sign in,
+>   and the console uses cookie sessions (ADR 0009).
+> - The admin flag is re-synced at every sign-in, a Tindeerr role is
+>   `media_server_admin` or `promoted`, and access tokens drop the `role` claim;
+>   refresh-token reuse has no grace period and the app must refresh single-flight
+>   ([ADR 0010](0010-roles-and-refresh-tokens.md)).
+>
+> The text below is kept as decided.
 
 ## Context
 

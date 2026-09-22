@@ -2,6 +2,11 @@
 
 - Status: accepted
 - Date: 2026-09-22
+- Amended by: [0009](0009-web-console-and-phone-pairing.md)
+
+> **Note (2026-09-22):** `auth_methods` also lists `quick_connect` and `pairing`, and
+> the API accepts a cookie session (with a CSRF token) from the web console besides
+> bearer tokens. See ADR 0009.
 
 ## Context
 

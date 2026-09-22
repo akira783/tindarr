@@ -2,6 +2,11 @@
 
 - Status: accepted
 - Date: 2026-09-22
+- Amended by: [0009](0009-web-console-and-phone-pairing.md)
+
+> **Note (2026-09-22):** the app no longer has admin screens; setup and admin moved
+> to a web console (React, Vite, TypeScript) that shares the generated client and the
+> translations. See ADR 0009. The stack below is unchanged.
 
 ## Context
 
