@@ -38,6 +38,7 @@ from tindeerr.auth.setupcode import (
 )
 from tindeerr.auth.users import link_user
 from tindeerr.core.clock import Clock
+from tindeerr.core.errors import ProblemError
 from tindeerr.ports.media_server import ConnectionCheck, MediaServerKind, MediaUser
 from tindeerr.storage import server_state as state_repository
 from tindeerr.storage import sessions as session_repository
@@ -176,19 +177,25 @@ class SetupService:
         """
         self._limits.claim_failures.check(client_key)
         await self._limits.claim_failures_global.admit()
-        async with self._engine.connect() as connection:
-            state = await state_repository.read(connection)
-        if state.setup_completed:
-            raise errors.setup_completed()
-        if state.setup_code_hash is None or not matches(code, state.setup_code_hash):
-            self._limits.claim_failures.record(client_key)
-            self._limits.claim_failures_global.record()
-            security_event("setup_claim_failed")
-            raise errors.invalid_setup_code()
         now = self._clock.now()
-        async with write_transaction(self._engine) as connection:
-            await session_repository.revoke_of_kind(connection, "setup", "superseded", now)
-            grant = await self._sessions.open_cookie_session(connection, "setup")
+        try:
+            # One write transaction: a sign-in cannot complete setup between the check
+            # and the session this opens, which would leave a live setup session on a
+            # server that is already set up.
+            async with write_transaction(self._engine) as connection:
+                state = await state_repository.read(connection)
+                if state.setup_completed:
+                    raise errors.setup_completed()
+                if state.setup_code_hash is None or not matches(code, state.setup_code_hash):
+                    raise errors.invalid_setup_code()
+                await session_repository.revoke_of_kind(connection, "setup", "superseded", now)
+                grant = await self._sessions.open_cookie_session(connection, "setup")
+        except ProblemError as problem:
+            if problem.code == "invalid_setup_code":
+                self._limits.claim_failures.record(client_key)
+                self._limits.claim_failures_global.record()
+                security_event("setup_claim_failed")
+            raise
         security_event("setup_claimed")
         return grant
 

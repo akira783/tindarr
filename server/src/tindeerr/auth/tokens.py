@@ -44,8 +44,12 @@ def token_hash(token: str) -> str:
 
 
 def tokens_equal(left: str, right: str) -> bool:
-    """Compare two tokens in constant time."""
-    return hmac.compare_digest(left, right)
+    """Compare two tokens in constant time.
+
+    The values are compared as bytes: one of them usually comes from a header, where a
+    non-ASCII character would make ``hmac.compare_digest`` raise on strings.
+    """
+    return hmac.compare_digest(left.encode("utf-8", "surrogateescape"), right.encode())
 
 
 @dataclass(frozen=True, slots=True)

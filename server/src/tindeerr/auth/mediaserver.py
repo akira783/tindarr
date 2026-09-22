@@ -232,6 +232,8 @@ class MediaServerConnector:
         unlocked = {
             name: value for name, value in values.items() if not self._settings.is_locked(name)
         }
-        await self._settings.set_many(unlocked)
+        # The connector and the identity it was read from are written together: a
+        # configured connector without its identity would stop every sign-in (section 6).
         async with write_transaction(self._engine) as connection:
+            await self._settings.set_many(unlocked, connection)
             await state_repository.set_media_server_identity(connection, identity.key)

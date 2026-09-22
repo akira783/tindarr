@@ -163,6 +163,21 @@ def test_forwarded_proto_only_from_trusted_proxies(
         assert whoami(client, headers={"X-Forwarded-Proto": proto})["scheme"] == expected
 
 
+def test_repeated_forwarded_proto_headers_are_one_chain(data_dir: Path) -> None:
+    # The nearest proxy appends last, and a client cannot prepend its way to "https".
+    with make_client(data_dir, "10.0.0.2") as client:
+        forged = whoami(
+            client,
+            headers=[("X-Forwarded-Proto", "https"), ("X-Forwarded-Proto", "http")],
+        )
+        real = whoami(
+            client,
+            headers=[("X-Forwarded-Proto", "http"), ("X-Forwarded-Proto", "https")],
+        )
+    assert forged["scheme"] == "http"
+    assert real["scheme"] == "https"
+
+
 def test_without_trusted_proxies_nothing_is_honoured(data_dir: Path) -> None:
     with make_client(data_dir, "10.0.0.2", trusted=None) as client:
         body = whoami(

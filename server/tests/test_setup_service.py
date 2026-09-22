@@ -1,5 +1,6 @@
 """First-run setup: the code, the claim, the wizard and the completion (auth.md, §3)."""
 
+import asyncio
 import logging
 import stat
 from dataclasses import replace
@@ -12,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from tests.support import FakeClock, FakeMediaServer, FakeMediaServers, media_user
 from tindeerr.auth.mediaserver import MediaServerConnector, MediaServerInput
 from tindeerr.auth.ratelimit import RateLimits
-from tindeerr.auth.sessions import SessionService
-from tindeerr.auth.setup import SetupService
+from tindeerr.auth.sessions import CookieGrant, SessionService
+from tindeerr.auth.setup import CompletedSetup, SetupService
 from tindeerr.auth.setupcode import ALPHABET, CODE_LENGTH, read_setup_code, setup_code_hash
 from tindeerr.core.crypto import SecretCipher
 from tindeerr.core.errors import ProblemError
@@ -573,3 +574,69 @@ async def test_the_reset_keeps_what_the_environment_forces(  # noqa: PLR0913, PL
 
     assert (await settings.get("media_server_url")).value == "http://emby.lan:8096"
     assert "forced by the environment" in caplog.text
+
+
+async def test_a_claim_racing_the_completion_never_leaves_a_live_setup_session(
+    setup_service: SetupService,
+    engine: AsyncEngine,
+    sessions: SessionService,
+) -> None:
+    await configure(setup_service, engine, sessions)
+    code = await code_of(setup_service)
+    first = await setup_service.claim(code, client_key="10.0.0.1")
+
+    async def complete() -> object:
+        try:
+            return await setup_service.complete_setup(first.session, media_user())
+        except ProblemError as problem:
+            return problem
+
+    async def claim_again() -> object:
+        try:
+            return await setup_service.claim(code, client_key="192.168.1.9")
+        except ProblemError as problem:
+            return problem
+
+    completed, claimed = await asyncio.gather(complete(), claim_again())
+
+    async with engine.connect() as connection:
+        state = await state_repository.read(connection)
+        live = [
+            session
+            for session in (await connection.execute(session_repository.sessions.select())).all()
+            if session.kind == "setup" and session.revoked_at is None
+        ]
+    if isinstance(completed, CompletedSetup):
+        # The completion won: setup is done and every setup session went with it.
+        assert state.setup_completed
+        assert live == []
+    else:
+        # The claim won: it superseded the session the completion was holding, which
+        # was refused, and the server is still waiting to be set up.
+        assert isinstance(completed, ProblemError)
+        assert completed.code == "setup_session_required"
+        assert not state.setup_completed
+        assert isinstance(claimed, CookieGrant)
+        assert [session.id for session in live] == [claimed.session.id]
+
+
+async def test_the_connector_and_its_identity_are_saved_together(
+    setup_service: SetupService,
+    engine: AsyncEngine,
+    sessions: SessionService,
+    settings_store: SettingsStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def failing_identity(*_args: object, **_kwargs: object) -> None:
+        msg = "the disk went away"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(state_repository, "set_media_server_identity", failing_identity)
+    with pytest.raises(RuntimeError, match="disk"):
+        await configure(setup_service, engine, sessions)
+
+    # Nothing was stored: a configured connector without its identity would stop
+    # every sign-in (docs/auth.md, section 6).
+    assert (await settings_store.get("media_server_url")).value is None
+    async with engine.connect() as connection:
+        assert (await state_repository.read(connection)).media_server_identity is None

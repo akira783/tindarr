@@ -190,6 +190,23 @@ def test_a_malformed_code_is_a_validation_error(app: Any, code: str) -> None:
     assert code not in response.text or not code
 
 
+def test_a_csrf_token_that_is_not_ascii_is_a_csrf_failure(app: Any) -> None:
+    with console_client(app) as client:
+        claim(client, app)
+        response = client.put(
+            MEDIA_SERVER_PATH,
+            json={"connector": "media_server", "server_type": "jellyfin", "url": "http://j.lan"},
+            headers={b"Origin": CONSOLE_ORIGIN.encode(), b"X-CSRF-Token": b"caf\xe9"},
+        )
+    assert_is_problem(response, 403, "csrf_failed")
+
+
+def test_a_bearer_token_that_is_not_ascii_is_unauthorized(app: Any) -> None:
+    with console_client(app) as client:
+        response = client.get("/api/v1/setup/state", headers={b"Authorization": b"Bearer caf\xe9"})
+    assert_is_problem(response, 401, "unauthorized")
+
+
 # --- the wizard's state -------------------------------------------------------------
 
 

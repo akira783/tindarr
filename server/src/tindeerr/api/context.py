@@ -268,7 +268,10 @@ class RequestContextMiddleware:
 
     @staticmethod
     def _forwarded_scheme(headers: Headers, *, websocket: bool) -> str | None:
-        value = headers.get("x-forwarded-proto", "").rsplit(",", 1)[-1].strip().lower()
+        # Repeated headers are one chain, like X-Forwarded-For: the last value is the
+        # one the nearest proxy appended, and it wins.
+        chain = ",".join(headers.getlist("x-forwarded-proto"))
+        value = chain.rsplit(",", 1)[-1].strip().lower()
         schemes = _FORWARDED_SCHEMES.get(value)
         if schemes is None:
             return None
@@ -298,7 +301,7 @@ class AllowedHostMiddleware:
         problem = host_not_allowed()
         logger.warning(
             "refused a request for an unknown host name",
-            extra={"peer": str(context.peer), "host_is_ip": context.host is None},
+            extra={"peer": str(context.peer), "host_parsed": context.host is not None},
         )
         response = problem_response(problem.status, problem.code, detail=problem.detail)
         await response(scope, receive, send)

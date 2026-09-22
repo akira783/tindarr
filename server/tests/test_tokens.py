@@ -46,6 +46,22 @@ def test_opaque_tokens_are_random_and_hashed() -> None:
     assert not tokens_equal(first, second)
 
 
+def test_comparing_tokens_survives_anything_a_header_can_carry() -> None:
+    # Header values reach this as latin-1 text: a non-ASCII byte must not raise.
+    assert not tokens_equal("é", "abc")
+    assert not tokens_equal("\xff\xfe", "abc")
+    assert tokens_equal("abc", "abc")
+
+
+def test_a_token_with_a_non_ascii_key_id_is_refused(access_tokens: AccessTokens) -> None:
+    token = jwt.encode(
+        {"sub": "u"}, "k" * 32, algorithm="HS256", headers={"typ": "at+jwt", "kid": "é"}
+    )
+    with pytest.raises(ProblemError) as caught:
+        access_tokens.verify(token)
+    assert (caught.value.status, caught.value.code) == (401, "unauthorized")
+
+
 def test_an_issued_token_carries_the_required_header_and_claims(
     access_tokens: AccessTokens, keys: KeyMaterial, clock: FakeClock
 ) -> None:

@@ -33,7 +33,7 @@ from pydantic import (
 )
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from tindeerr.core.config import ConfigError, env_var_name, read_env
 from tindeerr.core.crypto import SecretCipher
@@ -298,21 +298,33 @@ class SettingsStore:
         async with write_transaction(self._engine) as connection:
             await connection.execute(statement)
 
-    async def set_many(self, values: Mapping[str, object]) -> None:
-        """Validate and store several settings in one transaction (all or nothing)."""
+    async def set_many(
+        self, values: Mapping[str, object], connection: AsyncConnection | None = None
+    ) -> None:
+        """Validate and store several settings, all or nothing.
+
+        ``connection`` runs them inside a transaction the caller already opened, so a
+        write that belongs with them (the media server's identity) lands with them.
+        """
         rows = [self._row(name, value) for name, value in values.items()]
-        async with write_transaction(self._engine) as connection:
-            for row in rows:
-                statement = insert(settings_table).values(row)
-                await connection.execute(
-                    statement.on_conflict_do_update(
-                        index_elements=[settings_table.c.name],
-                        set_={
-                            key: statement.excluded[key]
-                            for key in ("value", "encrypted", "updated_at")
-                        },
-                    )
+        if connection is not None:
+            await self._write(connection, rows)
+            return
+        async with write_transaction(self._engine) as owned:
+            await self._write(owned, rows)
+
+    @staticmethod
+    async def _write(connection: AsyncConnection, rows: list[dict[str, object]]) -> None:
+        for row in rows:
+            statement = insert(settings_table).values(row)
+            await connection.execute(
+                statement.on_conflict_do_update(
+                    index_elements=[settings_table.c.name],
+                    set_={
+                        key: statement.excluded[key] for key in ("value", "encrypted", "updated_at")
+                    },
                 )
+            )
 
     async def delete(self, name: str) -> None:
         """Remove the stored value, falling back to the default."""
