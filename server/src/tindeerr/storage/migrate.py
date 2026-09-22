@@ -2,14 +2,21 @@
 
 When the database already exists and its revision differs from the code's head, a copy
 is taken first through SQLite's online backup API (consistent even with WAL, unlike a
-file copy) into ``<data_dir>/backups/``, with the old revision in the file name. Only
-the most recent backups are kept.
+file copy) into ``<data_dir>/backups/``, with the old revision in the file name. The
+copy is checked (``PRAGMA integrity_check``) and flushed to disk before the upgrade
+starts. Only the most recent backups are kept.
+
+The whole upgrade runs in one transaction (see ``tindeerr.storage.db``): a failing
+revision leaves the database as it was. An exclusive lock on ``<data_dir>/.migrate.lock``
+serialises processes started at the same time on the same data directory.
 """
 
+import fcntl
 import logging
 import os
 import sqlite3
-from contextlib import closing
+from collections.abc import Generator
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,17 +28,22 @@ from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from alembic.util.exc import CommandError
 
-from tindeerr.storage.db import create_sync_engine
+from tindeerr.storage.db import create_sync_engine, sync_write_transaction
 
 MIGRATIONS_DIR: Final = Path(__file__).parent / "migrations"
 BACKUP_PREFIX: Final = "tindeerr-"
 BACKUP_SUFFIX: Final = ".db"
+LOCK_FILE_NAME: Final = ".migrate.lock"
 
 logger = logging.getLogger(__name__)
 
 
 class SchemaTooNewError(RuntimeError):
     """The database was migrated by a newer Tindeerr version than this one."""
+
+
+class BackupError(RuntimeError):
+    """The pre-migration backup could not be taken or failed its integrity check."""
 
 
 @dataclass(frozen=True)
@@ -63,12 +75,32 @@ def head_revision() -> str:
     return head
 
 
+@contextmanager
+def migration_lock(directory: Path) -> Generator[None]:
+    """Hold an exclusive lock on ``<directory>/.migrate.lock`` (blocking until free)."""
+    fd = os.open(
+        directory / LOCK_FILE_NAME,
+        os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+        0o600,
+    )
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)  # releases the lock
+
+
 def upgrade_database(db_path: Path, backups_dir: Path, keep: int) -> MigrationResult:
     """Bring the database at ``db_path`` to the head revision (blocking).
 
     Creates the database if needed. Refuses to touch a database whose revision this
     version does not know, which happens after a downgrade of the server.
     """
+    with migration_lock(db_path.parent):
+        return _upgrade(db_path, backups_dir, keep)
+
+
+def _upgrade(db_path: Path, backups_dir: Path, keep: int) -> MigrationResult:
     script = ScriptDirectory.from_config(_alembic_config())
     head = head_revision()
     if not db_path.exists():
@@ -100,7 +132,8 @@ def upgrade_database(db_path: Path, backups_dir: Path, keep: int) -> MigrationRe
             )
 
         config = _alembic_config()
-        with engine.begin() as connection:
+        # One transaction for every pending revision: all of them apply, or none.
+        with sync_write_transaction(engine) as connection:
             config.attributes["connection"] = connection
             command.upgrade(config, "head")
         logger.info("database migrated", extra={"from_revision": current, "to_revision": head})
@@ -110,18 +143,56 @@ def upgrade_database(db_path: Path, backups_dir: Path, keep: int) -> MigrationRe
 
 
 def backup_database(db_path: Path, backups_dir: Path, revision: str) -> Path:
-    """Copy the database with SQLite's backup API into a new file, mode 0600."""
+    """Copy the database with SQLite's backup API into a new file, mode 0600.
+
+    The copy is verified and flushed to disk; a copy that fails is deleted and
+    ``BackupError`` is raised, so no migration runs without a usable backup.
+    """
     backups_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     target = backups_dir / f"{BACKUP_PREFIX}{stamp}-rev-{revision}{BACKUP_SUFFIX}"
     # Create the file first so it never exists with looser permissions.
     os.close(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
-    with (
-        closing(sqlite3.connect(db_path)) as source,
-        closing(sqlite3.connect(target)) as destination,
-    ):
-        source.backup(destination)
+    try:
+        with (
+            closing(sqlite3.connect(db_path)) as source,
+            closing(sqlite3.connect(target)) as destination,
+        ):
+            source.backup(destination)
+            # A self-contained file: no -wal or -shm companion to copy or lose.
+            destination.execute("PRAGMA journal_mode=DELETE")
+        verify_backup(target)
+        _fsync(target)
+        _fsync(backups_dir)
+    except (sqlite3.Error, OSError, BackupError) as exc:
+        for leftover in (target, *(Path(f"{target}{suffix}") for suffix in ("-wal", "-shm"))):
+            leftover.unlink(missing_ok=True)
+        if isinstance(exc, BackupError):
+            raise
+        msg = f"cannot back up the database before migrating it: {exc}"
+        raise BackupError(msg) from exc
     return target
+
+
+def verify_backup(path: Path) -> None:
+    """Raise ``BackupError`` unless ``PRAGMA integrity_check`` passes on ``path``."""
+    try:
+        with closing(sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)) as connection:
+            rows = connection.execute("PRAGMA integrity_check").fetchall()
+    except sqlite3.DatabaseError as exc:
+        msg = f"backup {path.name} is unreadable: {exc}"
+        raise BackupError(msg) from None
+    if rows != [("ok",)]:
+        msg = f"backup {path.name} failed its integrity check"
+        raise BackupError(msg)
+
+
+def _fsync(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def prune_backups(backups_dir: Path, keep: int) -> list[Path]:

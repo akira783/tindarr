@@ -9,6 +9,7 @@
   "timezone": "Europe/Paris",
   "schedule": ["before 6am on monday"],
   "labels": ["dependencies"],
+  "minimumReleaseAge": "3 days",
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": ["before 6am on monday"]
@@ -22,14 +23,6 @@
       "matchStrings": ["UV_VERSION: \"(?<currentValue>[^\"]+)\""],
       "depNameTemplate": "astral-sh/uv",
       "datasourceTemplate": "github-releases"
-    },
-    {
-      "customType": "regex",
-      "description": "Redocly CLI run through npx",
-      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
-      "matchStrings": ["@redocly/cli@(?<currentValue>[0-9][^\\s]*)"],
-      "depNameTemplate": "@redocly/cli",
-      "datasourceTemplate": "npm"
     }
   ],
   "packageRules": [

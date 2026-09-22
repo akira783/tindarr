@@ -1,47 +1,101 @@
 """Settings stored in the database, with secret values encrypted.
 
-Each known setting is declared in ``SETTINGS``. Its value is JSON, stored as text. A
-secret setting is encrypted with AES-256-GCM, bound to its name (see
+Each known setting is declared in ``SETTINGS`` with a type. Its value is JSON, stored as
+text. A secret setting is encrypted with AES-256-GCM, bound to its name (see
 ``tindeerr.core.crypto``). Any setting can be forced by ``TINDEERR_<NAME>`` (or
 ``_FILE``): the environment value then wins and the setting is locked against changes
 from the app.
+
+Values are validated against the setting's type everywhere they enter: environment
+values are parsed at startup (``TINDEERR_EXCLUDE_ADULT=false`` is ``False``, not a
+truthy string; an invalid one stops the server with a message naming the variable),
+``set`` rejects a wrong value with a ``validation_error`` problem, and a stored value
+that no longer fits its type falls back to the default with a warning.
 """
 
 import json
+import logging
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Final, Literal
+from functools import cached_property
+from http import HTTPStatus
+from typing import Any, Final, Literal, cast
 
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from tindeerr.core.config import read_env
+from tindeerr.core.config import ConfigError, env_var_name, read_env
 from tindeerr.core.crypto import SecretCipher
+from tindeerr.core.errors import ProblemError
 from tindeerr.core.logs import register_secret
+from tindeerr.ports.media_server import MediaServerKind
+from tindeerr.storage.db import write_transaction
 from tindeerr.storage.tables import settings as settings_table
 
 type JsonValue = str | int | float | bool | list[JsonValue] | dict[str, JsonValue] | None
 type SettingSource = Literal["default", "database", "environment"]
 
 
+logger = logging.getLogger(__name__)
+
+
+def _error_messages(error: ValidationError) -> str:
+    # Messages only: the rejected value may be a secret.
+    return "; ".join(
+        str(item["msg"]) for item in error.errors(include_input=False, include_url=False)
+    )
+
+
 @dataclass(frozen=True)
 class SettingDefinition:
-    """A setting the server knows about."""
+    """A setting the server knows about.
+
+    ``value_type`` is any type pydantic can validate whose values serialise to JSON
+    (``str | None``, ``bool``, a ``Literal``, ``list[str]``...).
+    """
 
     name: str
+    value_type: Any = field(repr=False)
     secret: bool = False
     default: JsonValue = None
+
+    @cached_property
+    def _adapter(self) -> TypeAdapter[Any]:
+        return TypeAdapter(self.value_type)
+
+    def validate(self, value: object) -> JsonValue:
+        """Return ``value`` checked against the type, as JSON data.
+
+        Raises ``pydantic.ValidationError``.
+        """
+        return self._to_json(self._adapter.validate_python(value))
+
+    def parse(self, raw: str) -> JsonValue:
+        """Parse an environment string: scalars as text (``false``, ``42``), else JSON.
+
+        Raises ``pydantic.ValidationError``.
+        """
+        try:
+            return self._to_json(self._adapter.validate_strings(raw))
+        except ValidationError:
+            if not raw.lstrip().startswith(("[", "{")):
+                raise
+        return self._to_json(self._adapter.validate_json(raw))
+
+    def _to_json(self, value: object) -> JsonValue:
+        return cast("JsonValue", self._adapter.dump_python(value, mode="json"))
 
 
 SETTINGS: Final[Mapping[str, SettingDefinition]] = {
     definition.name: definition
     for definition in (
-        SettingDefinition("server_name", default="Tindeerr"),
-        SettingDefinition("media_server_kind"),
-        SettingDefinition("media_server_url"),
-        SettingDefinition("media_server_api_key", secret=True),
+        SettingDefinition("server_name", str, default="Tindeerr"),
+        SettingDefinition("media_server_kind", MediaServerKind | None),
+        SettingDefinition("media_server_url", str | None),
+        SettingDefinition("media_server_api_key", str | None, secret=True),
     )
 }
 
@@ -63,20 +117,46 @@ class UnknownSettingError(LookupError):
     """No setting with that name is declared."""
 
 
-class SettingLockedError(Exception):
-    """The setting is set by an environment variable (problem ``code`` ``setting_locked``)."""
+class InvalidSettingValueError(ProblemError):
+    """The value does not fit the setting's type (400, ``validation_error``)."""
+
+    def __init__(self, name: str, reason: str) -> None:
+        super().__init__(HTTPStatus.BAD_REQUEST, "validation_error", f"{name}: {reason}")
+        self.name = name
+
+
+class SettingLockedError(ProblemError):
+    """The setting is set by an environment variable (409, ``setting_locked``)."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            HTTPStatus.CONFLICT,
+            "setting_locked",
+            f"{name} is set by {env_var_name(name)} and cannot be changed here",
+        )
+        self.name = name
 
 
 def environment_overrides(
     definitions: Mapping[str, SettingDefinition] = SETTINGS,
     environ: Mapping[str, str] | None = None,
-) -> dict[str, str]:
-    """Read ``TINDEERR_<NAME>`` / ``_FILE`` for every declared setting."""
-    overrides: dict[str, str] = {}
-    for name in definitions:
-        value = read_env(name, environ)
-        if value is not None:
-            overrides[name] = value
+) -> dict[str, JsonValue]:
+    """Read and validate ``TINDEERR_<NAME>`` / ``_FILE`` for every declared setting.
+
+    Raises ``ConfigError`` naming each invalid variable, never echoing its value.
+    """
+    overrides: dict[str, JsonValue] = {}
+    problems: list[str] = []
+    for name, definition in definitions.items():
+        raw = read_env(name, environ)
+        if raw is None:
+            continue
+        try:
+            overrides[name] = definition.parse(raw)
+        except ValidationError as exc:
+            problems.append(f"{env_var_name(name)}: {_error_messages(exc)}")
+    if problems:
+        raise ConfigError("invalid setting override: " + "; ".join(problems))
     return overrides
 
 
@@ -87,7 +167,7 @@ class SettingsStore:
         self,
         engine: AsyncEngine,
         cipher: SecretCipher,
-        overrides: Mapping[str, str],
+        overrides: Mapping[str, object],
         definitions: Mapping[str, SettingDefinition] = SETTINGS,
     ) -> None:
         unknown = set(overrides) - set(definitions)
@@ -97,10 +177,19 @@ class SettingsStore:
         self._engine = engine
         self._cipher = cipher
         self._definitions = definitions
-        self._overrides = dict(overrides)
+        self._overrides = {
+            name: self._validated(definitions[name], value) for name, value in overrides.items()
+        }
         for name, value in self._overrides.items():
-            if definitions[name].secret:
+            if definitions[name].secret and isinstance(value, str):
                 register_secret(value)
+
+    @staticmethod
+    def _validated(definition: SettingDefinition, value: object) -> JsonValue:
+        try:
+            return definition.validate(value)
+        except ValidationError as exc:
+            raise InvalidSettingValueError(definition.name, _error_messages(exc)) from None
 
     def _definition(self, name: str) -> SettingDefinition:
         try:
@@ -131,18 +220,30 @@ class SettingsStore:
         stored, encrypted = row.value, row.encrypted
         if encrypted:
             plaintext = self._cipher.decrypt(stored, context=self._context(name))
-            value: JsonValue = json.loads(plaintext)
+            value: object = json.loads(plaintext)
             if isinstance(value, str):
                 register_secret(value)
         else:
             value = json.loads(stored)
-        return SettingValue(value, "database")
+        try:
+            return SettingValue(definition.validate(value), "database")
+        except ValidationError:
+            logger.warning(
+                "stored setting does not fit its type; using the default",
+                extra={"setting": name},
+            )
+            return SettingValue(definition.default, "default")
 
-    async def set(self, name: str, value: JsonValue) -> None:
-        """Store ``value``. Raises ``SettingLockedError`` for an environment-set setting."""
+    async def set(self, name: str, value: object) -> None:
+        """Validate and store ``value``.
+
+        Raises ``InvalidSettingValueError`` for a value of the wrong type and
+        ``SettingLockedError`` for an environment-set setting.
+        """
         definition = self._definition(name)
         if name in self._overrides:
             raise SettingLockedError(name)
+        value = self._validated(definition, value)
         serialized = json.dumps(value, ensure_ascii=False, allow_nan=False)
         if definition.secret:
             if isinstance(value, str):
@@ -159,7 +260,7 @@ class SettingsStore:
             index_elements=[settings_table.c.name],
             set_={key: statement.excluded[key] for key in ("value", "encrypted", "updated_at")},
         )
-        async with self._engine.begin() as connection:
+        async with write_transaction(self._engine) as connection:
             await connection.execute(statement)
 
     async def delete(self, name: str) -> None:
@@ -167,7 +268,7 @@ class SettingsStore:
         self._definition(name)
         if name in self._overrides:
             raise SettingLockedError(name)
-        async with self._engine.begin() as connection:
+        async with write_transaction(self._engine) as connection:
             await connection.execute(delete(settings_table).where(settings_table.c.name == name))
 
     @staticmethod

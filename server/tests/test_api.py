@@ -1,23 +1,35 @@
 import logging
 import sqlite3
+import time
+from collections.abc import AsyncIterator
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx2
 import pytest
 from fastapi import FastAPI, Request
+from fastapi.responses import Response, StreamingResponse
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from tindeerr import __version__
-from tindeerr.core.config import ServerConfig
+from tindeerr.core.config import ConfigError, ServerConfig
+from tindeerr.core.crypto import DecryptionError
+from tindeerr.core.errors import ProblemError
+from tindeerr.core.logs import is_sensitive_key
 from tindeerr.main.app import create_app
 from tindeerr.storage.db import database_path
+from tindeerr.storage.settings import SettingLockedError
 
 SECURITY_HEADERS = {
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
     "referrer-policy": "no-referrer",
+    "cross-origin-resource-policy": "same-origin",
+    "cross-origin-opener-policy": "same-origin",
 }
 
 
@@ -32,9 +44,43 @@ def add_test_routes(app: FastAPI) -> None:
     async def whoami(request: Request) -> dict[str, str | None]:
         return {"client": request.client.host if request.client else None}
 
+    async def locked() -> None:
+        raise SettingLockedError("server_name")
+
+    async def undecryptable() -> None:
+        msg = "encrypted with another key (id 0a1b2c3d); was the secret key changed?"
+        raise DecryptionError(msg)
+
+    async def limited() -> None:
+        raise ProblemError(429, "rate_limited", "Too many attempts.", {"Retry-After": "3"})
+
+    async def unavailable() -> None:
+        raise ProblemError(503, "media_server_unreachable", "at http://10.0.0.5:8096 (secret)")
+
+    async def cached() -> Response:
+        return Response("static", headers={"Cache-Control": "public, max-age=3600"})
+
+    async def framework(status: int) -> None:
+        raise StarletteHTTPException(status)
+
+    async def streaming() -> StreamingResponse:
+        async def chunks() -> AsyncIterator[bytes]:
+            yield b"first chunk"
+            msg = "failed mid-stream"
+            raise RuntimeError(msg)
+
+        return StreamingResponse(chunks())
+
     app.add_api_route("/test/items", items)
     app.add_api_route("/test/boom", boom)
     app.add_api_route("/test/whoami", whoami)
+    app.add_api_route("/test/locked", locked)
+    app.add_api_route("/test/undecryptable", undecryptable)
+    app.add_api_route("/test/limited", limited)
+    app.add_api_route("/test/unavailable", unavailable)
+    app.add_api_route("/test/framework/{status}", framework)
+    app.add_api_route("/test/streaming", streaming)
+    app.add_api_route("/test/cached", cached)
 
 
 @pytest.fixture
@@ -86,14 +132,15 @@ def test_server_info_reflects_the_media_server(
     assert body["name"] == "Chez nous"
 
 
-def test_unknown_media_server_kind_is_ignored(
+def test_unknown_media_server_kind_prevents_startup(
     config: ServerConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TINDEERR_MEDIA_SERVER_KIND", "kodi")
-    with TestClient(create_app(config)) as client:
-        body = client.get("/api/v1/server/info").json()
-    assert body["media_server"] is None
-    assert body["auth_methods"] == []
+    with (
+        pytest.raises(ConfigError, match="TINDEERR_MEDIA_SERVER_KIND"),
+        TestClient(create_app(config)),
+    ):
+        pass
 
 
 def test_setup_required_follows_the_state_flag(config: ServerConfig, data_dir: Path) -> None:
@@ -107,16 +154,26 @@ def test_setup_required_follows_the_state_flag(config: ServerConfig, data_dir: P
         assert client.get("/api/v1/server/info").json()["setup_required"] is False
 
 
-def test_request_id_is_generated_or_echoed(client: TestClient) -> None:
+def test_request_id_is_generated(client: TestClient) -> None:
     generated = client.get("/healthz").headers["x-request-id"]
     assert len(generated) == 32
-    assert (
-        client.get("/healthz", headers={"X-Request-ID": "abc-123"}).headers["x-request-id"]
-        == "abc-123"
-    )
-    unsafe = client.get("/healthz", headers={"X-Request-ID": "bad id\x7f" + "x" * 200})
-    assert unsafe.headers["x-request-id"] != "bad id"
-    assert len(unsafe.headers["x-request-id"]) == 32
+    assert client.get("/healthz").headers["x-request-id"] != generated
+
+
+def test_request_id_is_echoed_from_trusted_proxies_only(data_dir: Path) -> None:
+    config = ServerConfig(data_dir=data_dir, trusted_proxies="10.0.0.0/8")  # pyright: ignore[reportArgumentType]
+    app = create_app(config)
+    with TestClient(app, client=("10.0.0.2", 5000)) as proxied:
+        assert (
+            proxied.get("/healthz", headers={"X-Request-ID": "abc-123"}).headers["x-request-id"]
+            == "abc-123"
+        )
+        unsafe = proxied.get("/healthz", headers={"X-Request-ID": "bad id\x7f" + "x" * 200})
+        assert len(unsafe.headers["x-request-id"]) == 32
+    with TestClient(app, client=("192.0.2.1", 5000)) as direct:
+        forged = direct.get("/healthz", headers={"X-Request-ID": "abc-123"})
+        assert forged.headers["x-request-id"] != "abc-123"
+        assert len(forged.headers["x-request-id"]) == 32
 
 
 def test_access_log_has_request_id_and_no_query_string(
@@ -221,3 +278,132 @@ def test_forwarded_headers_are_honoured_only_from_trusted_proxies(
             "/test/whoami", headers={"X-Forwarded-For": "198.51.100.1, 203.0.113.7"}
         )
     assert response.json() == {"client": expected}
+
+
+def test_huge_hyphenated_path_does_not_block_the_server(client: TestClient) -> None:
+    # Regression: the access log's redaction was quadratic on such paths (16 s for 16 KB).
+    started = time.perf_counter()
+    response = client.get("/" + "a-" * 8192)
+    assert response.status_code == 404
+    assert time.perf_counter() - started < 1
+
+
+def test_setting_locked_is_a_409_problem(test_client: TestClient) -> None:
+    with test_client:
+        response = test_client.get("/test/locked")
+    assert response.status_code == 409
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json() == {
+        "type": "about:blank",
+        "title": "Conflict",
+        "status": 409,
+        "code": "setting_locked",
+        "detail": "server_name is set by TINDEERR_SERVER_NAME and cannot be changed here",
+    }
+
+
+def test_decryption_error_is_a_generic_500_logged_distinctly(
+    test_client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    with test_client, caplog.at_level(logging.ERROR):
+        response = test_client.get("/test/undecryptable")
+    assert response.status_code == 500
+    assert response.json()["code"] == "internal_error"
+    assert "another key" not in response.text
+    (record,) = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert "secret key changed" in record.getMessage()
+    assert record.__dict__["problem"] == "decryption_failed"
+
+
+def test_problem_error_keeps_status_code_detail_and_headers(test_client: TestClient) -> None:
+    with test_client:
+        response = test_client.get("/test/limited")
+    assert response.status_code == 429
+    assert response.json()["code"] == "rate_limited"
+    assert response.json()["detail"] == "Too many attempts."
+    assert response.headers["retry-after"] == "3"
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_server_side_problem_details_are_logged_not_sent(
+    test_client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    with test_client, caplog.at_level(logging.ERROR):
+        response = test_client.get("/test/unavailable")
+    assert response.status_code == 503
+    assert response.json() == {
+        "type": "about:blank",
+        "title": "Service Unavailable",
+        "status": 503,
+        "code": "media_server_unreachable",
+    }
+    assert any(record.exc_info for record in caplog.records)
+
+
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [
+        (400, "validation_error"),
+        (401, "unauthorized"),
+        (403, "forbidden"),
+        (404, "not_found"),
+        (405, "method_not_allowed"),
+        (409, "bad_request"),
+        (429, "rate_limited"),
+        (502, "internal_error"),
+    ],
+)
+def test_framework_errors_get_a_code_from_their_status(
+    test_client: TestClient, status: int, code: str
+) -> None:
+    with test_client:
+        response = test_client.get(f"/test/framework/{status}")
+    assert response.status_code == status
+    assert response.json()["code"] == code
+
+
+def test_error_after_the_response_started_aborts_the_connection(test_client: TestClient) -> None:
+    with test_client, pytest.raises(RuntimeError, match="mid-stream"):
+        test_client.get("/test/streaming")
+
+
+def assert_security_headers(response: httpx2.Response) -> None:
+    for name, value in SECURITY_HEADERS.items():
+        assert response.headers[name] == value, name
+    assert "camera=()" in response.headers["permissions-policy"]
+    assert response.headers["content-security-policy"].startswith("default-src 'none'")
+
+
+def test_security_headers_are_on_error_responses(client: TestClient) -> None:
+    assert_security_headers(client.get("/api/v1/nope"))
+    assert_security_headers(client.post("/healthz"))
+
+
+def test_route_cache_control_is_kept(test_client: TestClient) -> None:
+    with test_client:
+        response = test_client.get("/test/cached")
+    assert response.headers["cache-control"] == "public, max-age=3600"
+    assert response.headers["x-frame-options"] == "DENY"
+
+
+def test_hsts_is_off_by_default(client: TestClient) -> None:
+    assert "strict-transport-security" not in client.get("/healthz").headers
+
+
+def test_hsts_can_be_enabled(data_dir: Path) -> None:
+    with TestClient(create_app(ServerConfig(data_dir=data_dir, hsts=True))) as client:
+        response = client.get("/healthz")
+    assert response.headers["strict-transport-security"] == "max-age=31536000"
+
+
+def test_no_route_takes_a_credential_in_its_path(config: ServerConfig) -> None:
+    # Paths are logged as is: a code or token must travel in a header or a body.
+    app = create_app(config)
+    names = [
+        name
+        for route in app.routes
+        if isinstance(route, APIRoute)
+        for name in route.param_convertors
+    ]
+    assert not [name for name in names if is_sensitive_key(name)]
+    assert is_sensitive_key("pairing_code")  # the check itself works

@@ -54,14 +54,17 @@ values count as unset.
 | `TINDEERR_HOST` | `127.0.0.1` (`0.0.0.0` in the image) | Listening address. |
 | `TINDEERR_PORT` | `8787` | Listening port. |
 | `TINDEERR_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR`. Logs are JSON lines on stdout, with credentials redacted. |
-| `TINDEERR_TRUSTED_PROXIES` | none | Comma-separated IPs/CIDRs of reverse proxies. `X-Forwarded-For` / `-Proto` are ignored from anyone else. |
+| `TINDEERR_TRUSTED_PROXIES` | none | Comma-separated IPs/CIDRs of reverse proxies. `X-Forwarded-For` / `-Proto` are ignored from anyone else, and so is `X-Request-ID`. A private address sending `X-Forwarded-For` without being listed is logged once. |
 | `TINDEERR_API_DOCS` | `false` | Serve interactive docs at `/api/docs` (and `/api/openapi.json`). |
+| `TINDEERR_HSTS` | `false` | Send `Strict-Transport-Security: max-age=31536000`. Only enable it when the server is always reached over HTTPS. |
 | `TINDEERR_DB_BACKUPS_KEEP` | `5` | Pre-migration backups to keep. |
 
 Settings stored in the database can be forced the same way; they then show as locked
 in the web console. Today: `TINDEERR_SERVER_NAME`, `TINDEERR_MEDIA_SERVER_KIND`
 (`jellyfin`, `emby`, `plex`), `TINDEERR_MEDIA_SERVER_URL`,
-`TINDEERR_MEDIA_SERVER_API_KEY`.
+`TINDEERR_MEDIA_SERVER_API_KEY`. Values are checked against the setting's type
+(`true`/`false` for booleans, JSON for lists and objects); an invalid one stops the
+server at startup with a message naming the variable.
 
 ## Container
 

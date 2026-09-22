@@ -1,6 +1,9 @@
+import fcntl
+import os
 import shutil
 import sqlite3
 import stat
+import threading
 from contextlib import closing
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -13,10 +16,14 @@ from sqlalchemy import text
 from tindeerr.storage import migrate
 from tindeerr.storage.db import UtcDateTime, create_sync_engine, database_path
 from tindeerr.storage.migrate import (
+    LOCK_FILE_NAME,
+    BackupError,
+    MigrationResult,
     SchemaTooNewError,
     head_revision,
     prune_backups,
     upgrade_database,
+    verify_backup,
 )
 from tindeerr.storage.tables import metadata
 
@@ -38,6 +45,40 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_column("settings", "note")
 '''
+
+
+FAILING_REVISION = '''"""Test-only revision that fails halfway."""
+
+import sqlalchemy as sa
+from alembic import op
+
+revision = "9999"
+down_revision = "{head}"
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    op.create_table("half", sa.Column("id", sa.Integer(), primary_key=True))
+    op.add_column("settings", sa.Column("note", sa.Text(), nullable=True))
+    op.execute("INSERT INTO settings VALUES ('ghost', '1', 0, '2026-01-01 00:00:00', NULL)")
+    raise RuntimeError("revision failed halfway")
+
+
+def downgrade() -> None:
+    pass
+'''
+
+
+def install_revision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str) -> None:
+    newer = tmp_path / "migrations"
+    shutil.copytree(migrate.MIGRATIONS_DIR, newer)
+    (newer / "versions" / "9999_test.py").write_text(source.format(head=head_revision()))
+    monkeypatch.setattr(migrate, "MIGRATIONS_DIR", newer)
+
+
+def schema(db_path: Path) -> list[tuple[object, ...]]:
+    return query(db_path, "SELECT type, name, sql FROM sqlite_master ORDER BY name")
 
 
 def query(db_path: Path, sql: str) -> list[tuple[object, ...]]:
@@ -186,3 +227,137 @@ def test_initial_revision_downgrades_cleanly(data_dir: Path) -> None:
     command.downgrade(config, "base")
     tables = {row[0] for row in query(db_path, "SELECT name FROM sqlite_master WHERE type='table'")}
     assert tables == {"alembic_version"}
+
+
+def test_failed_migration_leaves_the_database_unchanged(
+    data_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = database_path(data_dir)
+    upgrade_database(db_path, data_dir / "backups", keep=3)
+    with closing(sqlite3.connect(db_path)) as connection, connection:
+        connection.execute(
+            "INSERT INTO settings VALUES ('server_name', '\"Home\"', 0, '2026-01-01 00:00:00')"
+        )
+    before = schema(db_path)
+    install_revision(tmp_path, monkeypatch, FAILING_REVISION)
+
+    with pytest.raises(RuntimeError, match="halfway"):
+        upgrade_database(db_path, data_dir / "backups", keep=3)
+
+    assert schema(db_path) == before
+    assert query(db_path, "SELECT version_num FROM alembic_version") == [("0001",)]
+    assert query(db_path, "SELECT name FROM settings") == [("server_name",)]
+
+
+def test_failed_first_migration_leaves_an_empty_database(
+    data_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = database_path(data_dir)
+    install_revision(tmp_path, monkeypatch, FAILING_REVISION)
+    with pytest.raises(RuntimeError, match="halfway"):
+        upgrade_database(db_path, data_dir / "backups", keep=3)
+    assert schema(db_path) == []
+
+
+def test_migration_waits_for_the_lock(data_dir: Path) -> None:
+    db_path = database_path(data_dir)
+    results: list[MigrationResult] = []
+    fd = os.open(data_dir / LOCK_FILE_NAME, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        worker = threading.Thread(
+            target=lambda: results.append(upgrade_database(db_path, data_dir / "backups", 3))
+        )
+        worker.start()
+        worker.join(0.3)
+        assert worker.is_alive()
+        assert not db_path.exists()
+    finally:
+        os.close(fd)
+    worker.join(10)
+    assert not worker.is_alive()
+    assert [result.to_revision for result in results] == [head_revision()]
+    assert stat.S_IMODE((data_dir / LOCK_FILE_NAME).stat().st_mode) == 0o600
+
+
+def test_concurrent_first_starts_migrate_once(data_dir: Path) -> None:
+    db_path = database_path(data_dir)
+    results: list[MigrationResult] = []
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            results.append(upgrade_database(db_path, data_dir / "backups", 3))
+        except BaseException as exc:  # noqa: BLE001 - reported below
+            errors.append(exc)
+
+    workers = [threading.Thread(target=run) for _ in range(4)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(20)
+    assert errors == []
+    assert sorted(result.upgraded for result in results) == [False, False, False, True]
+
+
+def test_backup_is_verified(tmp_path: Path) -> None:
+    good = tmp_path / "good.db"
+    with closing(sqlite3.connect(good)) as connection, connection:
+        connection.execute("CREATE TABLE t (x INTEGER)")
+    verify_backup(good)
+    bad = tmp_path / "bad.db"
+    bad.write_bytes(b"not a database" * 100)
+    with pytest.raises(BackupError, match="unreadable"):
+        verify_backup(bad)
+
+
+def test_backup_with_an_inconsistent_index_fails_the_integrity_check(tmp_path: Path) -> None:
+    corrupt = tmp_path / "corrupt.db"
+    with closing(sqlite3.connect(corrupt)) as connection:
+        connection.execute("CREATE TABLE t (a INTEGER, b INTEGER)")
+        connection.execute("CREATE INDEX i ON t (a)")
+        connection.executemany("INSERT INTO t VALUES (?, ?)", [(n, n + 1000) for n in range(20)])
+        connection.commit()
+        # Readable file, but the index no longer matches the rows it indexes.
+        connection.execute("PRAGMA writable_schema=ON")
+        connection.execute(
+            "UPDATE sqlite_master SET sql = 'CREATE INDEX i ON t (b)' WHERE name = 'i'"
+        )
+        connection.commit()
+    with pytest.raises(BackupError, match="failed its integrity check"):
+        verify_backup(corrupt)
+
+
+def test_upgrade_is_aborted_when_the_backup_is_bad(
+    data_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = database_path(data_dir)
+    backups = data_dir / "backups"
+    upgrade_database(db_path, backups, keep=3)
+    install_revision(tmp_path, monkeypatch, EXTRA_REVISION)
+
+    def failing_verify(path: Path) -> None:
+        raise BackupError(f"backup {path.name} failed its integrity check")
+
+    monkeypatch.setattr(migrate, "verify_backup", failing_verify)
+    with pytest.raises(BackupError, match="integrity"):
+        upgrade_database(db_path, backups, keep=3)
+    assert list(backups.iterdir()) == []
+    assert query(db_path, "SELECT version_num FROM alembic_version") == [("0001",)]
+
+
+def test_backup_io_errors_are_reported(
+    data_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = database_path(data_dir)
+    backups = data_dir / "backups"
+    upgrade_database(db_path, backups, keep=3)
+    install_revision(tmp_path, monkeypatch, EXTRA_REVISION)
+
+    def failing_fsync(path: Path) -> None:
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(migrate, "_fsync", failing_fsync)
+    with pytest.raises(BackupError, match="cannot back up"):
+        upgrade_database(db_path, backups, keep=3)
+    assert list(backups.iterdir()) == []

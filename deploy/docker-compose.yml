@@ -14,8 +14,10 @@ services:
     image: tindeerr-server:local
     restart: unless-stopped
     ports:
-      # Put a TLS-terminating reverse proxy in front for anything beyond the LAN.
-      - "8787:8787"
+      # Loopback only: Docker's published ports bypass host firewalls such as ufw.
+      # Reach the server through a TLS-terminating reverse proxy on this host. To serve
+      # other devices directly, publish on a specific LAN address instead.
+      - "127.0.0.1:8787:8787"
     environment:
       TINDEERR_LOG_LEVEL: INFO
       # Honour X-Forwarded-For/-Proto only from your reverse proxy (IPs or CIDRs).
@@ -33,6 +35,9 @@ services:
     security_opt:
       - no-new-privileges:true
     user: "10001:10001"
+    # Bounds a runaway process (fork loop, memory leak) instead of the whole host.
+    pids_limit: 256
+    mem_limit: 512m
 
 volumes:
   tindeerr-data:

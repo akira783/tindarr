@@ -106,3 +106,24 @@ def test_config_is_immutable() -> None:
     config = ServerConfig()
     with pytest.raises(ValueError, match="frozen"):
         config.port = 1  # pyright: ignore[reportAttributeAccessIssue]
+
+
+def test_explicit_overrides_win_over_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TINDEERR_PORT", "9000")
+    monkeypatch.setenv("TINDEERR_HOST", "0.0.0.0")  # noqa: S104 - never bound here
+    config = load_config(port=9100)
+    assert (config.port, config.host) == (9100, "0.0.0.0")  # noqa: S104
+
+
+def test_building_the_model_directly_reads_no_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TINDEERR_PORT", "9000")
+    assert ServerConfig().port == 8787
+
+
+def test_hsts_is_read_as_a_boolean(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TINDEERR_HSTS", "false")
+    assert load_config().hsts is False
+    monkeypatch.setenv("TINDEERR_HSTS", "true")
+    assert load_config().hsts is True
