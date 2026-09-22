@@ -180,6 +180,20 @@ def test_the_sweep_returns_quick_connect_handles_nobody_collected(
     assert pin.expired(clock.now())
 
 
+def test_an_expired_handle_still_reaches_the_sweep_after_it_was_pruned(
+    registry: HandleRegistry, clock: FakeClock
+) -> None:
+    abandoned = start(registry)
+    clock.advance(MAX_LIFETIME["quick_connect"])
+    # Anything touching the registry drops expired handles, so the caps stay right.
+    with pytest.raises(ProblemError):
+        registry.use(abandoned, "quick_connect", "sign_in", Binding.verifier(VERIFIER))
+    assert registry.outstanding == 0
+    # It is still handed to the sweep, which is what closes its Jellyfin session.
+    assert [handle.id for handle in registry.sweep()] == [abandoned]
+    assert registry.sweep() == []
+
+
 def test_the_sweep_leaves_live_handles_alone(registry: HandleRegistry) -> None:
     start(registry)
     assert registry.sweep() == []

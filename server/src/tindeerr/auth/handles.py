@@ -141,6 +141,7 @@ class HandleRegistry:
         self._max_per_client = max_per_client
         self._max_total = max_total
         self._handles: OrderedDict[str, Handle] = OrderedDict()
+        self._to_sweep: list[Handle] = []
 
     # --- creating -------------------------------------------------------------------
 
@@ -254,26 +255,27 @@ class HandleRegistry:
     # --- housekeeping ---------------------------------------------------------------
 
     def sweep(self) -> list[Handle]:
-        """Drop every expired handle and return those that may still hold a session.
+        """Return the expired handles that may still hold a media server session.
 
         A Quick Connect request the user approved created a session on Jellyfin the
-        moment they approved it, even if nobody ever collected it. Those are handed to
-        the caller, which collects them once so the session can be closed.
+        moment they approved it, even if nobody ever collected it. Expired handles leave
+        the registry as soon as anything touches it — otherwise they would count against
+        the caps — so those that may hold a session are put aside here rather than
+        dropped, and handed to the sweep whenever it next runs.
         """
-        now = self._clock.now()
-        expired = [handle for handle in self._handles.values() if handle.expired(now)]
-        for handle in expired:
-            del self._handles[handle.id]
-        return [
-            handle
-            for handle in expired
-            if handle.kind == "quick_connect" and not handle.collected and not handle.consumed
-        ]
+        self._forget_expired(self._clock.now())
+        pending, self._to_sweep = self._to_sweep, []
+        return pending
 
     def _forget_expired(self, now: datetime) -> None:
         for handle_id, handle in list(self._handles.items()):
-            if handle.expired(now):
-                del self._handles[handle_id]
+            if not handle.expired(now):
+                continue
+            del self._handles[handle_id]
+            if handle.kind == "quick_connect" and not handle.collected and not handle.consumed:
+                self._to_sweep.append(handle)
+        # The sweep runs every 30 seconds; this only bounds the list if it ever stops.
+        del self._to_sweep[: -self._max_total]
 
     @property
     def outstanding(self) -> int:

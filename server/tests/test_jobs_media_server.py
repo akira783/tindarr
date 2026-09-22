@@ -61,6 +61,22 @@ def test_an_abandoned_approval_is_collected_and_logged_out(
     assert internet.media.logouts == [f"user-token-{ADMIN_NAME}"]
 
 
+def test_an_approval_survives_another_client_touching_the_registry(
+    app: FastAPI, internet: FakeInternet, clock: FakeClock
+) -> None:
+    with console_client(app) as client:
+        set_up_server(client, app)
+        start_quick_connect(client)
+        internet.media.approve(f"qc-secret-{len(internet.media.quick_connect)}", ADMIN_NAME)
+        internet.media.logouts.clear()
+        clock.advance(5 * 60 + 1)
+        # Somebody else starts a sign-in, which prunes the expired handle first.
+        start_quick_connect(client)
+        services: Any = app.state.services
+        run(client, handle_sweep_job(services.quick_connect).run_once)
+    assert internet.media.logouts == [f"user-token-{ADMIN_NAME}"]
+
+
 def test_a_handle_nobody_approved_leaves_nothing_behind(
     app: FastAPI, internet: FakeInternet, clock: FakeClock
 ) -> None:
