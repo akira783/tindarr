@@ -6,18 +6,13 @@
 
 # Tindarr
 
-Swipe through AI-picked movies and series, one card at a time, and send the ones you
-like straight to your request queue.
+**Swipe right on your next binge.**
 
-Tindeerr is a self-hosted server plus an Android app (iOS later). The server learns
-your taste from your votes and your media server's watch history, asks an AI provider
-for fitting titles, and files requests through Seerr. It also
-serves a small web console for setup and administration, from which you connect your
-phone by scanning a QR code.
+Tired of scrolling Netflix for 45 minutes before giving up and rewatching The Office? Tindarr is Tinder for movies and series: AI-picked matches, one card at a time. Swipe right and the title goes straight to your request queue. Swipe left and it never has to know.
 
-> **Status:** server foundation (step 1): the server starts and answers `/healthz` and
-> `/api/v1/server/info`, nothing usable yet. See the [roadmap](docs/roadmap.md) and
-> [server/README.md](server/README.md).
+Under the hood, Tindarr is a self-hosted server plus an Android app (iOS is still playing hard to get). The server learns your type from your swipes and your media server's watch history, asks an AI provider to play matchmaker, and files requests through Seerr. It also serves a small web console for setup and administration. Pairing your phone takes one QR code scan, which is less awkward than asking for a number.
+
+> **Relationship status: it's complicated.** Server foundation (step 1): the server starts and answers `/healthz` and `/api/v1/server/info`, but it's not ready to commit to anything usable yet. See the [roadmap](https://github.com/akira783/tindeerr/blob/main/docs/roadmap.md) and [server/README.md](https://github.com/akira783/tindeerr/blob/main/server/README.md).
 
 ## How it fits together
 
