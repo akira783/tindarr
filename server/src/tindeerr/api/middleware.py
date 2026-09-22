@@ -46,7 +46,9 @@ class RequestIdMiddleware:
     An incoming id is kept when the request came through a trusted proxy (so it can be
     correlated with the proxy's logs) and it is short and made of safe characters;
     otherwise a new one is generated, so a client cannot forge the ids in the logs. The
-    access log line has no query string, which could carry a credential.
+    access log line has no query string, which could carry a credential. The path is
+    logged as is (only pattern-redacted): routes must never put a code or token in a
+    path segment.
     """
 
     def __init__(self, app: ASGIApp) -> None:

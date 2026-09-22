@@ -10,6 +10,7 @@ import httpx2
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import Response, StreamingResponse
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -17,6 +18,7 @@ from tindeerr import __version__
 from tindeerr.core.config import ConfigError, ServerConfig
 from tindeerr.core.crypto import DecryptionError
 from tindeerr.core.errors import ProblemError
+from tindeerr.core.logs import is_sensitive_key
 from tindeerr.main.app import create_app
 from tindeerr.storage.db import database_path
 from tindeerr.storage.settings import SettingLockedError
@@ -392,3 +394,16 @@ def test_hsts_can_be_enabled(data_dir: Path) -> None:
     with TestClient(create_app(ServerConfig(data_dir=data_dir, hsts=True))) as client:
         response = client.get("/healthz")
     assert response.headers["strict-transport-security"] == "max-age=31536000"
+
+
+def test_no_route_takes_a_credential_in_its_path(config: ServerConfig) -> None:
+    # Paths are logged as is: a code or token must travel in a header or a body.
+    app = create_app(config)
+    names = [
+        name
+        for route in app.routes
+        if isinstance(route, APIRoute)
+        for name in route.param_convertors
+    ]
+    assert not [name for name in names if is_sensitive_key(name)]
+    assert is_sensitive_key("pairing_code")  # the check itself works
