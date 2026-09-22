@@ -311,6 +311,23 @@ def test_backup_is_verified(tmp_path: Path) -> None:
         verify_backup(bad)
 
 
+def test_backup_with_an_inconsistent_index_fails_the_integrity_check(tmp_path: Path) -> None:
+    corrupt = tmp_path / "corrupt.db"
+    with closing(sqlite3.connect(corrupt)) as connection:
+        connection.execute("CREATE TABLE t (a INTEGER, b INTEGER)")
+        connection.execute("CREATE INDEX i ON t (a)")
+        connection.executemany("INSERT INTO t VALUES (?, ?)", [(n, n + 1000) for n in range(20)])
+        connection.commit()
+        # Readable file, but the index no longer matches the rows it indexes.
+        connection.execute("PRAGMA writable_schema=ON")
+        connection.execute(
+            "UPDATE sqlite_master SET sql = 'CREATE INDEX i ON t (b)' WHERE name = 'i'"
+        )
+        connection.commit()
+    with pytest.raises(BackupError, match="failed its integrity check"):
+        verify_backup(corrupt)
+
+
 def test_upgrade_is_aborted_when_the_backup_is_bad(
     data_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
