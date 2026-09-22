@@ -3,13 +3,13 @@
 Each step ends with something that can be checked. Nothing moves on while the
 previous step's checks are red.
 
-## Step 0: framing ✅ in review
+## Step 0: framing ✅ done
 
 - Name, license, repository, v1 scope.
 - Architecture, security model, ADRs 0001–0008.
 - HTTP API contract `api/openapi.yaml` (v1).
 
-## Step 1: server foundation
+## Step 1: server foundation ✅ done
 
 - `server/` package, uv, ruff, pyright strict, pytest, import-linter.
 - Settings (environment + database, secrets encrypted with AES-GCM), structured logs
