@@ -258,6 +258,7 @@ def set_up_plex(client: TestClient, app: FastAPI, internet: FakeInternet, clock:
     created = client.post(
         f"{API}/auth/plex/pins", json={"purpose": "owner_token"}, headers=console_headers(csrf)
     )
+    assert_matches_contract(f"{API}/auth/plex/pins", "post", created)
     assert created.status_code == 201, created.text
     pin_id = created.json()["pin_id"]
     assert (
@@ -355,6 +356,7 @@ def test_a_shared_plex_account_is_not_an_administrator(
             f"{API}/auth/plex/login",
             json={"pin_id": pin_id, "code_verifier": VERIFIER, "device": APP_DEVICE},
         )
+    assert_matches_contract(f"{API}/auth/plex/login", "post", signed_in)
     assert signed_in.status_code == 200, signed_in.text
     assert signed_in.json()["user"]["role"] == "user"
     assert signed_in.json()["user"]["id"] != ""
