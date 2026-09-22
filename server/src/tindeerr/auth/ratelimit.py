@@ -145,6 +145,11 @@ class ExponentialPause:
         self._max = max_pause.total_seconds()
         self._events = _Events(limit.seconds, max_keys)
 
+    @property
+    def limit(self) -> Limit:
+        """The threshold past which attempts are paused."""
+        return self._limit
+
     def pause_for(self, key: str) -> float:
         """Seconds this key must wait before its next attempt is processed."""
         failures = len(self._events.times(key, self._clock.monotonic()))

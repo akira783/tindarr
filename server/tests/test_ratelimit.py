@@ -175,6 +175,12 @@ def test_the_limits_match_the_documented_table(clock: FakeClock) -> None:
     )
     # The per-username cap stays below Jellyfin's default lockout of three failures.
     assert limits.password_per_username.limit.count == 2
+    assert (limits.password_failures.limit.count, limits.password_failures.limit.window) == (
+        5,
+        timedelta(minutes=15),
+    )
+    assert limits.claim_failures_global.limit.count == 20
+    assert limits.pairing_global.limit.count == 60
 
 
 def test_a_rate_limited_problem_is_a_problem_error(clock: FakeClock) -> None:
