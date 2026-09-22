@@ -14,15 +14,9 @@ import os
 from collections.abc import Mapping
 from ipaddress import IPv4Network, IPv6Network, ip_network
 from pathlib import Path
-from typing import Any, Literal, override
+from typing import Any, Literal
 
-from pydantic import Field, SecretStr, ValidationError, field_validator
-from pydantic.fields import FieldInfo
-from pydantic_settings import (
-    BaseSettings,
-    PydanticBaseSettingsSource,
-    SettingsConfigDict,
-)
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator
 
 ENV_PREFIX = "TINDEERR_"
 FILE_SUFFIX = "_FILE"
@@ -64,27 +58,13 @@ def read_env(name: str, environ: Mapping[str, str] | None = None) -> str | None:
     return value or None
 
 
-class _EnvironmentSource(PydanticBaseSettingsSource):
-    """Settings source implementing the ``TINDEERR_<NAME>`` / ``_FILE`` rule."""
+class ServerConfig(BaseModel):
+    """Configuration needed to start the server.
 
-    @override
-    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
-        return read_env(field_name), field_name, False
+    Building it directly reads nothing from the environment; ``load_config`` does.
+    """
 
-    @override
-    def __call__(self) -> dict[str, Any]:
-        values: dict[str, Any] = {}
-        for name, field in self.settings_cls.model_fields.items():
-            value, key, _ = self.get_field_value(field, name)
-            if value is not None:
-                values[key] = value
-        return values
-
-
-class ServerConfig(BaseSettings):
-    """Configuration needed to start the server."""
-
-    model_config = SettingsConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     data_dir: Path = Field(
         default=Path("data"), description="Directory holding the database, backups and key."
@@ -109,19 +89,6 @@ class ServerConfig(BaseSettings):
         default=5, ge=1, le=100, description="Pre-migration database backups to keep."
     )
 
-    @override
-    @classmethod
-    def settings_customise_sources(
-        cls,
-        settings_cls: type[BaseSettings],
-        init_settings: PydanticBaseSettingsSource,
-        env_settings: PydanticBaseSettingsSource,
-        dotenv_settings: PydanticBaseSettingsSource,
-        file_secret_settings: PydanticBaseSettingsSource,
-    ) -> tuple[PydanticBaseSettingsSource, ...]:
-        # Explicit arguments first (tests, embedding), then the environment. No .env files.
-        return (init_settings, _EnvironmentSource(settings_cls))
-
     @field_validator("log_level", mode="before")
     @classmethod
     def _upper_log_level(cls, value: object) -> object:
@@ -145,8 +112,13 @@ def load_config(**overrides: Any) -> ServerConfig:
 
     Raises ``ConfigError`` with one line per invalid field and never echoes the input.
     """
+    values: dict[str, Any] = {}
+    for name in ServerConfig.model_fields:
+        value = read_env(name)
+        if value is not None:
+            values[name] = value
     try:
-        return ServerConfig(**overrides)
+        return ServerConfig.model_validate(values | overrides)
     except ValidationError as exc:
         lines = [
             f"{env_var_name('.'.join(str(part) for part in error['loc']))}: {error['msg']}"
