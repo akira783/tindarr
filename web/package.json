@@ -10,7 +10,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit -p tsconfig.json && vite build && node scripts/check-csp.mjs dist",
+    "build": "vite build && node scripts/check-csp.mjs dist",
     "preview": "vite preview",
     "lint": "eslint --max-warnings=0 .",
     "typecheck": "tsc --noEmit -p tsconfig.json",

@@ -1,0 +1,31 @@
+# The image is built from the repository root (docker build -f server/Dockerfile .).
+# Nothing is sent to the daemon unless it is listed here: the Python package, the
+# console's sources and the contract it is generated from.
+*
+
+!server/pyproject.toml
+!server/uv.lock
+!server/README.md
+!server/src/
+
+!web/package.json
+!web/package-lock.json
+!web/index.html
+!web/tsconfig.json
+!web/vite.config.ts
+!web/src/
+!web/public/
+!web/scripts/
+
+!shared/i18n/
+
+# Never: local state, build output, caches, secrets.
+**/node_modules
+**/dist
+**/coverage
+**/__pycache__
+**/.venv
+**/*.sqlite*
+**/*.db
+**/secret.key
+**/setup-code
