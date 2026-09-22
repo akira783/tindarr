@@ -20,13 +20,22 @@ _QUIET_PATHS: Final = frozenset({"/healthz"})
 _FIRST_ERROR_STATUS: Final = 400
 
 SECURITY_HEADERS: Final = {
-    "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
     "Cross-Origin-Resource-Policy": "same-origin",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Permissions-Policy": (
+        "accelerometer=(), camera=(), geolocation=(), gyroscope=(), microphone=(), "
+        "payment=(), usb=()"
+    ),
 }
+#: Applied unless the route set its own (hashed static assets will be cacheable).
+DEFAULT_CACHE_CONTROL: Final = "no-store"
 CONTENT_SECURITY_POLICY: Final = "default-src 'none'; frame-ancestors 'none'"
+#: One year, this host only: no includeSubDomains, no preload (sibling hosts on a home
+#: network are often plain HTTP, and preload is hard to undo).
+STRICT_TRANSPORT_SECURITY: Final = "max-age=31536000"
 
 access_logger = logging.getLogger("tindeerr.access")
 
@@ -88,14 +97,19 @@ class RequestIdMiddleware:
 class SecurityHeadersMiddleware:
     """Adds conservative security headers to every HTTP response.
 
-    API responses are never cached and never framed. The strict Content-Security-Policy
-    is skipped on ``csp_exempt_paths`` (the optional interactive docs, which load
-    scripts).
+    Responses are never framed, and not cached unless the route says otherwise
+    (``Cache-Control`` is only a default). The strict Content-Security-Policy is skipped
+    on ``csp_exempt_paths`` (the optional interactive docs, which load scripts).
+    ``Strict-Transport-Security`` is sent only when ``hsts`` is set
+    (``TINDEERR_HSTS``), for deployments that are only ever reached over HTTPS.
     """
 
-    def __init__(self, app: ASGIApp, csp_exempt_paths: Collection[str] = ()) -> None:
+    def __init__(
+        self, app: ASGIApp, csp_exempt_paths: Collection[str] = (), *, hsts: bool = False
+    ) -> None:
         self.app = app
         self.csp_exempt_paths = frozenset(csp_exempt_paths)
+        self.hsts = hsts
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Handle one ASGI call."""
@@ -109,6 +123,9 @@ class SecurityHeadersMiddleware:
                 headers = MutableHeaders(scope=message)
                 for name, value in SECURITY_HEADERS.items():
                     headers[name] = value
+                headers.setdefault("Cache-Control", DEFAULT_CACHE_CONTROL)
+                if self.hsts:
+                    headers["Strict-Transport-Security"] = STRICT_TRANSPORT_SECURITY
                 if apply_csp:
                     headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
             await send(message)

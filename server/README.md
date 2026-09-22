@@ -56,6 +56,7 @@ values count as unset.
 | `TINDEERR_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR`. Logs are JSON lines on stdout, with credentials redacted. |
 | `TINDEERR_TRUSTED_PROXIES` | none | Comma-separated IPs/CIDRs of reverse proxies. `X-Forwarded-For` / `-Proto` are ignored from anyone else, and so is `X-Request-ID`. A private address sending `X-Forwarded-For` without being listed is logged once. |
 | `TINDEERR_API_DOCS` | `false` | Serve interactive docs at `/api/docs` (and `/api/openapi.json`). |
+| `TINDEERR_HSTS` | `false` | Send `Strict-Transport-Security: max-age=31536000`. Only enable it when the server is always reached over HTTPS. |
 | `TINDEERR_DB_BACKUPS_KEEP` | `5` | Pre-migration backups to keep. |
 
 Settings stored in the database can be forced the same way; they then show as locked

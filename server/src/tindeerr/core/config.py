@@ -97,6 +97,10 @@ class ServerConfig(BaseSettings):
     port: int = Field(default=DEFAULT_PORT, ge=1, le=65535, description="Listening port.")
     log_level: LogLevel = Field(default="INFO", description="Minimum log level.")
     api_docs: bool = Field(default=False, description="Serve the interactive API docs.")
+    hsts: bool = Field(
+        default=False,
+        description="Send Strict-Transport-Security (only when always reached over HTTPS).",
+    )
     trusted_proxies: tuple[IPv4Network | IPv6Network, ...] = Field(
         default=(),
         description="Comma-separated IPs or CIDRs whose X-Forwarded-* headers are honoured.",

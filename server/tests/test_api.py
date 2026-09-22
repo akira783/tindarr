@@ -6,9 +6,10 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx2
 import pytest
 from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -25,6 +26,8 @@ SECURITY_HEADERS = {
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
     "referrer-policy": "no-referrer",
+    "cross-origin-resource-policy": "same-origin",
+    "cross-origin-opener-policy": "same-origin",
 }
 
 
@@ -52,6 +55,9 @@ def add_test_routes(app: FastAPI) -> None:
     async def unavailable() -> None:
         raise ProblemError(503, "media_server_unreachable", "at http://10.0.0.5:8096 (secret)")
 
+    async def cached() -> Response:
+        return Response("static", headers={"Cache-Control": "public, max-age=3600"})
+
     async def framework(status: int) -> None:
         raise StarletteHTTPException(status)
 
@@ -72,6 +78,7 @@ def add_test_routes(app: FastAPI) -> None:
     app.add_api_route("/test/unavailable", unavailable)
     app.add_api_route("/test/framework/{status}", framework)
     app.add_api_route("/test/streaming", streaming)
+    app.add_api_route("/test/cached", cached)
 
 
 @pytest.fixture
@@ -356,3 +363,32 @@ def test_framework_errors_get_a_code_from_their_status(
 def test_error_after_the_response_started_aborts_the_connection(test_client: TestClient) -> None:
     with test_client, pytest.raises(RuntimeError, match="mid-stream"):
         test_client.get("/test/streaming")
+
+
+def assert_security_headers(response: httpx2.Response) -> None:
+    for name, value in SECURITY_HEADERS.items():
+        assert response.headers[name] == value, name
+    assert "camera=()" in response.headers["permissions-policy"]
+    assert response.headers["content-security-policy"].startswith("default-src 'none'")
+
+
+def test_security_headers_are_on_error_responses(client: TestClient) -> None:
+    assert_security_headers(client.get("/api/v1/nope"))
+    assert_security_headers(client.post("/healthz"))
+
+
+def test_route_cache_control_is_kept(test_client: TestClient) -> None:
+    with test_client:
+        response = test_client.get("/test/cached")
+    assert response.headers["cache-control"] == "public, max-age=3600"
+    assert response.headers["x-frame-options"] == "DENY"
+
+
+def test_hsts_is_off_by_default(client: TestClient) -> None:
+    assert "strict-transport-security" not in client.get("/healthz").headers
+
+
+def test_hsts_can_be_enabled(data_dir: Path) -> None:
+    with TestClient(create_app(ServerConfig(data_dir=data_dir, hsts=True))) as client:
+        response = client.get("/healthz")
+    assert response.headers["strict-transport-security"] == "max-age=31536000"

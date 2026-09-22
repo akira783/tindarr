@@ -54,8 +54,10 @@ def healthcheck(config: ServerConfig) -> int:
     if ":" in host:
         host = f"[{host}]"
     url = f"http://{host}:{config.port}/healthz"
+    # Never through HTTP_PROXY / HTTPS_PROXY: the probe targets this very container.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with urllib.request.urlopen(url, timeout=HEALTHCHECK_TIMEOUT_S) as response:
+        with opener.open(url, timeout=HEALTHCHECK_TIMEOUT_S) as response:
             return 0 if response.status == 200 else 1  # noqa: PLR2004
     except (URLError, OSError):
         return 1

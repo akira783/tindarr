@@ -49,14 +49,30 @@ def test_healthcheck_fails_when_nothing_listens(monkeypatch: pytest.MonkeyPatch)
     assert cli.main(["healthcheck"]) == 1
 
 
+def test_healthcheck_ignores_http_proxies(
+    monkeypatch: pytest.MonkeyPatch, health_server: int
+) -> None:
+    dead_proxy = f"http://127.0.0.1:{free_port()}"
+    for name in ("http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"):
+        monkeypatch.setenv(name, dead_proxy)
+    for name in ("no_proxy", "NO_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("TINDEERR_PORT", str(health_server))
+    assert cli.main(["healthcheck"]) == 0
+
+
 def test_healthcheck_handles_ipv6_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
     urls: list[str] = []
 
-    def fake_urlopen(url: str, timeout: float) -> Any:
-        urls.append(url)
-        raise OSError
+    class FakeOpener:
+        def open(self, url: str, timeout: float) -> Any:
+            urls.append(url)
+            raise OSError
 
-    monkeypatch.setattr(cli.urllib.request, "urlopen", fake_urlopen)
+    def fake_build_opener(*handlers: object) -> FakeOpener:
+        return FakeOpener()
+
+    monkeypatch.setattr(cli.urllib.request, "build_opener", fake_build_opener)
     monkeypatch.setenv("TINDEERR_HOST", "::1")
     assert cli.main(["healthcheck"]) == 1
     assert urls == ["http://[::1]:8787/healthz"]

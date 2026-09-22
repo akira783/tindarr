@@ -89,7 +89,7 @@ def create_app(config: ServerConfig) -> FastAPI:
 
     # Starlette wraps in reverse order: the last middleware added is the outermost.
     app.add_middleware(UnhandledErrorMiddleware)
-    app.add_middleware(SecurityHeadersMiddleware, csp_exempt_paths={DOCS_URL})
+    app.add_middleware(SecurityHeadersMiddleware, csp_exempt_paths={DOCS_URL}, hsts=config.hsts)
     app.add_middleware(RequestIdMiddleware)
     # Outermost: X-Forwarded-For/-Proto are only honoured from these peers; unset, never.
     app.add_middleware(TrustedProxyMiddleware, trusted_proxies=config.trusted_proxies)
