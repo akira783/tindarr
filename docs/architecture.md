@@ -392,7 +392,8 @@ Details in [the authentication reference](auth.md), with the reasons in
 - **Two credentials:** bearer token (app) or session cookie with CSRF token
   (console). Each operation's `security` in the contract says which it accepts.
   Operations tagged `console` never accept a bearer token (they answer `401`); those
-  among them with `security: []` are the public sign-ins that set the cookie.
+  among them that need no session (`security: []`, an empty `{}` alternative, or only
+  the pre-auth cookie) are the setup claim and the web sign-ins that set the cookie.
 - **Errors from lower layers.** Auth and storage raise `ProblemError` (from `core`) with
   the status and `code`; one handler renders it. Everything else unhandled is a generic
   `500 internal_error`.

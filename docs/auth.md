@@ -84,7 +84,7 @@ origin: the console must be used at the origin it was loaded from.
 |---|---|---|---|
 | Access token | `Authorization: Bearer <JWT>` | `mobile` session | Shared endpoints: `GET /me`, `GET /me/sessions`, `/swipe/…`, `POST /auth/logout` |
 | Web session | cookie `__Host-tindeerr_session` | `web` session | Shared endpoints and console endpoints |
-| Setup session | cookie `__Host-tindeerr_setup` | `setup` session | Setup endpoints, `GET /auth/web/session`, the web sign-ins while setup is pending, Plex PINs with purpose `owner_token` during setup |
+| Setup session | cookie `__Host-tindeerr_setup` | `setup` session | Setup endpoints, `GET /auth/web/session`, the web sign-ins while setup is pending, Plex PINs with purpose `owner_token` during setup (`POST /auth/plex/pins`, `POST /auth/plex/pins/status`) |
 | Pre-auth cookie | cookie `__Host-tindeerr_preauth` | none | Binds console sign-in handles to the browser (section 5) |
 
 Rules, applied in this order:
@@ -352,7 +352,7 @@ Each handle records:
   | `sign_in` (app) | the request carries `code_challenge` | `code_challenge` = base64url(SHA-256(`code_verifier`)), PKCE S256 | `POST /auth/plex/login`, `POST /auth/quick-connect/login` with `code_verifier` |
   | `sign_in` (console) | no `code_challenge`; `Origin` checked | the pre-auth cookie (set if absent) | `POST /auth/web/plex/login`, `POST /auth/web/quick-connect/login` |
   | `reauth` | web session + CSRF | that session id | `POST /auth/web/reauth` |
-  | `owner_token` | setup session, or web session of a media server administrator, + CSRF | that session id | `POST /auth/plex/pins/status`, `PUT /setup/media-server`, `PUT /admin/connectors/media_server` |
+  | `owner_token` | setup session, or web session of a media server administrator, + CSRF | that session id | `POST /auth/plex/pins/status`, `PUT /setup/media-server`, `PUT /admin/connectors/media_server` and its `test` (which does not consume it) |
 
 - the upstream PIN id and client identifier, or the Quick Connect secret; the expiry:
   the upstream expiry, capped at 10 minutes for Plex and 5 minutes for Quick Connect
