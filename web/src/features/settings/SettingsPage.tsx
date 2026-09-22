@@ -95,9 +95,9 @@ export function SettingsPage(): ReactNode {
 
   if (settings.isPending) return <Loading />;
   if (settings.error !== null) return <ErrorAlert error={settings.error} />;
-  // Keyed on the saved values, so a save restarts the form from what the server
-  // now holds instead of copying server state into a React state in an effect.
-  return <SettingsForm key={JSON.stringify(settings.data)} settings={settings.data} />;
+  // The form starts from the values the server holds; a save updates both the
+  // cache and the form, so no effect ever copies server state into React state.
+  return <SettingsForm settings={settings.data} />;
 }
 
 function SettingsForm({ settings: current }: { settings: ServerSettings }): ReactNode {
@@ -112,6 +112,7 @@ function SettingsForm({ settings: current }: { settings: ServerSettings }): Reac
     mutationFn: (patch: ServerSettingsPatch) => updateSettings(patch),
     onSuccess: (result) => {
       queryClient.setQueryData(SETTINGS_KEY, result);
+      setForm(toForm(result));
       setSaved(true);
     },
   });
