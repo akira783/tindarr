@@ -30,7 +30,6 @@ from tindeerr.auth import errors
 from tindeerr.auth.handles import Binding, HandlePurpose, HandleRegistry
 from tindeerr.auth.signin import Caller, SignInService
 from tindeerr.core.errors import PendingError, ProblemError
-from tindeerr.core.logs import register_secret
 from tindeerr.ports.media_server import MediaUser, ServerIdentity
 from tindeerr.ports.plextv import PlexTv, as_media_user, find_server
 from tindeerr.storage.server_state import ServerStateRepository
@@ -140,9 +139,10 @@ class PlexPinFlow:
         token = await self._plex_tv.check_pin(handle.pin)
         if token is None:
             return
-        # Kept in memory only, until the connector stores it encrypted; registering it
-        # keeps it out of every log line in the meantime.
-        register_secret(token)
+        # The token is kept in memory only. It is deliberately **not** registered for
+        # log redaction: nothing ever puts it in a log field, and the redaction set is
+        # scanned for every line, so request-scoped values must not accumulate in it.
+        # The settings store registers the owner token once the connector saves it.
         account = await self._plex_tv.account(token)
         handle.token, handle.account_name = token, account.name
         logger.info("a Plex owner token was approved", extra={"account": account.name})
@@ -162,7 +162,6 @@ class PlexPinFlow:
         token = await self._plex_tv.check_pin(handle.pin)
         if token is None:
             raise PendingError
-        register_secret(token)
         self._handles.spend(handle)
         return await self._account_for(token, handle.pin.client_id, machine_id)
 

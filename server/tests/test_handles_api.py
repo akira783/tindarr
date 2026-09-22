@@ -732,3 +732,43 @@ def test_the_pin_status_is_not_checked_more_than_once_a_second(
             ).json()["status"]
             == "authorized"
         )
+
+
+def test_no_plex_token_and_no_handle_ever_reaches_the_logs(
+    app: FastAPI, internet: FakeInternet, clock: FakeClock, log_stream: Any
+) -> None:
+    with console_client(app) as client:
+        setup_csrf = set_up_plex(client, app, internet, clock)
+        pin_id = start_plex_pin(client).json()["pin_id"]
+        internet.plex_tv.approve(last_plex_code(internet), OWNER_TOKEN)
+        clock.advance(2)
+        assert (
+            client.post(
+                f"{API}/auth/web/plex/login", json={"pin_id": pin_id}, headers=console_headers()
+            ).status_code
+            == 200
+        )
+    text = log_stream.getvalue()
+    assert text  # the requests were logged
+    for secret in (OWNER_TOKEN, pin_id, setup_csrf):
+        assert secret not in text
+
+
+def test_no_quick_connect_secret_ever_reaches_the_logs(
+    app: FastAPI, internet: FakeInternet, clock: FakeClock, log_stream: Any
+) -> None:
+    with console_client(app) as client:
+        set_up_server(client, app)
+        handle = start_quick_connect(client).json()["handle"]
+        secret = f"qc-secret-{len(internet.media.quick_connect)}"
+        internet.media.approve(secret, ADMIN_NAME)
+        clock.advance(2)
+        client.post(
+            f"{API}/auth/web/quick-connect/login",
+            json={"handle": handle},
+            headers=console_headers(),
+        )
+    text = log_stream.getvalue()
+    assert text
+    assert secret not in text
+    assert handle not in text
