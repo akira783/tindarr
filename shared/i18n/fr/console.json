@@ -1,0 +1,210 @@
+{
+  "nav": {
+    "skipToContent": "Aller au contenu",
+    "settings": "Réglages du serveur",
+    "users": "Utilisateurs",
+    "connectPhone": "Connecter un téléphone",
+    "sessions": "Mes sessions",
+    "signedInAs": "Connecté en tant que {{name}}",
+    "admin": "Administrateur"
+  },
+  "notFound": {
+    "title": "Page introuvable",
+    "body": "Cette page n'existe pas dans la console.",
+    "home": "Retour à la console"
+  },
+  "signIn": {
+    "title": "Connexion",
+    "subtitle": "Utilisez votre compte {{server}}.",
+    "noMethods": "Ce serveur ne propose aucune méthode de connexion pour le moment. Vérifiez le connecteur du serveur multimédia.",
+    "method": {
+      "password": "Identifiant et mot de passe",
+      "plex_pin": "Plex",
+      "quick_connect": "Quick Connect"
+    },
+    "password": {
+      "username": "Identifiant",
+      "password": "Mot de passe"
+    },
+    "plex": {
+      "start": "Se connecter avec Plex",
+      "openLink": "Ouvrir la page Plex",
+      "waiting": "En attente de votre approbation sur plex.tv…",
+      "popupHint": "Une fenêtre plex.tv devrait s'être ouverte. Sinon, utilisez le lien ci-dessous.",
+      "badUrl": "Le serveur a renvoyé une adresse Plex inattendue. Rien n'a été ouvert."
+    },
+    "quickConnect": {
+      "start": "Utiliser Quick Connect",
+      "code": "Code Quick Connect",
+      "hint": "Saisissez ce code dans une application Jellyfin où vous êtes déjà connecté.",
+      "waiting": "En attente de l'approbation du code…"
+    },
+    "expired": "Le code a expiré. Recommencez."
+  },
+  "setup": {
+    "title": "Configurer ce serveur",
+    "step": "Étape {{current}} sur {{total}}",
+    "steps": {
+      "claim": "Code d'installation",
+      "mediaServer": "Serveur multimédia",
+      "signIn": "Connexion administrateur",
+      "publicUrl": "Adresse publique"
+    },
+    "claim": {
+      "title": "Saisissez le code d'installation",
+      "help": "Le code se trouve dans le répertoire de données du serveur, dans le fichier indiqué par le journal de démarrage (par exemple /data/setup-code).",
+      "label": "Code d'installation",
+      "submit": "Continuer"
+    },
+    "mediaServer": {
+      "title": "Connectez votre serveur multimédia",
+      "help": "Tindeerr y authentifie les utilisateurs et y lit ce qu'ils ont regardé.",
+      "kind": "Type",
+      "url": "Adresse",
+      "urlHint": "Par exemple http://192.168.1.20:8096",
+      "apiKey": "Clé d'API administrateur",
+      "verifyTls": "Vérifier le certificat TLS",
+      "test": "Tester et enregistrer",
+      "locked": "Imposé par l'environnement",
+      "lockedAll": "Le serveur multimédia est défini par des variables d'environnement : cette étape est passée.",
+      "lockedField": "Imposé par une variable d'environnement : la valeur doit être identique.",
+      "configured": "Connecté à {{name}}",
+      "health": {
+        "ok": "Connexion réussie",
+        "unauthorized": "La clé a été refusée",
+        "unreachable": "Le serveur est injoignable",
+        "unexpected_response": "Réponse inattendue",
+        "unsupported_version": "Version non prise en charge",
+        "not_configured": "Non configuré"
+      },
+      "plex": {
+        "start": "Lier le compte Plex propriétaire",
+        "help": "Approuvez sur plex.tv avec le compte propriétaire de ce serveur Plex.",
+        "waiting": "En attente de l'approbation sur plex.tv…",
+        "linked": "Lié en tant que {{account}}"
+      }
+    },
+    "signIn": {
+      "title": "Connectez-vous en administrateur",
+      "help": "Utilisez un compte administrateur du serveur multimédia. Cette connexion termine l'installation."
+    },
+    "publicUrl": {
+      "title": "Adresse publique",
+      "help": "L'adresse que les téléphones utilisent pour joindre ce serveur. Elle est vérifiée avant d'être enregistrée et sert aux QR codes d'appairage.",
+      "label": "Adresse publique",
+      "suggestion": "Utiliser l'adresse de ce navigateur ({{origin}})",
+      "skip": "Plus tard",
+      "done": "Installation terminée."
+    }
+  },
+  "settings": {
+    "title": "Réglages du serveur",
+    "general": "Général",
+    "name": "Nom du serveur",
+    "publicUrl": "Adresse publique",
+    "publicUrlHint": "Origine par laquelle les téléphones joignent ce serveur, utilisée dans les QR codes d'appairage.",
+    "passwordSignIn": "Connexion par mot de passe",
+    "passwordSignInOption": {
+      "enabled": "Autorisée",
+      "lan_only": "Réseau local uniquement",
+      "disabled": "Désactivée"
+    },
+    "later": "Enregistré dès maintenant, utilisé dans une version ultérieure",
+    "language": "Langue par défaut",
+    "streamingRegion": "Région de streaming",
+    "streamingRegionHint": "Deux lettres, par exemple FR.",
+    "dailyGenerationLimit": "Générations par jour et par utilisateur",
+    "warmUpEnabled": "Préparer les cartes en arrière-plan",
+    "contentFilters": "Filtres de contenu",
+    "excludeAdult": "Exclure les titres pour adultes",
+    "minYear": "Année minimale",
+    "excludedGenres": "Genres exclus",
+    "excludedLanguages": "Langues originales exclues",
+    "listHint": "Séparez par des virgules.",
+    "locked": "Imposé par une variable d'environnement.",
+    "mediaServerAdminOnly": "Seul un administrateur du serveur multimédia peut modifier ceci.",
+    "saved": "Réglages enregistrés."
+  },
+  "users": {
+    "title": "Utilisateurs",
+    "empty": "Personne ne s'est encore connecté.",
+    "columns": {
+      "name": "Nom",
+      "role": "Rôle",
+      "status": "État",
+      "lastSignIn": "Dernière connexion",
+      "limit": "Limite quotidienne",
+      "actions": "Actions"
+    },
+    "role": { "admin": "Administrateur", "user": "Utilisateur" },
+    "mediaServerAdmin": "Administrateur sur le serveur multimédia",
+    "promoted": "Promu dans Tindeerr",
+    "status": {
+      "enabled": "Actif",
+      "disabled": "Désactivé",
+      "disabled_admin": "Désactivé par un administrateur",
+      "disabled_media_server": "Désactivé sur le serveur multimédia",
+      "disabled_unlinked": "Délié du serveur multimédia"
+    },
+    "remoteAccessOff": "Pas d'accès distant",
+    "never": "Jamais",
+    "promote": "Nommer administrateur",
+    "demote": "Retirer l'administration",
+    "disable": "Désactiver",
+    "enable": "Réactiver",
+    "limitLabel": "Générations par jour pour {{name}}",
+    "limitDefault": "Valeur par défaut du serveur",
+    "revokeSessions": "Déconnecter partout",
+    "revokeSessionsConfirm": "Déconnecter {{name}} de tous ses appareils ?",
+    "updated": "Utilisateur mis à jour."
+  },
+  "pairing": {
+    "title": "Connecter un téléphone",
+    "help": "Scannez ce code avec l'application Tindeerr. Le code sert une seule fois et expire au bout de quelques minutes.",
+    "create": "Créer un QR code",
+    "again": "Nouveau QR code",
+    "connectsTo": "Se connecte à {{host}}",
+    "qrAlt": "QR code pour appairer un téléphone avec {{host}}",
+    "openInApp": "Ouvrir dans Tindeerr",
+    "expiresIn": "Expire dans {{seconds}} s",
+    "status": {
+      "pending": "En attente du scan par un téléphone…",
+      "awaiting_approval": "Un téléphone demande à se connecter",
+      "approved": "Approuvé. En attente du téléphone…",
+      "completed": "{{device}} connecté",
+      "expired": "Ce code a expiré.",
+      "revoked": "Cette demande a été annulée."
+    },
+    "device": "Appareil",
+    "platform": "Plateforme",
+    "from": "Demandé depuis",
+    "confirmationCode": "N'approuvez que si votre téléphone affiche {{code}}",
+    "revokeSession": "Déconnecter ce téléphone"
+  },
+  "sessions": {
+    "title": "Mes sessions",
+    "help": "Tous les appareils connectés avec votre compte.",
+    "empty": "Aucune autre session.",
+    "current": "Ce navigateur",
+    "kind": { "web": "Console", "mobile": "Application" },
+    "created": "Connecté le {{date}}",
+    "lastSeen": "Vu le {{date}}",
+    "revokeConfirm": "Déconnecter {{device}} ?",
+    "revokeCurrentWarning": "C'est le navigateur que vous utilisez : vous serez déconnecté."
+  },
+  "deleteData": {
+    "title": "Supprimer mes données",
+    "help": "Supprime vos votes, votre profil de goûts, vos préférences et vos sessions sur ce serveur Tindeerr. Rien n'est supprimé sur le serveur multimédia.",
+    "understand": "Je comprends que c'est irréversible.",
+    "submit": "Supprimer mes données",
+    "confirm": "Supprimer toute trace de votre compte sur ce serveur ?"
+  },
+  "reauth": {
+    "title": "Confirmez votre identité",
+    "help": "Cette modification exige une connexion récente sur le serveur multimédia.",
+    "password": "Mot de passe de {{name}}",
+    "submit": "Confirmer",
+    "success": "Confirmé.",
+    "noMethods": "Aucun moyen de confirmation n'est disponible pour le moment."
+  }
+}

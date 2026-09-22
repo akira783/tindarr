@@ -29,3 +29,7 @@ setup-code
 .idea/
 .vscode/
 .import_linter_cache/
+
+# Web console build output
+web/dist/
+web/coverage/

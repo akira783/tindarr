@@ -1,0 +1,210 @@
+{
+  "nav": {
+    "skipToContent": "Skip to content",
+    "settings": "Server settings",
+    "users": "Users",
+    "connectPhone": "Connect a phone",
+    "sessions": "My sessions",
+    "signedInAs": "Signed in as {{name}}",
+    "admin": "Administrator"
+  },
+  "notFound": {
+    "title": "Page not found",
+    "body": "That page does not exist in the console.",
+    "home": "Back to the console"
+  },
+  "signIn": {
+    "title": "Sign in",
+    "subtitle": "Use your {{server}} account.",
+    "noMethods": "This server offers no sign-in method right now. Check the media server connector.",
+    "method": {
+      "password": "User name and password",
+      "plex_pin": "Plex",
+      "quick_connect": "Quick Connect"
+    },
+    "password": {
+      "username": "User name",
+      "password": "Password"
+    },
+    "plex": {
+      "start": "Sign in with Plex",
+      "openLink": "Open the Plex page",
+      "waiting": "Waiting for your approval on plex.tv…",
+      "popupHint": "A plex.tv window should have opened. If it did not, use the link below.",
+      "badUrl": "The server returned an unexpected Plex address. Nothing was opened."
+    },
+    "quickConnect": {
+      "start": "Use Quick Connect",
+      "code": "Quick Connect code",
+      "hint": "Enter this code in a Jellyfin app where you are already signed in.",
+      "waiting": "Waiting for the code to be approved…"
+    },
+    "expired": "The code expired. Start again."
+  },
+  "setup": {
+    "title": "Set up this server",
+    "step": "Step {{current}} of {{total}}",
+    "steps": {
+      "claim": "Setup code",
+      "mediaServer": "Media server",
+      "signIn": "Administrator sign-in",
+      "publicUrl": "Public address"
+    },
+    "claim": {
+      "title": "Enter the setup code",
+      "help": "The code is in the server's data directory, in the file the startup log points to (for example /data/setup-code).",
+      "label": "Setup code",
+      "submit": "Continue"
+    },
+    "mediaServer": {
+      "title": "Connect your media server",
+      "help": "Tindeerr signs users in through this server and reads what they have watched.",
+      "kind": "Type",
+      "url": "Address",
+      "urlHint": "For example http://192.168.1.20:8096",
+      "apiKey": "Administrator API key",
+      "verifyTls": "Verify the TLS certificate",
+      "test": "Test and save",
+      "locked": "Locked by the environment",
+      "lockedAll": "The media server is set by environment variables on this server, so this step is skipped.",
+      "lockedField": "Set by an environment variable: the value must match.",
+      "configured": "Connected to {{name}}",
+      "health": {
+        "ok": "Connection successful",
+        "unauthorized": "The key was refused",
+        "unreachable": "The server could not be reached",
+        "unexpected_response": "Unexpected answer",
+        "unsupported_version": "Unsupported version",
+        "not_configured": "Not configured"
+      },
+      "plex": {
+        "start": "Link the owner's Plex account",
+        "help": "Approve on plex.tv with the account that owns this Plex server.",
+        "waiting": "Waiting for approval on plex.tv…",
+        "linked": "Linked as {{account}}"
+      }
+    },
+    "signIn": {
+      "title": "Sign in as an administrator",
+      "help": "Use an account that is an administrator on the media server. That sign-in finishes the setup."
+    },
+    "publicUrl": {
+      "title": "Public address",
+      "help": "The address phones use to reach this server. It is checked before it is saved, and it is what pairing QR codes point to.",
+      "label": "Public address",
+      "suggestion": "Use this browser's address ({{origin}})",
+      "skip": "Set it later",
+      "done": "Setup finished."
+    }
+  },
+  "settings": {
+    "title": "Server settings",
+    "general": "General",
+    "name": "Server name",
+    "publicUrl": "Public address",
+    "publicUrlHint": "Origin the phones reach this server at, used in pairing QR codes.",
+    "passwordSignIn": "Password sign-in",
+    "passwordSignInOption": {
+      "enabled": "Allowed",
+      "lan_only": "Local network only",
+      "disabled": "Turned off"
+    },
+    "later": "Stored now, used in a later version",
+    "language": "Default language",
+    "streamingRegion": "Streaming region",
+    "streamingRegionHint": "Two letters, for example FR.",
+    "dailyGenerationLimit": "Daily generations per user",
+    "warmUpEnabled": "Prepare cards in the background",
+    "contentFilters": "Content filters",
+    "excludeAdult": "Exclude adult titles",
+    "minYear": "Earliest year",
+    "excludedGenres": "Excluded genres",
+    "excludedLanguages": "Excluded original languages",
+    "listHint": "Separate with commas.",
+    "locked": "Set by an environment variable.",
+    "mediaServerAdminOnly": "Only an administrator of the media server can change this.",
+    "saved": "Settings saved."
+  },
+  "users": {
+    "title": "Users",
+    "empty": "Nobody has signed in yet.",
+    "columns": {
+      "name": "Name",
+      "role": "Role",
+      "status": "Status",
+      "lastSignIn": "Last sign-in",
+      "limit": "Daily limit",
+      "actions": "Actions"
+    },
+    "role": { "admin": "Administrator", "user": "User" },
+    "mediaServerAdmin": "Administrator on the media server",
+    "promoted": "Promoted in Tindeerr",
+    "status": {
+      "enabled": "Active",
+      "disabled": "Disabled",
+      "disabled_admin": "Disabled by an administrator",
+      "disabled_media_server": "Disabled on the media server",
+      "disabled_unlinked": "Unlinked from the media server"
+    },
+    "remoteAccessOff": "No remote access",
+    "never": "Never",
+    "promote": "Make administrator",
+    "demote": "Remove administrator",
+    "disable": "Disable",
+    "enable": "Enable",
+    "limitLabel": "Daily generations for {{name}}",
+    "limitDefault": "Server default",
+    "revokeSessions": "Sign out everywhere",
+    "revokeSessionsConfirm": "Sign {{name}} out of every device?",
+    "updated": "User updated."
+  },
+  "pairing": {
+    "title": "Connect a phone",
+    "help": "Scan this code with the Tindeerr app. The code works once and expires in a few minutes.",
+    "create": "Create a QR code",
+    "again": "New QR code",
+    "connectsTo": "Connects to {{host}}",
+    "qrAlt": "QR code to pair a phone with {{host}}",
+    "openInApp": "Open in Tindeerr",
+    "expiresIn": "Expires in {{seconds}} s",
+    "status": {
+      "pending": "Waiting for a phone to scan the code…",
+      "awaiting_approval": "A phone is asking to connect",
+      "approved": "Approved. Waiting for the phone…",
+      "completed": "{{device}} connected",
+      "expired": "This code expired.",
+      "revoked": "This request was cancelled."
+    },
+    "device": "Device",
+    "platform": "Platform",
+    "from": "Asked from",
+    "confirmationCode": "Approve only if your phone shows {{code}}",
+    "revokeSession": "Sign this phone out"
+  },
+  "sessions": {
+    "title": "My sessions",
+    "help": "Every device signed in with your account.",
+    "empty": "No other session.",
+    "current": "This browser",
+    "kind": { "web": "Console", "mobile": "App" },
+    "created": "Signed in {{date}}",
+    "lastSeen": "Last seen {{date}}",
+    "revokeConfirm": "Sign {{device}} out?",
+    "revokeCurrentWarning": "This is the browser you are using: you will be signed out."
+  },
+  "deleteData": {
+    "title": "Delete my data",
+    "help": "Deletes your votes, taste profile, preferences and sessions on this Tindeerr server. Nothing is deleted on the media server.",
+    "understand": "I understand this cannot be undone.",
+    "submit": "Delete my data",
+    "confirm": "Delete every trace of your account on this server?"
+  },
+  "reauth": {
+    "title": "Confirm it is you",
+    "help": "This change needs a fresh sign-in on the media server.",
+    "password": "Password for {{name}}",
+    "submit": "Confirm",
+    "success": "Confirmed.",
+    "noMethods": "No way to confirm is available right now."
+  }
+}
