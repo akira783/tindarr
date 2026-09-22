@@ -12,11 +12,12 @@ from tindarr.api.deps import Services
 from tindarr.api.security import Context, CookieSetting, SetupSession
 from tindarr.api.v1.models import (
     ConnectorStatusResponse,
+    LockedValuesResponse,
     MediaServerConfigInput,
-    MediaServerInfo,
     SetupClaimInput,
     SetupStateResponse,
     WebSessionResponse,
+    media_server_info,
 )
 from tindarr.auth.mediaserver import MediaServerInput
 
@@ -56,11 +57,10 @@ async def get_setup_state(
     """
     state = await services.setup.state(client_is_private=context.client_is_private)
     return SetupStateResponse(
-        media_server=None
-        if state.media_server is None
-        else MediaServerInfo(kind=state.media_server),
+        media_server=await media_server_info(services.settings, state.media_server),
         media_server_locked=state.media_server_locked,
         locked_fields=state.locked_fields,
+        locked_values=LockedValuesResponse.of(services.connector.locked_values()),
         auth_methods=state.auth_methods,
     )
 

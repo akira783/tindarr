@@ -64,7 +64,12 @@ The `Host` header of every request except `/healthz` must be one of:
 - `localhost`, with any port;
 - a host name listed in `TINDARR_ALLOWED_HOSTS` (bootstrap configuration,
   comma-separated host names, compared case-insensitively, any port);
-- the host of `public_url`, once it is set.
+- the host of `public_url`, once it is set;
+- the host of a `public_url` **being checked**, for the few seconds that check lasts
+  (section 10). Without it a server set up through its IP address could never be given
+  a domain name from the console: the check calls that very address, and the `Host` it
+  would send is the one not allowed yet. Only `GET /server/info` is reachable that way,
+  and only a media server administrator with a fresh re-authentication can open it.
 
 Anything else gets `400` with `code` = `host_not_allowed`, before routing, for the API
 and the console alike. A server reached by a domain name must therefore have
@@ -381,13 +386,33 @@ from `GET /System/Info/Public`), or `plex:<machineIdentifier>` from the Plex ser
 
 - Jellyfin / Emby: `GET /System/Info/Public` (product must match the declared kind,
   version at least 10.10 for Jellyfin), then `GET /Users` with the API key (proves the
-  key is an admin key).
+  key works), then `GET /System/Configuration` with it (proves the key is an
+  **administrator** key).
+  - `GET /Users` alone proves nothing: both products answer `200` to any authenticated
+    caller and silently filter the list to what that caller may see, so a *user* access
+    token pasted into the API key field would pass — and the hourly sync would then read
+    that one-entry list as "everyone else was removed". `GET /System/Configuration` is
+    the endpoint both gate on the administrator role (Jellyfin's
+    `ConfigurationController` requires the `RequiresElevation` policy, Emby's the `Admin`
+    role): `401` or `403` there means the key works but is not an admin key
+    (`unauthorized`).
+  - A server that answers that probe with anything else (an older or forked build
+    without the route) leaves the question open: the key is accepted, the doubt is
+    logged, and the sync's own guard — a list with no users at all changes nothing —
+    stays the backstop.
 - Plex: `GET <url>/identity` for the `machineIdentifier`, then
   `GET https://plex.tv/api/v2/resources` with the token from the `owner_token` handle:
   the resource with that `clientIdentifier` must be `owned` (otherwise `403`
   `plex_owner_required`); then `GET <url>/` with the token.
 - Results are coarse (security model, section 7): `ok`, `unauthorized`, `unreachable`,
   `unexpected_response`, `unsupported_version`. No response body is ever returned.
+
+**What the console sees of a stored secret.** `SecretState` says whether one is set and,
+for a Jellyfin or Emby API key, its last four characters — an administrator may hold
+several keys and that is what tells them apart. A Plex connector's secret is not a key
+but the **account token** of the server's owner: there is only ever one, so those four
+characters would identify nothing and would give away part of a credential that opens
+the whole Plex account. It is masked entirely (`last4` is null).
 
 **Stored Plex token (step 2).** The account-wide token of the owner, from an `owned`
 account, encrypted like every secret. Step 2 needs it for the hourly user sync
@@ -554,11 +579,16 @@ the traffic lasts, never lock anyone out.
    challenge (first 32 bits of SHA-256 of the challenge, modulo 10 000, zero-padded).
 5. **Approve** (console): the console, polling `GET /pairings/{id}`, shows the device
    name, platform, IP and the confirmation code: "Approve only if your phone shows
-   4821". `POST /pairings/{id}/approve` (CSRF) moves it to `approved`;
+   4821". The answer carries `retry_after_ms` (2 s while anything can still happen,
+   null once the pairing is `completed`, `expired` or `revoked`), so the console stops
+   polling on its own. `POST /pairings/{id}/approve` (CSRF) moves it to `approved`;
    `DELETE /pairings/{id}` rejects it (`revoked`).
 6. **Complete** (app): the app polls `POST /auth/pair/complete` with the code and its
    `code_verifier` every 2 s: `202` while waiting, `403` `pairing_rejected` after a
-   rejection, `410` once expired, and `200` with the token pair once approved. That
+   rejection, `410` once expired, and `200` with the token pair once approved. The
+   `code_verifier` is checked **first**, so a caller who only holds the code learns
+   nothing about the pairing's fate: everything but a matching verifier is the same
+   `410`. That
    call opens the `mobile` session and marks the pairing `completed`. It applies the
    same checks as any authenticated request (user enabled, remote-access rule).
 7. The console then shows "Pixel 9 connected" with a button that revokes that session.
@@ -584,7 +614,11 @@ Pairing does not contact the media server, so it does not re-sync the admin flag
 - Servers that cannot reach their own public address (no NAT hairpinning) cannot pass
   the check from the console; the operator sets `TINDARR_PUBLIC_URL` instead. An
   environment value is checked once after startup and only logged when it fails.
-- Its host becomes an allowed host (section 1). It is not an extra accepted `Origin`.
+- Its host becomes an allowed host (section 1), and is already accepted while its own
+  check runs, so an address can be set from a console opened elsewhere. It is not an
+  extra accepted `Origin`.
+- Clearing it (`null`) needs the same administrator and the same fresh
+  re-authentication, and is not checked: there is nothing to check.
 
 ## 11. `auth_methods` in `server/info`
 
@@ -633,7 +667,7 @@ by the server. Times are UTC (`UtcDateTime`).
 | `user_id` | text, FK `users` (cascade), null | Null only for `setup` (check constraint). Indexed. |
 | `token_hash` | text, unique, null | SHA-256 of the cookie token (`web`, `setup`); null for `mobile`. |
 | `csrf_token` | text, null | `web` and `setup`; returned by `GET /auth/web/session`. |
-| `device_name`, `platform`, `app_version` | text | From `DeviceInput`, or derived from the User-Agent for `web`. |
+| `device_name`, `platform`, `app_version` | text, null | From `DeviceInput`, or derived from the User-Agent for `web` (`platform` = `web`). Null only for a row written without either; `Session` in the contract shows them as nullable for that reason. |
 | `created_at`, `last_seen_at`, `expires_at` | datetime, not null | `expires_at` = absolute end. |
 | `reauth_at` | datetime, null | `web` only. |
 | `revoked_at` | datetime, null | |
@@ -665,6 +699,10 @@ by the server. Times are UTC (`UtcDateTime`).
 **Purge** (daily job): sessions revoked or expired for more than 30 days, with their
 refresh tokens; pairings older than 7 days.
 
+**Settings added in step 2c:** `media_server_name`, what the media server calls itself,
+written at each successful connection test so the wizard and `GET /server/info` can show
+"connected to Home Jellyfin" without testing again. It is never set by hand.
+
 **In memory, not in the database:** handles (section 5), rate-limit counters
 (section 8), `public_url` nonces (section 10), the Quick Connect "enabled" cache and the
 last identity check (section 6). All are lost on restart, with the consequences given
@@ -677,7 +715,10 @@ in each section.
   `refresh_token`, `access_token`, `session`, `sid`, `jwt`, `csrf`, `otp`, `pin`,
   `nonce`.
 - Credentials never go in a URL path or query string Tindarr serves: codes, handles
-  and tokens travel in bodies, cookies or headers. Outbound calls that need one in a
+  and tokens travel in bodies, cookies or headers. Resource identifiers are not
+  credentials and may appear in a path (`/me/sessions/{session_id}`,
+  `/pairings/{pairing_id}`, `/admin/users/{user_id}`): they name a row the caller must
+  already be authorised for, and knowing one grants nothing. Outbound calls that need one in a
   query (Quick Connect's `secret`) go through an HTTP client whose logger stays at
   `WARNING`, and URLs are redacted before any log line.
 - Validation errors never echo the input (already the case since step 1).

@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from sqlalchemy import Row, select, update
+from sqlalchemy import delete as delete_statement
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tindarr.storage.ids import new_id
@@ -22,6 +23,7 @@ __all__ = [
     "Role",
     "User",
     "count_enabled_admins",
+    "delete",
     "get",
     "get_by_media_server_id",
     "insert",
@@ -133,6 +135,11 @@ async def update_fields(connection: AsyncConnection, user_id: str, **values: obj
 async def touch(connection: AsyncConnection, user_id: str, now: datetime) -> None:
     """Record that the user was seen now."""
     await update_fields(connection, user_id, last_seen_at=now)
+
+
+async def delete(connection: AsyncConnection, user_id: str) -> None:
+    """Remove a user row; sessions, refresh tokens and pairings cascade with it."""
+    await connection.execute(delete_statement(users).where(users.c.id == user_id))
 
 
 async def count_enabled_admins(connection: AsyncConnection) -> int:

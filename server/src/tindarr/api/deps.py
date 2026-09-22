@@ -10,6 +10,8 @@ from tindarr.api.context import HostPolicy
 from tindarr.auth.brokered import PlexPinFlow, QuickConnectFlow
 from tindarr.auth.handles import HandleRegistry
 from tindarr.auth.mediaserver import MediaServerConnector
+from tindarr.auth.pairing import PairingService
+from tindarr.auth.publicurl import PublicUrlVerifier
 from tindarr.auth.ratelimit import RateLimits
 from tindarr.auth.sessions import SessionService
 from tindarr.auth.setup import SetupService
@@ -39,8 +41,12 @@ class AppServices:
     quick_connect: QuickConnectFlow
     #: The in-memory registry both brokered flows share (docs/auth.md, section 5).
     handles: HandleRegistry
+    #: Connecting a phone from the console (docs/auth.md, section 9).
+    pairings: PairingService
     limits: RateLimits
     hosts: HostPolicy
+    #: Checks that ``public_url`` really reaches this server (docs/auth.md, section 10).
+    public_url: PublicUrlVerifier
     #: Random per database: the JWT issuer and the media server ``DeviceId``.
     install_id: str
 

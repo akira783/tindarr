@@ -23,6 +23,7 @@ from tindarr.auth.setupcode import read_setup_code
 from tindarr.core.config import ServerConfig
 from tindarr.main.app import Wiring, create_app
 from tindarr.ports.media_server import MediaUser
+from tindarr.ports.publicurl import PublicUrlProbe
 from tindarr.storage.sessions import Device
 
 #: The host the console is opened at in the tests, and the one TestClient sends by default.
@@ -48,21 +49,27 @@ def build_app(
     clock: FakeClock | None = None,
     media_servers: FakeMediaServers | None = None,
     internet: FakeInternet | None = None,
+    public_url_probe: PublicUrlProbe | None = None,
     **overrides: Any,
 ) -> FastAPI:
     """Build the application with the test's clock and its media servers.
 
     ``internet`` wires the **real** adapters to fake Jellyfin, Emby, Plex and plex.tv
     servers; ``media_servers`` replaces the adapters themselves, for the tests that only
-    care about what auth does with their answers.
+    care about what auth does with their answers. ``public_url_probe`` replaces the one
+    outbound call the server makes to its own public address.
     """
-    return create_app(server_config(data_dir, **overrides), wiring(clock, media_servers, internet))
+    return create_app(
+        server_config(data_dir, **overrides),
+        wiring(clock, media_servers, internet, public_url_probe),
+    )
 
 
 def wiring(
     clock: FakeClock | None = None,
     media_servers: FakeMediaServers | None = None,
     internet: FakeInternet | None = None,
+    public_url_probe: PublicUrlProbe | None = None,
 ) -> Wiring:
     """The ``Wiring`` for these fakes: real adapters over ``internet``, or stubs."""
     if internet is not None:
@@ -71,8 +78,13 @@ def wiring(
             clock=clock or FakeClock(),
             media_servers=media_server_factory(plex_tv, internet.transport),
             plex_tv=plex_tv,
+            public_url_probe=public_url_probe,
         )
-    return Wiring(clock=clock or FakeClock(), media_servers=media_servers or FakeMediaServers())
+    return Wiring(
+        clock=clock or FakeClock(),
+        media_servers=media_servers or FakeMediaServers(),
+        public_url_probe=public_url_probe,
+    )
 
 
 @contextmanager

@@ -132,7 +132,7 @@ def test_server_info_reflects_the_media_server(
     monkeypatch.setenv("TINDARR_SERVER_NAME", "Chez nous")
     with TestClient(create_app(config)) as client:
         body = client.get("/api/v1/server/info").json()
-        assert body["media_server"] == {"kind": kind}
+        assert body["media_server"] == {"kind": kind, "name": None}
         assert body["name"] == "Chez nous"
         # Nobody signs in before setup completes.
         assert body["auth_methods"] == []

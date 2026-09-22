@@ -1,9 +1,11 @@
 """Background jobs that run inside the API process.
 
-``PeriodicJob`` is the shape they all take (step 2b's user sync and Quick Connect sweep,
-step 4's warm-up): a coroutine run a first time after ``first_delay``, then every
+``PeriodicJob`` is the shape most of them take (step 2b's user sync and Quick Connect
+sweep, step 4's warm-up): a coroutine run a first time after ``first_delay``, then every
 ``interval``. A failure is logged and the job keeps its schedule, so one unreachable
-media server never stops the others.
+media server never stops the others. ``OneShotJob`` runs its coroutine once, shortly
+after startup (the ``public_url`` check of an environment-set address), and both are
+started and stopped the same way by the lifespan.
 """
 
 import asyncio
@@ -11,7 +13,7 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
-from typing import Final
+from typing import Final, Protocol, override
 
 from tindarr.auth.sessions import SessionService
 
@@ -22,26 +24,32 @@ PURGE_FIRST_DELAY: Final = timedelta(minutes=1)
 logger = logging.getLogger(__name__)
 
 
-class PeriodicJob:
-    """Runs one coroutine on a schedule until it is stopped."""
+class BackgroundJob(Protocol):
+    """What the lifespan needs of a background job: start it, then stop it."""
 
-    def __init__(
-        self,
-        name: str,
-        run: Callable[[], Awaitable[object]],
-        interval: timedelta,
-        first_delay: timedelta = timedelta(0),
-    ) -> None:
+    name: str
+
+    def start(self) -> None:
+        """Start the job as a background task."""
+        ...
+
+    async def stop(self) -> None:
+        """Cancel the job and wait for it to finish."""
+        ...
+
+
+class _Job:
+    """What running a coroutine in the background needs, whatever the schedule."""
+
+    def __init__(self, name: str, run: Callable[[], Awaitable[object]]) -> None:
         self.name = name
         self._run = run
-        self._interval = interval.total_seconds()
-        self._first_delay = first_delay.total_seconds()
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
         """Start the job as a background task."""
         if self._task is None:
-            self._task = asyncio.create_task(self._loop(), name=f"tindarr.jobs.{self.name}")
+            self._task = asyncio.create_task(self._schedule(), name=f"tindarr.jobs.{self.name}")
 
     async def stop(self) -> None:
         """Cancel the job and wait for it to finish."""
@@ -59,11 +67,43 @@ class PeriodicJob:
         except Exception:
             logger.exception("background job failed", extra={"job": self.name})
 
-    async def _loop(self) -> None:
+    async def _schedule(self) -> None:  # pragma: no cover - each subclass has its own
+        raise NotImplementedError
+
+
+class PeriodicJob(_Job):
+    """Runs one coroutine on a schedule until it is stopped."""
+
+    def __init__(
+        self,
+        name: str,
+        run: Callable[[], Awaitable[object]],
+        interval: timedelta,
+        first_delay: timedelta = timedelta(0),
+    ) -> None:
+        super().__init__(name, run)
+        self._interval = interval.total_seconds()
+        self._first_delay = first_delay.total_seconds()
+
+    @override
+    async def _schedule(self) -> None:
         await asyncio.sleep(self._first_delay)
         while True:
             await self.run_once()
             await asyncio.sleep(self._interval)
+
+
+class OneShotJob(_Job):
+    """Runs one coroutine once, a moment after startup, then finishes."""
+
+    def __init__(self, name: str, run: Callable[[], Awaitable[object]], delay: timedelta) -> None:
+        super().__init__(name, run)
+        self._delay = delay.total_seconds()
+
+    @override
+    async def _schedule(self) -> None:
+        await asyncio.sleep(self._delay)
+        await self.run_once()
 
 
 def purge_job(sessions: SessionService) -> PeriodicJob:

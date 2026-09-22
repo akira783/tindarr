@@ -505,7 +505,7 @@ paths:
               schema: { $ref: "#/components/schemas/Problem" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "503":
-          description: "`setup_required`, `plex_tv_unreachable` or `media_server_changed`."
+          description: "`setup_required`, `plex_tv_unreachable`, `media_server_unreachable` (the Plex server's own identity is re-read before the sign-in uses it, docs/auth.md section 6) or `media_server_changed`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -915,7 +915,7 @@ paths:
               schema: { $ref: "#/components/schemas/Problem" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "503":
-          description: "`setup_required`, `plex_tv_unreachable` or `media_server_changed`."
+          description: "`setup_required`, `plex_tv_unreachable`, `media_server_unreachable` (the Plex server's own identity is re-read before the sign-in uses it, docs/auth.md section 6) or `media_server_changed`."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -1755,6 +1755,11 @@ paths:
         - cookieSession: []
           csrfToken: []
       summary: Remove an optional connector (omdb, requests)
+      description: |
+        Only the optional connectors can be removed. `media_server` is not one of
+        them: a Tindarr without a media server signs nobody in, so it is repointed
+        with `PUT` instead (`409` `media_server_required`). In step 2 the optional
+        connectors do not exist yet and answer `404`.
       operationId: deleteConnector
       parameters:
         - $ref: "#/components/parameters/ConnectorKind"
@@ -1763,8 +1768,13 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/AdminForbidden" }
+        "404":
+          description: "`not_found`: a connector kind not implemented yet (step 2: every kind but `media_server`)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "409":
-          description: "`setting_locked` (the connector is set by environment variables)."
+          description: "`setting_locked` (the connector is set by environment variables) or `media_server_required` (the media server connector cannot be removed)."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -1798,7 +1808,11 @@ paths:
               schema: { $ref: "#/components/schemas/ConnectorStatus" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/AdminForbidden" }
+        "403":
+          description: "`admin_required`, `plex_owner_required` (the PIN's account does not own that Plex server), `csrf_failed` or `remote_access_denied`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "404":
           description: "`not_found`: a connector kind not implemented yet (step 2: every kind but `media_server`)."
           content:
@@ -2242,7 +2256,7 @@ components:
               public_url_unverified;
             - connectors: connector_unreachable, connector_unauthorized,
               connector_unexpected_response, media_server_unsupported,
-              secret_required;
+              media_server_required, secret_required;
             - swipe and admin: last_admin, streaming_region_not_set,
               metadata_unreachable, llm_not_configured, tmdb_not_configured,
               llm_auth_failed, llm_quota, llm_model_not_found, llm_unreachable,
@@ -2294,7 +2308,9 @@ components:
               required: [kind]
               properties:
                 kind: { $ref: "#/components/schemas/MediaServerKind" }
-                name: { type: string }
+                name:
+                  type: [string, "null"]
+                  description: What the media server calls itself, read at the last successful connection test; null while it is unknown.
         auth_methods:
           type: array
           description: |
@@ -2339,7 +2355,7 @@ components:
     SetupState:
       type: object
       description: What the setup wizard still has to do (docs/auth.md, section 3).
-      required: [media_server, media_server_locked, locked_fields, auth_methods]
+      required: [media_server, media_server_locked, locked_fields, locked_values, auth_methods]
       properties:
         media_server:
           description: The configured media server, or null.
@@ -2359,6 +2375,21 @@ components:
           type: array
           description: "`MediaServerConfigInput` fields set by environment variables (`server_type`, `url`, `api_key`, `verify_tls`)."
           items: { type: string }
+        locked_values:
+          type: object
+          description: |
+            The values the environment forces on `locked_fields`, so the wizard can
+            show them and send them back unchanged in `PUT /setup/media-server`. A
+            locked `api_key` is never returned: `locked_fields` says it is set, and
+            the field is left empty in the form.
+          required: [server_type, url, verify_tls]
+          properties:
+            server_type:
+              oneOf:
+                - type: "null"
+                - $ref: "#/components/schemas/MediaServerKind"
+            url: { type: [string, "null"] }
+            verify_tls: { type: [boolean, "null"] }
         auth_methods:
           type: array
           description: |
@@ -2543,6 +2574,11 @@ components:
             - type: "null"
             - $ref: "#/components/schemas/ConfirmationCode"
         session_id: { type: [string, "null"], description: The session the pairing opened. }
+        retry_after_ms:
+          type: [integer, "null"]
+          minimum: 250
+          description: How long to wait before reading this pairing again; null once it is `completed`, `expired` or `revoked` and nothing more will happen.
+          examples: [2000]
 
     NewPairing:
       allOf:
@@ -2632,9 +2668,13 @@ components:
       properties:
         id: { type: string }
         kind: { type: string, enum: [mobile, web] }
-        device_name: { type: string }
-        platform: { type: string }
-        app_version: { type: string }
+        device_name:
+          type: [string, "null"]
+          description: The app's `DeviceInput.name`, or the browser a web session was opened from ("Firefox on Linux"). Null only for a row written without either.
+        platform:
+          type: [string, "null"]
+          description: "`android`, `ios`, or `web` for a console session."
+        app_version: { type: [string, "null"] }
         created_at: { type: string, format: date-time }
         last_seen_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time, description: Absolute end of the session. }
@@ -2922,7 +2962,13 @@ components:
 
     ConnectorHealth:
       type: string
-      enum: [ok, unauthorized, unreachable, unexpected_response, unsupported_version, not_configured]
+      description: |
+        Coarse result of the last check, never a remote response body.
+        `not_configured`: nothing is stored for this connector. `unknown`: it is
+        configured but the answer did not test it — `GET /admin/connectors` never
+        calls a remote service, so the console asks with
+        `POST /admin/connectors/{kind}/test`.
+      enum: [ok, unauthorized, unreachable, unexpected_response, unsupported_version, not_configured, unknown]
 
     ConnectorStatus:
       type: object
@@ -2931,7 +2977,7 @@ components:
         health: { $ref: "#/components/schemas/ConnectorHealth" }
         server_name: { type: [string, "null"] }
         server_version: { type: [string, "null"] }
-        checked_at: { type: string, format: date-time }
+        checked_at: { type: [string, "null"], format: date-time, description: Null when this answer did not test the connector. }
 
     SecretState:
       type: object
@@ -2939,7 +2985,13 @@ components:
       required: [set]
       properties:
         set: { type: boolean }
-        last4: { type: [string, "null"] }
+        last4:
+          type: [string, "null"]
+          description: |
+            Last four characters of the stored secret, so an administrator can tell
+            two keys apart. Null when showing them would help nobody: a Plex
+            connector holds the owner's **account** token, of which there is only
+            ever one, so it is masked entirely.
         locked: { type: boolean, description: Set by an environment variable. }
 
     MediaServerConfigInput:
@@ -2959,7 +3011,9 @@ components:
         plex_pin_id:
           $ref: "#/components/schemas/Handle"
           description: Plex only. A completed Plex PIN of purpose `owner_token` from this session; the owner token is taken from it.
-        verify_tls: { type: boolean, default: true }
+        verify_tls:
+          type: boolean
+          description: Verify the media server's TLS certificate. Omitted means true, and must be omitted when `verify_tls` is locked by the environment.
       if:
         required: [server_type]
         properties:

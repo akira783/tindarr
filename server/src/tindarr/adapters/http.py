@@ -15,6 +15,7 @@ code rather than leaking an exception from the vendor's library.
 """
 
 import json
+import ssl
 from collections.abc import Mapping
 from types import TracebackType
 from typing import Any, Final, Self, cast
@@ -26,6 +27,9 @@ import httpx2
 
 #: Connect, read and write timeout of every outbound call, in seconds.
 DEFAULT_TIMEOUT_S: Final = 10.0
+#: Reasons a call produced no response at all. ``tls_error`` is separated out because
+#: ``public_url`` reports it to the administrator, who can act on it.
+NO_RESPONSE_REASONS: Final = ("timeout", "unreachable", "tls_error")
 #: Largest response body an adapter reads. Far above any real answer.
 MAX_RESPONSE_BYTES: Final = 4 * 1024 * 1024
 _XML_PARSE_ERROR: Final = "the response is not the XML this endpoint returns"
@@ -101,8 +105,22 @@ class HttpSession:
             )
         except httpx2.TimeoutException:
             raise RemoteCallError("timeout") from None
-        except httpx2.RequestError:
-            raise RemoteCallError("unreachable") from None
+        except httpx2.RequestError as failure:
+            raise RemoteCallError("tls_error" if is_tls_error(failure) else "unreachable") from None
+
+
+def is_tls_error(failure: BaseException) -> bool:
+    """Whether a transport failure was the TLS handshake (a certificate, usually).
+
+    ``httpx`` reports it as a ``ConnectError`` wrapping an ``ssl.SSLError``, so the
+    cause chain is walked rather than the message parsed.
+    """
+    seen: BaseException | None = failure
+    while seen is not None:
+        if isinstance(seen, ssl.SSLError):
+            return True
+        seen = seen.__cause__ or seen.__context__
+    return False
 
 
 def body_bytes(response: httpx2.Response) -> bytes:

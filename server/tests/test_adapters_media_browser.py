@@ -1,5 +1,6 @@
 """The Jellyfin and Emby adapters, against the fake servers of ``tests.support.upstream``."""
 
+import logging
 from typing import Any
 
 import httpx2
@@ -8,7 +9,12 @@ import pytest
 from tests.support.upstream import ADMIN_API_KEY, ADMIN_ID, SERVER_ID, FakeMediaBrowser
 from tindarr.adapters.emby import EmbyServer
 from tindarr.adapters.jellyfin import JellyfinServer
-from tindarr.adapters.mediabrowser import MediaBrowserServer, authorization_header, parse_version
+from tindarr.adapters.mediabrowser import (
+    ELEVATION_PROBE_PATH,
+    MediaBrowserServer,
+    authorization_header,
+    parse_version,
+)
 from tindarr.core.errors import ProblemError
 from tindarr.ports.media_server import MediaServerConnection
 
@@ -135,6 +141,31 @@ async def test_an_unreadable_public_info_is_an_unexpected_response(
 async def test_a_failing_users_call_is_an_unexpected_response(server: FakeMediaBrowser) -> None:
     server.fails["/Users"] = 500
     assert (await jellyfin(server).test()).health == "unexpected_response"
+
+
+async def test_a_user_token_is_not_an_admin_key(server: FakeMediaBrowser) -> None:
+    # The whole point of probing an elevation-gated endpoint: GET /Users answers 200
+    # to this token and filters the list, so it alone would let it through.
+    server.add_user("robin", "pw", user_id="b" * 32, admin=False)
+    token = server.issue_user_token("robin")
+    check = await jellyfin(server, secret=token).test()
+    assert check.health == "unauthorized"
+
+
+async def test_a_server_without_the_elevation_endpoint_is_still_accepted(
+    server: FakeMediaBrowser, caplog: pytest.LogCaptureFixture
+) -> None:
+    # An older or forked build: refusing would lock the operator out over a probe.
+    server.fails["/System/Configuration"] = 404
+    with caplog.at_level(logging.WARNING, logger="tindarr.adapters.mediabrowser"):
+        assert (await jellyfin(server).test()).health == "ok"
+    assert "administrator key" in caplog.text
+
+
+async def test_the_elevation_probe_carries_the_api_key(server: FakeMediaBrowser) -> None:
+    await jellyfin(server).test()
+    probe = next(r for r in server.requests if r.url.path == ELEVATION_PROBE_PATH)
+    assert 'Token="admin-api-key"' in probe.headers["authorization"]
 
 
 async def test_jellyfin_older_than_10_10_is_unsupported(server: FakeMediaBrowser) -> None:

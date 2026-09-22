@@ -7,7 +7,7 @@ wrong credential must not tell the caller which part was wrong.
 
 from http import HTTPStatus
 
-from tindarr.core.errors import ProblemError
+from tindarr.core.errors import ProblemError, RateLimitedError
 from tindarr.ports.problems import (
     account_disabled,
     invalid_credentials,
@@ -29,20 +29,27 @@ __all__ = [
     "admin_required",
     "connector_failed",
     "csrf_failed",
+    "forbidden",
     "host_not_allowed",
     "https_required",
     "invalid_credentials",
     "invalid_setup_code",
+    "last_admin",
     "media_server_admin_required",
     "media_server_changed",
     "media_server_unreachable",
     "media_server_unsupported",
     "not_a_server_user",
+    "not_found",
+    "pairing_expired",
+    "pairing_not_awaiting_approval",
+    "pairing_rejected",
     "password_sign_in_disabled",
     "pin_expired",
     "plex_owner_required",
     "plex_pin_pending",
     "plex_tv_unreachable",
+    "public_url_not_set",
     "quick_connect_expired",
     "quick_connect_unavailable",
     "reauth_required",
@@ -54,6 +61,7 @@ __all__ = [
     "setup_session_required",
     "sign_in_method_unavailable",
     "token_expired",
+    "too_many_pairings",
     "unauthorized",
 ]
 
@@ -94,6 +102,25 @@ def https_required() -> ProblemError:
         "https_required",
         "The console needs HTTPS, except on localhost or with TINDARR_ALLOW_HTTP_CONSOLE "
         "from a private address.",
+    )
+
+
+def forbidden(detail: str) -> ProblemError:
+    """403: allowed for some callers, not for this one (ADR 0010's role rules)."""
+    return ProblemError(HTTPStatus.FORBIDDEN, "forbidden", detail)
+
+
+def not_found(detail: str = "No such resource.") -> ProblemError:
+    """404: no such row, or one that belongs to somebody else."""
+    return ProblemError(HTTPStatus.NOT_FOUND, "not_found", detail)
+
+
+def last_admin() -> ProblemError:
+    """409: the last enabled administrator cannot be demoted or disabled (ADR 0010)."""
+    return ProblemError(
+        HTTPStatus.CONFLICT,
+        "last_admin",
+        "This is the last administrator; promote another one first.",
     )
 
 
@@ -176,6 +203,47 @@ def plex_pin_pending() -> ProblemError:
     """409: the owner-token PIN has not been approved on plex.tv yet."""
     return ProblemError(
         HTTPStatus.CONFLICT, "plex_pin_pending", "Approve the Plex PIN, then try again."
+    )
+
+
+def pairing_expired() -> ProblemError:
+    """410: anything wrong with a pairing code, so nothing can be told from the answer.
+
+    Unknown, expired, already used, already requested, cancelled, or presented with a
+    verifier that does not match the challenge: one answer for all of them.
+    """
+    return ProblemError(HTTPStatus.GONE, "pairing_expired", "This pairing code is no longer valid.")
+
+
+def pairing_rejected() -> ProblemError:
+    """403: the user refused this phone in the console."""
+    return ProblemError(
+        HTTPStatus.FORBIDDEN, "pairing_rejected", "This connection was refused in the console."
+    )
+
+
+def pairing_not_awaiting_approval() -> ProblemError:
+    """409: no phone is waiting on this pairing (or it already moved on)."""
+    return ProblemError(
+        HTTPStatus.CONFLICT,
+        "pairing_not_awaiting_approval",
+        "No phone is waiting for approval on this pairing.",
+    )
+
+
+def public_url_not_set() -> ProblemError:
+    """409: pairing needs an address to put in the QR code (docs/auth.md, section 10)."""
+    return ProblemError(
+        HTTPStatus.CONFLICT,
+        "public_url_not_set",
+        "An administrator of the media server must set the server's public address first.",
+    )
+
+
+def too_many_pairings(retry_after_ms: int) -> RateLimitedError:
+    """429: this user already has as many unfinished pairings as they may have."""
+    return RateLimitedError(
+        retry_after_ms, "Finish or cancel a pending connection before starting another."
     )
 
 

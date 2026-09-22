@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from tindarr import __version__
 from tindarr.adapters.factory import media_server_factory
 from tindarr.adapters.plextv import PlexTvClient
+from tindarr.adapters.publicurl import HttpPublicUrlProbe
 from tindarr.api import health, v1
 from tindarr.api.console import ConsoleMiddleware, WebConsole
 from tindarr.api.context import AllowedHostMiddleware, HostPolicy, RequestContextMiddleware
@@ -21,6 +22,8 @@ from tindarr.api.middleware import RequestIdMiddleware, SecurityHeadersMiddlewar
 from tindarr.auth.brokered import PlexPinFlow, QuickConnectFlow
 from tindarr.auth.handles import HandleRegistry
 from tindarr.auth.mediaserver import MediaServerConnector
+from tindarr.auth.pairing import PairingService
+from tindarr.auth.publicurl import PublicUrlVerifier
 from tindarr.auth.ratelimit import RateLimits
 from tindarr.auth.sessions import SessionService
 from tindarr.auth.setup import SetupService
@@ -37,9 +40,11 @@ from tindarr.jobs.media_server import (
     quick_connect_probe_job,
     user_sync_job,
 )
-from tindarr.jobs.purge import PeriodicJob, purge_job
+from tindarr.jobs.publicurl import public_url_check_job
+from tindarr.jobs.purge import BackgroundJob, purge_job
 from tindarr.ports.media_server import MediaServerFactory
 from tindarr.ports.plextv import PlexTv
+from tindarr.ports.publicurl import PublicUrlProbe
 from tindarr.storage.db import create_async_db_engine, database_path
 from tindarr.storage.migrate import upgrade_database
 from tindarr.storage.server_state import ServerStateRepository
@@ -61,6 +66,8 @@ class Wiring:
     media_servers: MediaServerFactory | None = None
     #: The plex.tv client every Plex PIN and the Plex adapter go through.
     plex_tv: PlexTv | None = None
+    #: How the server calls its own public address to check ``public_url``.
+    public_url_probe: PublicUrlProbe | None = None
 
 
 @dataclass(frozen=True)
@@ -69,7 +76,7 @@ class Runtime:
 
     engine: AsyncEngine
     services: AppServices
-    jobs: tuple[PeriodicJob, ...] = ()
+    jobs: tuple[BackgroundJob, ...] = ()
 
 
 async def start(
@@ -140,8 +147,14 @@ async def start(
     plex_pins = PlexPinFlow(sign_in, handles, plex_tv, server_state, state.install_id)
     quick_connect = QuickConnectFlow(sign_in, handles)
     hosts = hosts or HostPolicy(config.allowed_hosts)
-    public_url = (await settings.get("public_url")).value
-    hosts.set_public_url(public_url if isinstance(public_url, str) else None)
+    public_url_setting = await settings.get("public_url")
+    public_url = public_url_setting.value if isinstance(public_url_setting.value, str) else None
+    hosts.set_public_url(public_url)
+    public_url_verifier = PublicUrlVerifier(
+        keys.derive(KeyPurpose.PUBLIC_URL_PROOF),
+        wiring.public_url_probe or HttpPublicUrlProbe(),
+        wiring.clock,
+    )
 
     await setup.ensure_setup_code()
 
@@ -158,16 +171,21 @@ async def start(
         plex_pins=plex_pins,
         quick_connect=quick_connect,
         handles=handles,
+        pairings=PairingService(engine, wiring.clock, sessions),
         limits=limits,
         hosts=hosts,
         install_id=state.install_id,
+        public_url=public_url_verifier,
     )
-    jobs = (
+    jobs: tuple[BackgroundJob, ...] = (
         purge_job(sessions),
         user_sync_job(UserSync(engine, connector, wiring.clock, state.install_id)),
         handle_sweep_job(quick_connect),
         quick_connect_probe_job(quick_connect),
     )
+    if public_url is not None and public_url_setting.locked:
+        # Only the operator's own value: one set from the console was checked first.
+        jobs += (public_url_check_job(public_url_verifier, public_url),)
     return Runtime(engine=engine, services=services, jobs=jobs)
 
 
@@ -179,6 +197,9 @@ def create_app(config: ServerConfig, wiring: Wiring | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         runtime = await start(config, wiring, hosts)
         app.state.services = runtime.services
+        # Kept on the application so an operator (and the tests) can see what is
+        # scheduled; the lifespan is the only thing that starts and stops them.
+        app.state.jobs = runtime.jobs
         for job in runtime.jobs:
             job.start()
         logger.info("tindarr started", extra={"version": __version__})

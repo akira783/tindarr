@@ -124,6 +124,12 @@ class FakeMediaBrowser:
         self.quick_connect[secret] = QuickConnectRequest(code=code, secret=secret)
         return secret
 
+    def issue_user_token(self, name: str) -> str:
+        """Hand out an ordinary user's access token, as a sign-in would."""
+        token = f"user-token-{name}"
+        self._tokens[token] = name
+        return token
+
     def approve(self, secret: str, user_name: str) -> None:
         """Approve a Quick Connect request, as a signed-in Jellyfin client would."""
         request = self.quick_connect[secret]
@@ -162,6 +168,7 @@ class FakeMediaBrowser:
         return {
             ("GET", "/System/Info/Public"): self._public_info,
             ("GET", "/Users"): self._list_users,
+            ("GET", "/System/Configuration"): self._configuration,
             ("POST", "/Users/AuthenticateByName"): self._authenticate,
             ("POST", "/Sessions/Logout"): self._logout,
             ("GET", "/QuickConnect/Enabled"): self._quick_connect_enabled,
@@ -182,9 +189,24 @@ class FakeMediaBrowser:
         return _json(info)
 
     def _list_users(self, request: httpx2.Request) -> httpx2.Response:
-        if _token_of(request) != self.api_key:
+        """Answer as Jellyfin and Emby do: any authenticated caller, filtered list.
+
+        This is the behaviour docs/auth.md section 6 used to mistake for an
+        administrator check: a plain user token gets ``200`` and sees only itself.
+        """
+        token = _token_of(request)
+        if token == self.api_key:
+            return _json(list(self.users.values()))
+        name = self._tokens.get(token or "")
+        if name is None:
             return _json({"error": "unauthorized"}, 401)
-        return _json(list(self.users.values()))
+        return _json([self.users[name]])
+
+    def _configuration(self, request: httpx2.Request) -> httpx2.Response:
+        """``GET /System/Configuration``: administrators only, on both products."""
+        if _token_of(request) != self.api_key:
+            return _json({"error": "forbidden"}, 403)
+        return _json({"IsStartupWizardCompleted": True})
 
     def _authenticate(self, request: httpx2.Request) -> httpx2.Response:
         body = _body(request)

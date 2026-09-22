@@ -69,6 +69,7 @@ class MediaServer(Protocol):
     async def identify(self) -> ServerIdentity                       # server id, product, version
     async def test(self) -> ConnectorStatus                          # coarse result, never a body
     async def authenticate_password(self, username: str, password: str) -> MediaUser  # Jellyfin / Emby
+    async def quick_connect_enabled(self) -> bool                    # feeds auth_methods, cached
     async def quick_connect_start(self) -> QuickConnectStart         # Jellyfin: code + secret
     async def quick_connect_poll(self, secret: str) -> MediaUser | None  # None while not approved
     async def list_users(self) -> list[MediaUser]                    # hourly sync
@@ -78,12 +79,17 @@ class MediaServer(Protocol):
     def deep_link(self, item: LibraryItem) -> str | None              # "open in Jellyfin"
 
 class PlexTv(Protocol):            # step 2; used by auth and by the Plex adapter
-    async def create_pin(self, client_id: str) -> PlexPin
+    # ``device_name`` is what plex.tv shows on the approval page ("Tindarr (Chez nous)").
+    async def create_pin(self, client_id: str, device_name: str) -> PlexPin
     async def check_pin(self, pin: PlexPin) -> str | None            # the token once approved
     async def account(self, token: str) -> PlexAccount               # plex.tv account id, name
     async def resources(self, token: str) -> list[PlexResource]      # clientIdentifier, owned
     async def delete_device(self, token: str, client_id: str) -> bool  # unofficial, best effort
     async def shared_users(self, owner_token: str, machine_id: str) -> list[PlexAccount]
+
+class PublicUrlProbe(Protocol):    # step 2; the one call Tindarr makes to its own address
+    async def fetch_proof(self, public_url: str, nonce: str) -> ProofResponse  # no redirect, 5 s
+
 
 class RequestBackend(Protocol):
     async def find_user(self, media_user: MediaUser) -> BackendUser | None
@@ -240,7 +246,7 @@ the file wins when both are set.
 | `TINDARR_TRUSTED_PROXIES` | none | IPs/CIDRs whose `X-Forwarded-For`/`-Proto` are honoured ([rules](auth.md#client-ip-and-scheme)). |
 | `TINDARR_ALLOWED_HOSTS` | none | Extra host names accepted in `Host`, besides IP literals, `localhost` and the host of `public_url` ([rules](auth.md#allowed-hosts-dns-rebinding)). Step 2. |
 | `TINDARR_ALLOW_HTTP_CONSOLE` | `false` | Console over plain HTTP from private client IPs ([rules](auth.md#cookies)). Step 2. |
-| `TINDARR_WEB_DIR` | `/app/web` | Built console. When the directory does not exist (development without a build), the console is not served and `/` answers `404`. Step 2. |
+| `TINDARR_WEB_DIR` | `/app/web` | Built console. When it holds no `index.html` (development without a build), nothing is intercepted and every path outside the API answers the router's own `404`. Step 2. |
 
 Settings, with their environment variable and where they appear in the contract (the
 names differ for historical reasons; this table is the mapping):

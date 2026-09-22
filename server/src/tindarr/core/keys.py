@@ -38,6 +38,7 @@ class KeyPurpose(StrEnum):
 
     SETTINGS_ENCRYPTION = "tindarr/v1/settings-encryption"
     JWT_SIGNING = "tindarr/v1/jwt-signing"  # access tokens (HS256)
+    PUBLIC_URL_PROOF = "tindarr/v1/public-url-proof"  # docs/auth.md, section 10
     KEY_ID = "tindarr/v1/key-id"
 
 

@@ -128,6 +128,9 @@ SETTINGS: Final[Mapping[str, SettingDefinition]] = {
         SettingDefinition("media_server_kind", MediaServerKind | None),
         SettingDefinition("media_server_url", str | None),
         SettingDefinition("media_server_api_key", str | None, secret=True),
+        # What the media server calls itself, read at the last successful test. Shown
+        # by the wizard and by ``server/info``; never set by hand.
+        SettingDefinition("media_server_name", str | None),
         SettingDefinition("media_server_verify_tls", bool, default=True),
         SettingDefinition("public_url", PublicUrl | None),
         SettingDefinition("password_sign_in", PasswordSignIn, default="enabled"),

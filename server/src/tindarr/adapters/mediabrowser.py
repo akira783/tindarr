@@ -38,6 +38,7 @@ from typing import Any, Final
 import httpx2
 
 from tindarr.adapters.http import (
+    NO_RESPONSE_REASONS,
     HttpSession,
     RemoteCallError,
     as_flag,
@@ -65,6 +66,8 @@ DEVICE_NAME: Final = "Tindarr server"
 CLIENT_VERSION: Final = "1"
 #: Used when the connector has no install id yet (only reachable in tests).
 _FALLBACK_DEVICE_ID: Final = "tindarr"
+#: The one endpoint both products gate on the administrator role (see ``_check_elevation``).
+ELEVATION_PROBE_PATH: Final = "/System/Configuration"
 
 logger = logging.getLogger(__name__)
 
@@ -201,13 +204,42 @@ class MediaBrowserServer:
                 if response.status_code in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN):
                     return "unauthorized"
                 read_list(self._expect_ok(response))
+                return await self._check_elevation(session)
         except RemoteCallError as failure:
             return self._health_of(failure)
+
+    async def _check_elevation(self, session: HttpSession) -> ConnectorHealth:
+        """Check that the key is an administrator's, not just a valid user token.
+
+        ``GET /Users`` is **not** the proof it looks like: Jellyfin and Emby answer
+        ``200`` to any authenticated caller and silently filter the list to what that
+        caller may see. A user access token pasted into the API key field would pass,
+        and the hourly sync would then read that one-entry list as "everyone else was
+        removed" (docs/auth.md, section 6).
+
+        ``GET /System/Configuration`` is the elevation-gated endpoint both products
+        have: Jellyfin's ``ConfigurationController`` requires the ``RequiresElevation``
+        policy, Emby's requires the ``Admin`` role. A ``401`` or ``403`` there is
+        therefore a key that works but is not an administrator's.
+
+        A server that answers something else — an older or forked build without that
+        route — leaves the question open. Refusing would lock such an operator out of
+        their own setup over a probe, so the key is accepted and the doubt is logged;
+        the sync's own guard (a list with no users changes nothing) stays the backstop.
+        """
+        response = await session.request("GET", ELEVATION_PROBE_PATH)
+        if response.status_code in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN):
+            return "unauthorized"
+        if response.status_code != HTTPStatus.OK:
+            logger.warning(
+                "could not check that the media server API key is an administrator key",
+                extra=self._log() | {"status": response.status_code},
+            )
         return "ok"
 
     @staticmethod
     def _health_of(failure: RemoteCallError) -> ConnectorHealth:
-        if failure.reason in ("timeout", "unreachable"):
+        if failure.reason in NO_RESPONSE_REASONS:
             return "unreachable"
         return "unexpected_response"
 

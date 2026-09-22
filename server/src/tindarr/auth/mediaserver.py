@@ -102,6 +102,21 @@ class MediaServerInput:
 
 
 @dataclass(frozen=True, slots=True)
+class LockedMediaServerValues:
+    """What an environment variable forces, among the fields it is safe to show.
+
+    The wizard needs them: ``PUT /setup/media-server`` takes the whole connector, so a
+    step that cannot show a locked URL can only tell the administrator "it must match".
+    The API key is deliberately absent — a locked secret is shown as locked, never
+    returned.
+    """
+
+    server_type: MediaServerKind | None = None
+    url: str | None = None
+    verify_tls: bool | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SavedConnector:
     """What saving the connector produced: the test, the identity, and whether it moved."""
 
@@ -161,6 +176,16 @@ class MediaServerConnector:
             for field_name, setting in SETTING_FOR_FIELD.items()
             if self._settings.is_locked(setting)
         ]
+
+    def locked_values(self) -> LockedMediaServerValues:
+        """Return the values the environment forces, for the fields the console may show."""
+        url = self._settings.locked_value("media_server_url")
+        verify_tls = self._settings.locked_value("media_server_verify_tls")
+        return LockedMediaServerValues(
+            server_type=as_media_server_kind(self._settings.locked_value("media_server_kind")),
+            url=url if isinstance(url, str) else None,
+            verify_tls=verify_tls if isinstance(verify_tls, bool) else None,
+        )
 
     def locked(self) -> bool:
         """Whether the environment sets kind, URL and secret, so the wizard skips the step."""
@@ -322,6 +347,8 @@ class MediaServerConnector:
             "media_server_url": settings.url,
             "media_server_api_key": settings.secret,
             "media_server_verify_tls": settings.verify_tls,
+            # So the console can say "connected to Home Jellyfin" without testing again.
+            "media_server_name": identity.name,
         }
         unlocked = {
             name: value for name, value in values.items() if not self._settings.is_locked(name)

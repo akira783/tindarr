@@ -1,6 +1,7 @@
 """The setup endpoints over HTTP: cookies, CSRF, locks and problems (auth.md, §2 and §3)."""
 
 import io
+import json
 from pathlib import Path
 from typing import Any
 
@@ -210,6 +211,11 @@ def test_a_bearer_token_that_is_not_ascii_is_unauthorized(app: Any) -> None:
     assert_is_problem(response, 401, "unauthorized")
 
 
+def response_text(body: object) -> str:
+    """The JSON body as text, to assert a secret is nowhere in it."""
+    return json.dumps(body)
+
+
 # --- the wizard's state -------------------------------------------------------------
 
 
@@ -223,6 +229,7 @@ def test_the_state_needs_the_setup_session(app: Any) -> None:
         "media_server": None,
         "media_server_locked": False,
         "locked_fields": [],
+        "locked_values": {"server_type": None, "url": None, "verify_tls": None},
         "auth_methods": [],
     }
 
@@ -239,7 +246,8 @@ def test_the_state_shows_the_configured_media_server(app: Any) -> None:
         csrf = claim(client, app)
         configure_media_server(client, csrf)
         response = client.get(STATE_PATH)
-    assert response.json()["media_server"] == {"kind": "jellyfin"}
+    # The name comes from the connection test, so the wizard can say what it reached.
+    assert response.json()["media_server"] == {"kind": "jellyfin", "name": "Home Jellyfin"}
     assert response.json()["auth_methods"] == ["password"]
     assert_matches_contract(STATE_PATH, "get", response)
 
@@ -256,7 +264,14 @@ def test_the_state_lists_the_fields_the_environment_locks(
         body = client.get(STATE_PATH).json()
     assert body["media_server_locked"] is True
     assert sorted(body["locked_fields"]) == ["api_key", "server_type", "url"]
-    assert body["media_server"] == {"kind": "emby"}
+    assert body["media_server"] == {"kind": "emby", "name": None}
+    # The wizard can show and resend the locked values; the API key is never returned.
+    assert body["locked_values"] == {
+        "server_type": "emby",
+        "url": "http://emby.lan:8096",
+        "verify_tls": None,
+    }
+    assert "locked-key" not in response_text(body)
 
 
 # --- the media server step ----------------------------------------------------------
