@@ -1,0 +1,5 @@
+extends:
+  - recommended
+apis:
+  tindeerr@v1:
+    root: api/openapi.yaml

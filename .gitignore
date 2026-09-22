@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+# Node / Expo
+node_modules/
+.expo/
+dist/
+web-build/
+*.keystore
+*.jks
+google-services.json
+# Local data and secrets
+data/
+*.env
+.env*
+!.env.example
+secret.key
+setup-code
+*.sqlite*
+*.db
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

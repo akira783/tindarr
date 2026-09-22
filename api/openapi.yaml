@@ -1,0 +1,1455 @@
+openapi: 3.1.0
+info:
+  title: Tindeerr API
+  version: 1.0.0-draft
+  summary: Self-hosted server behind the Tindeerr mobile app.
+  description: |
+    Contract between the Tindeerr app and a Tindeerr server. Written before the
+    implementation; the server's generated spec is compared with this file in CI.
+
+    Rules (see docs/adr/0006):
+    - Additive changes only within v1. Clients ignore unknown fields and treat
+      unknown enum values as "other".
+    - Errors are `application/problem+json` with a stable `code`.
+    - Slow work answers `202` with `retry_after_ms`; the client polls.
+    - Every `/api/v1` endpoint requires a bearer access token unless marked
+      `security: []`.
+  license:
+    name: MIT
+    identifier: MIT
+
+servers:
+  - url: "{server}"
+    variables:
+      server:
+        default: https://tindeerr.example.com
+
+security:
+  - bearer: []
+
+tags:
+  - name: server
+    description: Health and public server information.
+  - name: setup
+    description: First-run claim and media server configuration.
+  - name: auth
+    description: Sign-in through the media server, token rotation, sign-out.
+  - name: me
+    description: The signed-in user's account and sessions.
+  - name: swipe
+    description: Deck, votes, requests, likes, taste profile and preferences.
+  - name: admin
+    description: Connectors, server settings, users and AI usage. Admins only.
+
+paths:
+  /healthz:
+    get:
+      tags: [server]
+      summary: Liveness probe
+      operationId: health
+      security: []
+      responses:
+        "200":
+          description: The process is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, const: ok }
+
+  /api/v1/server/info:
+    get:
+      tags: [server]
+      summary: Server identity, version and capabilities
+      description: Public. Returns no user data and no internal URL.
+      operationId: getServerInfo
+      security: []
+      responses:
+        "200":
+          description: Server information.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerInfo" }
+        "429": { $ref: "#/components/responses/Problem" }
+
+  # ---------------------------------------------------------------- setup
+  /api/v1/setup/claim:
+    post:
+      tags: [setup]
+      summary: Exchange the one-time setup code for a setup token
+      operationId: claimServer
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [setup_code]
+              properties:
+                setup_code: { type: string, minLength: 6, maxLength: 64 }
+      responses:
+        "200":
+          description: Setup token, valid 30 minutes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [setup_token, expires_at]
+                properties:
+                  setup_token: { type: string }
+                  expires_at: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Problem" }
+        "409":
+          description: Setup already completed (`code` = `setup_completed`).
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/setup/media-server:
+    put:
+      tags: [setup]
+      summary: Configure the media server during setup
+      description: |
+        The connection is tested before saving. For Plex, obtain the owner token
+        through the Plex PIN endpoints first. After this call, the first media
+        server administrator who signs in completes the setup.
+      operationId: setupMediaServer
+      security:
+        - setupToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MediaServerConfigInput" }
+      responses:
+        "200":
+          description: Saved.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConnectorStatus" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "502":
+          description: Connection test failed (`code` = `connector_unreachable` or `connector_unauthorized`).
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  # ---------------------------------------------------------------- auth
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      summary: Sign in with Jellyfin or Emby credentials
+      description: The password is checked with the media server and never stored.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password, device]
+              properties:
+                username: { type: string, minLength: 1, maxLength: 128 }
+                password: { type: string, maxLength: 512 }
+                device: { $ref: "#/components/schemas/DeviceInput" }
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResult" }
+        "401":
+          description: "`invalid_credentials` (same answer for unknown user and wrong password)."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "403":
+          description: "`account_disabled`, `not_a_server_user`, or `admin_required` while setup is pending."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+        "503":
+          description: "`setup_required` or `media_server_unreachable`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /api/v1/auth/plex/pins:
+    post:
+      tags: [auth]
+      summary: Start a Plex PIN sign-in
+      description: |
+        The server creates a plex.tv PIN. The app opens `auth_url` in the browser,
+        then calls `POST /auth/plex/login` until it succeeds or the PIN expires.
+        Also used during setup (with a setup token) to obtain the owner token.
+      operationId: createPlexPin
+      security: []
+      responses:
+        "201":
+          description: PIN created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pin_id, auth_url, expires_at]
+                properties:
+                  pin_id: { type: string }
+                  auth_url: { type: string, format: uri }
+                  expires_at: { type: string, format: date-time }
+        "429": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/auth/plex/login:
+    post:
+      tags: [auth]
+      summary: Complete a Plex PIN sign-in
+      operationId: loginWithPlex
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pin_id, device]
+              properties:
+                pin_id: { type: string }
+                device: { $ref: "#/components/schemas/DeviceInput" }
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResult" }
+        "202": { $ref: "#/components/responses/Pending" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "410":
+          description: "`pin_expired`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate the refresh token and get a new access token
+      description: |
+        Each refresh token works once. Presenting a used one revokes the whole
+        session (`code` = `refresh_token_reused`).
+      operationId: refreshTokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        "200":
+          description: New token pair.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenPair" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke the current session
+      operationId: logout
+      responses:
+        "204": { description: Signed out. }
+        "401": { $ref: "#/components/responses/Problem" }
+
+  # ---------------------------------------------------------------- me
+  /api/v1/me:
+    get:
+      tags: [me]
+      summary: The signed-in user
+      operationId: getMe
+      responses:
+        "200":
+          description: Current user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Problem" }
+    delete:
+      tags: [me]
+      summary: Delete all of the caller's Tindeerr data and sign out everywhere
+      description: Votes, profile, preferences and sessions. Nothing is deleted on the media server or the request backend.
+      operationId: deleteMyData
+      parameters:
+        - name: confirm
+          in: query
+          required: true
+          schema: { type: string, const: delete-my-data }
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/me/sessions:
+    get:
+      tags: [me]
+      summary: The caller's sessions (one per device)
+      operationId: listMySessions
+      responses:
+        "200":
+          description: Sessions, most recent first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions:
+                    type: array
+                    items: { $ref: "#/components/schemas/Session" }
+        "401": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/me/sessions/{session_id}:
+    delete:
+      tags: [me]
+      summary: Revoke one of the caller's sessions
+      operationId: revokeMySession
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "204": { description: Revoked. }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  # ---------------------------------------------------------------- swipe
+  /api/v1/swipe/status:
+    get:
+      tags: [swipe]
+      summary: What the deck needs to know before showing cards
+      operationId: getSwipeStatus
+      responses:
+        "200":
+          description: Status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SwipeStatus" }
+        "401": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/swipe/deck:
+    get:
+      tags: [swipe]
+      summary: Next cards, or pending while a batch is generated
+      description: |
+        Returns cards not yet voted on. When no batch is ready, starts one in the
+        background and answers `202`; poll after `retry_after_ms`. A finished but
+        empty batch answers `200` with no cards and does not start another one.
+      operationId: getDeck
+      parameters:
+        - name: media_type
+          in: query
+          schema: { $ref: "#/components/schemas/MediaFilter" }
+        - name: novelty
+          in: query
+          schema: { $ref: "#/components/schemas/Novelty" }
+        - name: mode
+          in: query
+          schema:
+            type: string
+            enum: [auto, normal, calibration]
+            default: auto
+        - name: mood
+          in: query
+          description: Optional free-text wish for this session.
+          schema: { type: string, maxLength: 200 }
+      responses:
+        "200":
+          description: Cards ready.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Deck" }
+        "202": { $ref: "#/components/responses/Pending" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "409":
+          description: "`llm_not_configured` or `tmdb_not_configured`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429":
+          description: "`rate_limited` or `daily_limit_reached`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "502":
+          description: "The last generation failed: `llm_auth_failed`, `llm_quota`, `llm_model_not_found`, `llm_unreachable`, `llm_invalid_output`. Reported once."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /api/v1/swipe/votes:
+    post:
+      tags: [swipe]
+      summary: Record votes (one or a queued batch)
+      description: |
+        Idempotent per `client_vote_id`: resending a vote already stored returns
+        `duplicate`. Voting again on the same title replaces the previous vote.
+        Items are processed independently.
+      operationId: submitVotes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [votes]
+              properties:
+                votes:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: { $ref: "#/components/schemas/VoteInput" }
+      responses:
+        "200":
+          description: Per-item results, in input order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: "#/components/schemas/VoteResult" }
+                  profile_refresh_started: { type: boolean }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+    delete:
+      tags: [swipe]
+      summary: Delete all of the caller's votes (the profile text is kept)
+      operationId: resetVotes
+      parameters:
+        - name: confirm
+          in: query
+          required: true
+          schema: { type: string, const: reset-votes }
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted: { type: integer, minimum: 0 }
+        "401": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/swipe/votes/{media_type}/{tmdb_id}:
+    delete:
+      tags: [swipe]
+      summary: Undo the vote on one title
+      description: The card goes back to the top of the deck if it has not expired.
+      operationId: undoVote
+      parameters:
+        - $ref: "#/components/parameters/MediaTypePath"
+        - $ref: "#/components/parameters/TmdbIdPath"
+      responses:
+        "204": { description: Vote removed. }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/swipe/requests:
+    post:
+      tags: [swipe]
+      summary: Request a title through the request backend
+      description: |
+        Filed on behalf of the caller's request-backend user, so their quotas and
+        approval rules apply. Only titles served to or voted on by the caller can
+        be requested (`code` = `title_not_offered` otherwise).
+      operationId: requestTitle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TitleRef" }
+      responses:
+        "200":
+          description: Request result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [request_status]
+                properties:
+                  request_status: { $ref: "#/components/schemas/RequestStatus" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403":
+          description: "`title_not_offered`, `no_backend_user`, `quota_exceeded`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "409":
+          description: "`requests_not_configured`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+        "502":
+          description: "`request_backend_error`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /api/v1/swipe/likes:
+    get:
+      tags: [swipe]
+      summary: The caller's liked titles
+      operationId: listLikes
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [all, to_request, requested]
+            default: all
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Likes, most recent first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [likes]
+                properties:
+                  likes:
+                    type: array
+                    items: { $ref: "#/components/schemas/Like" }
+                  next_cursor: { type: [string, "null"] }
+        "401": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/swipe/profile:
+    get:
+      tags: [swipe]
+      summary: The caller's taste profile
+      operationId: getProfile
+      responses:
+        "200":
+          description: Profile state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProfileState" }
+        "401": { $ref: "#/components/responses/Problem" }
+    put:
+      tags: [swipe]
+      summary: Replace the profile with text written by the user
+      description: Later AI rewrites keep this text and never contradict it.
+      operationId: saveProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, maxLength: 4000 }
+      responses:
+        "200":
+          description: Saved.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProfileState" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/swipe/profile/refresh:
+    post:
+      tags: [swipe]
+      summary: Rewrite the profile in the background
+      description: Poll `GET /swipe/profile` until `refreshing` is false.
+      operationId: refreshProfile
+      responses:
+        "202":
+          description: Started, or already running.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [started]
+                properties:
+                  started: { type: boolean }
+        "401": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/swipe/preferences:
+    get:
+      tags: [swipe]
+      summary: The caller's deck preferences
+      operationId: getPreferences
+      responses:
+        "200":
+          description: Preferences.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Preferences" }
+        "401": { $ref: "#/components/responses/Problem" }
+    patch:
+      tags: [swipe]
+      summary: Change some preferences
+      operationId: updatePreferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PreferencesPatch" }
+      responses:
+        "200":
+          description: Updated preferences.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Preferences" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/swipe/stats:
+    get:
+      tags: [swipe]
+      summary: Like and request rates, overall and per pick type
+      operationId: getStats
+      responses:
+        "200":
+          description: Statistics.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Stats" }
+        "401": { $ref: "#/components/responses/Problem" }
+
+  # ---------------------------------------------------------------- admin
+  /api/v1/admin/connectors:
+    get:
+      tags: [admin]
+      summary: All connectors, secrets masked
+      operationId: listConnectors
+      responses:
+        "200":
+          description: Connectors.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connectors]
+                properties:
+                  connectors:
+                    type: array
+                    items: { $ref: "#/components/schemas/Connector" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/admin/connectors/{kind}:
+    put:
+      tags: [admin]
+      summary: Configure a connector
+      description: |
+        Omitted secret fields keep their stored value. Fields locked by an
+        environment variable are rejected (`code` = `setting_locked`).
+      operationId: saveConnector
+      parameters:
+        - $ref: "#/components/parameters/ConnectorKind"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConnectorInput" }
+      responses:
+        "200":
+          description: Saved and tested.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Connector" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+    delete:
+      tags: [admin]
+      summary: Remove an optional connector (omdb, requests)
+      operationId: deleteConnector
+      parameters:
+        - $ref: "#/components/parameters/ConnectorKind"
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/admin/connectors/{kind}/test:
+    post:
+      tags: [admin]
+      summary: Test a connector without saving
+      description: Returns a coarse result only, never the remote response body.
+      operationId: testConnector
+      parameters:
+        - $ref: "#/components/parameters/ConnectorKind"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConnectorInput" }
+      responses:
+        "200":
+          description: Test result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConnectorStatus" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/admin/llm/models:
+    post:
+      tags: [admin]
+      summary: List the models a provider offers
+      description: Uses the given settings, or the stored ones for omitted fields.
+      operationId: listLlmModels
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LlmSettingsInput" }
+      responses:
+        "200":
+          description: Models.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [models]
+                properties:
+                  models:
+                    type: array
+                    items: { type: string }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "502": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/admin/settings:
+    get:
+      tags: [admin]
+      summary: General server settings
+      operationId: getSettings
+      responses:
+        "200":
+          description: Settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerSettings" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    patch:
+      tags: [admin]
+      summary: Change general server settings
+      operationId: updateSettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerSettingsPatch" }
+      responses:
+        "200":
+          description: Updated settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerSettings" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/admin/users:
+    get:
+      tags: [admin]
+      summary: Users who signed in at least once
+      operationId: listUsers
+      responses:
+        "200":
+          description: Users.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users]
+                properties:
+                  users:
+                    type: array
+                    items: { $ref: "#/components/schemas/AdminUser" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/admin/users/{user_id}:
+    patch:
+      tags: [admin]
+      summary: Enable, disable, promote or set limits for a user
+      description: Disabling a user revokes their sessions. An admin cannot demote or disable the last admin.
+      operationId: updateUser
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                enabled: { type: boolean }
+                role: { $ref: "#/components/schemas/Role" }
+                daily_generation_limit:
+                  type: [integer, "null"]
+                  minimum: 0
+                  description: Null uses the server default.
+      responses:
+        "200":
+          description: Updated user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminUser" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/admin/users/{user_id}/sessions:
+    delete:
+      tags: [admin]
+      summary: Sign a user out of every device
+      operationId: revokeUserSessions
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "204": { description: Revoked. }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /api/v1/admin/usage:
+    get:
+      tags: [admin]
+      summary: AI usage per user and per day
+      operationId: getUsage
+      parameters:
+        - name: days
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 90, default: 30 }
+      responses:
+        "200":
+          description: Usage.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [days]
+                properties:
+                  days:
+                    type: array
+                    items: { $ref: "#/components/schemas/UsageDay" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from login or refresh, valid 15 minutes.
+    setupToken:
+      type: http
+      scheme: bearer
+      description: Setup token from `POST /setup/claim`, valid 30 minutes, setup endpoints only.
+
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string, maxLength: 512 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    SessionId:
+      name: session_id
+      in: path
+      required: true
+      schema: { type: string }
+    UserId:
+      name: user_id
+      in: path
+      required: true
+      schema: { type: string }
+    MediaTypePath:
+      name: media_type
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/MediaType" }
+    TmdbIdPath:
+      name: tmdb_id
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+    ConnectorKind:
+      name: kind
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/ConnectorKind" }
+
+  responses:
+    Problem:
+      description: Error, see `code`.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Pending:
+      description: Work in progress; ask again after `retry_after_ms`.
+      headers:
+        Retry-After:
+          description: Seconds, rounded up.
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Pending" }
+
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 problem details with a stable machine-readable `code`.
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri-reference, default: about:blank }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          description: |
+            Stable identifier. Known values: validation_error, unauthorized,
+            token_expired, refresh_token_reused, forbidden, admin_required,
+            not_found, rate_limited, setup_required, setup_completed,
+            invalid_setup_code, invalid_credentials, account_disabled,
+            not_a_server_user, pin_expired, media_server_unreachable,
+            connector_unreachable, connector_unauthorized, setting_locked,
+            llm_not_configured, tmdb_not_configured, llm_auth_failed, llm_quota,
+            llm_model_not_found, llm_unreachable, llm_invalid_output,
+            daily_limit_reached, requests_not_configured, no_backend_user,
+            title_not_offered, quota_exceeded, request_backend_error,
+            last_admin, internal_error.
+          examples: [llm_quota]
+        retry_after_ms: { type: integer, minimum: 0 }
+        errors:
+          type: array
+          description: Field errors for `validation_error`.
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: { type: string }
+              message: { type: string }
+
+    Pending:
+      type: object
+      required: [pending, retry_after_ms]
+      properties:
+        pending: { type: boolean, const: true }
+        retry_after_ms: { type: integer, minimum: 250 }
+
+    ServerInfo:
+      type: object
+      required: [name, version, api_version, min_app_version, setup_required, auth_methods, capabilities, tmdb_image_base_url]
+      properties:
+        name: { type: string, description: Server display name chosen by the admin. }
+        version: { type: string, examples: ["1.0.0"] }
+        api_version: { type: integer, const: 1 }
+        min_app_version: { type: string, examples: ["1.0.0"] }
+        setup_required: { type: boolean }
+        media_server:
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [kind]
+              properties:
+                kind: { $ref: "#/components/schemas/MediaServerKind" }
+                name: { type: string }
+        auth_methods:
+          type: array
+          items:
+            type: string
+            enum: [password, plex_pin]
+        capabilities:
+          type: array
+          description: Feature flags the app enables on, e.g. `trailers`, `ratings`, `streaming_providers`, `requests`, `notifications`.
+          items: { type: string }
+        tmdb_image_base_url:
+          type: string
+          format: uri
+          description: Base the app prepends to `*_path` image fields (size segment appended by the app).
+          examples: ["https://image.tmdb.org/t/p/"]
+
+    DeviceInput:
+      type: object
+      required: [name, platform, app_version]
+      properties:
+        name: { type: string, maxLength: 80, examples: ["Pixel 9"] }
+        platform: { type: string, enum: [android, ios, web] }
+        app_version: { type: string, maxLength: 32 }
+
+    TokenPair:
+      type: object
+      required: [access_token, access_expires_at, refresh_token, refresh_expires_at]
+      properties:
+        access_token: { type: string }
+        access_expires_at: { type: string, format: date-time }
+        refresh_token: { type: string }
+        refresh_expires_at: { type: string, format: date-time }
+
+    AuthResult:
+      allOf:
+        - $ref: "#/components/schemas/TokenPair"
+        - type: object
+          required: [user, setup_completed_now]
+          properties:
+            user: { $ref: "#/components/schemas/User" }
+            setup_completed_now:
+              type: boolean
+              description: True when this sign-in completed the first-run setup.
+
+    Role:
+      type: string
+      enum: [admin, user]
+
+    User:
+      type: object
+      required: [id, name, role]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        avatar_url: { type: [string, "null"], format: uri }
+
+    AdminUser:
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          required: [enabled, created_at, votes, generations_today]
+          properties:
+            enabled: { type: boolean }
+            created_at: { type: string, format: date-time }
+            last_seen_at: { type: [string, "null"], format: date-time }
+            votes: { type: integer, minimum: 0 }
+            generations_today: { type: integer, minimum: 0 }
+            daily_generation_limit: { type: [integer, "null"], minimum: 0 }
+            request_backend_user_found: { type: boolean }
+
+    Session:
+      type: object
+      required: [id, device_name, platform, created_at, last_seen_at, current]
+      properties:
+        id: { type: string }
+        device_name: { type: string }
+        platform: { type: string }
+        app_version: { type: string }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        current: { type: boolean }
+
+    MediaType:
+      type: string
+      enum: [movie, tv]
+
+    MediaFilter:
+      type: string
+      enum: [both, movie, tv]
+      default: both
+
+    Novelty:
+      type: string
+      enum: [familiar, balanced, bold]
+      default: balanced
+
+    PickType:
+      type: string
+      enum: [safe, explore, calibration]
+
+    VoteValue:
+      type: string
+      enum: [like, dislike, seen_liked, seen_disliked]
+
+    RequestStatus:
+      type: string
+      enum: [queued, awaiting_approval, already_requested, already_available]
+
+    Availability:
+      type: string
+      enum: [none, requested, processing, partially_available, available]
+
+    TitleRef:
+      type: object
+      required: [media_type, tmdb_id]
+      properties:
+        media_type: { $ref: "#/components/schemas/MediaType" }
+        tmdb_id: { type: integer, minimum: 1 }
+
+    Ratings:
+      type: object
+      properties:
+        tmdb: { type: [number, "null"], minimum: 0, maximum: 10 }
+        imdb: { type: [number, "null"], minimum: 0, maximum: 10 }
+        rotten_tomatoes: { type: [integer, "null"], minimum: 0, maximum: 100 }
+        metacritic: { type: [integer, "null"], minimum: 0, maximum: 100 }
+
+    StreamingProvider:
+      type: object
+      required: [name, offer]
+      properties:
+        name: { type: string }
+        logo_path: { type: [string, "null"] }
+        offer: { type: string, enum: [subscription, free, ads, rent, buy] }
+
+    Trailer:
+      type: object
+      required: [site, key]
+      properties:
+        site: { type: string, const: youtube }
+        key: { type: string, pattern: "^[A-Za-z0-9_-]{6,20}$" }
+        language: { type: [string, "null"] }
+
+    Card:
+      type: object
+      required: [id, media_type, tmdb_id, title, pick_type, availability, expires_at]
+      properties:
+        id: { type: string, description: "Opaque card id, used to vote." }
+        media_type: { $ref: "#/components/schemas/MediaType" }
+        tmdb_id: { type: integer }
+        title: { type: string, description: In the user's language when available. }
+        original_title: { type: [string, "null"] }
+        year: { type: [integer, "null"] }
+        overview: { type: [string, "null"] }
+        genres: { type: array, items: { type: string } }
+        runtime_minutes: { type: [integer, "null"] }
+        seasons: { type: [integer, "null"] }
+        poster_path: { type: [string, "null"] }
+        backdrop_path: { type: [string, "null"] }
+        ratings: { $ref: "#/components/schemas/Ratings" }
+        providers:
+          type: array
+          description: Streaming offers in the server's region.
+          items: { $ref: "#/components/schemas/StreamingProvider" }
+        trailer:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/Trailer"
+        rationale: { type: [string, "null"], description: Why the AI picked it. Plain text. }
+        pick_type: { $ref: "#/components/schemas/PickType" }
+        availability: { $ref: "#/components/schemas/Availability" }
+        expires_at: { type: string, format: date-time }
+
+    Deck:
+      type: object
+      required: [mode, novelty, cards, calibration]
+      properties:
+        mode: { type: string, enum: [normal, calibration] }
+        novelty: { $ref: "#/components/schemas/Novelty" }
+        cards:
+          type: array
+          items: { $ref: "#/components/schemas/Card" }
+        calibration: { $ref: "#/components/schemas/Calibration" }
+        seen_ratio_warning:
+          type: boolean
+          description: Many recent cards were already seen; the app may suggest a bolder novelty.
+
+    Calibration:
+      type: object
+      required: [done, target, complete]
+      properties:
+        done: { type: integer, minimum: 0 }
+        target: { type: integer, minimum: 1 }
+        complete: { type: boolean }
+
+    SwipeStatus:
+      type: object
+      required: [llm_configured, tmdb_configured, requests_enabled, media_history, votes, calibration, profile_ready]
+      properties:
+        llm_configured: { type: boolean }
+        llm_provider: { type: [string, "null"], description: Display name shown before the first batch (privacy notice). }
+        tmdb_configured: { type: boolean }
+        requests_enabled: { type: boolean }
+        media_history: { type: boolean, description: Watch history could be read for this user. }
+        streaming_region: { type: [string, "null"], examples: [FR] }
+        ratings_enabled: { type: boolean }
+        votes: { type: integer, minimum: 0 }
+        calibration: { $ref: "#/components/schemas/Calibration" }
+        profile_ready: { type: boolean }
+        generations_left_today: { type: [integer, "null"] }
+
+    VoteInput:
+      type: object
+      required: [client_vote_id, card_id, vote]
+      properties:
+        client_vote_id: { type: string, format: uuid }
+        card_id: { type: string }
+        vote: { $ref: "#/components/schemas/VoteValue" }
+        voted_at:
+          type: string
+          format: date-time
+          description: When the user voted (offline queue); defaults to reception time.
+
+    VoteResult:
+      type: object
+      required: [client_vote_id, outcome]
+      properties:
+        client_vote_id: { type: string, format: uuid }
+        outcome: { type: string, enum: [stored, duplicate, rejected] }
+        code:
+          type: [string, "null"]
+          description: "For `rejected`: `card_not_found`, `card_expired`, `validation_error`."
+        request_status:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/RequestStatus"
+          description: Set when auto-request is on and the vote was a like.
+
+    Like:
+      type: object
+      required: [media_type, tmdb_id, title, vote, liked_at, requested, availability]
+      properties:
+        media_type: { $ref: "#/components/schemas/MediaType" }
+        tmdb_id: { type: integer }
+        title: { type: string }
+        year: { type: [integer, "null"] }
+        poster_path: { type: [string, "null"] }
+        vote: { type: string, enum: [like, seen_liked] }
+        pick_type: { $ref: "#/components/schemas/PickType" }
+        liked_at: { type: string, format: date-time }
+        requested: { type: boolean, description: Requested from Tindeerr or already requested elsewhere. }
+        availability: { $ref: "#/components/schemas/Availability" }
+        watch_url:
+          type: [string, "null"]
+          format: uri
+          description: Deep link into the media server once available.
+
+    ProfileState:
+      type: object
+      required: [profile, refreshing]
+      properties:
+        profile:
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [text, user_edited, updated_at, votes_since_update]
+              properties:
+                text: { type: string }
+                user_edited: { type: boolean }
+                updated_at: { type: string, format: date-time }
+                votes_since_update: { type: integer, minimum: 0 }
+        refreshing: { type: boolean }
+        refresh_error:
+          type: [string, "null"]
+          description: Problem `code` of the last failed rewrite.
+
+    Preferences:
+      type: object
+      required: [media_type, novelty, auto_request, language]
+      properties:
+        media_type: { $ref: "#/components/schemas/MediaFilter" }
+        novelty: { $ref: "#/components/schemas/Novelty" }
+        auto_request: { type: boolean, description: A like files the request without asking. }
+        language:
+          type: string
+          description: BCP 47 tag for card titles and overviews; defaults to the server language.
+          examples: [fr-FR]
+
+    PreferencesPatch:
+      type: object
+      minProperties: 1
+      properties:
+        media_type: { $ref: "#/components/schemas/MediaFilter" }
+        novelty: { $ref: "#/components/schemas/Novelty" }
+        auto_request: { type: boolean }
+        language: { type: string, maxLength: 16 }
+
+    Stats:
+      type: object
+      required: [total, likes, dislikes, requested, like_rate, request_rate, by_pick_type]
+      properties:
+        total: { type: integer }
+        likes: { type: integer }
+        dislikes: { type: integer }
+        requested: { type: integer }
+        like_rate: { type: number, minimum: 0, maximum: 1 }
+        request_rate: { type: number, minimum: 0, maximum: 1 }
+        by_pick_type:
+          type: object
+          additionalProperties:
+            type: object
+            required: [total, likes]
+            properties:
+              total: { type: integer }
+              likes: { type: integer }
+
+    MediaServerKind:
+      type: string
+      enum: [jellyfin, emby, plex]
+
+    ConnectorKind:
+      type: string
+      enum: [media_server, requests, tmdb, omdb, llm]
+
+    ConnectorHealth:
+      type: string
+      enum: [ok, unauthorized, unreachable, unexpected_response, not_configured]
+
+    ConnectorStatus:
+      type: object
+      required: [health]
+      properties:
+        health: { $ref: "#/components/schemas/ConnectorHealth" }
+        server_name: { type: [string, "null"] }
+        server_version: { type: [string, "null"] }
+        checked_at: { type: string, format: date-time }
+
+    SecretState:
+      type: object
+      description: A stored secret is never returned; only whether it is set.
+      required: [set]
+      properties:
+        set: { type: boolean }
+        last4: { type: [string, "null"] }
+        locked: { type: boolean, description: Set by an environment variable. }
+
+    MediaServerConfigInput:
+      type: object
+      required: [connector, server_type, url]
+      properties:
+        connector: { type: string, const: media_server }
+        server_type: { $ref: "#/components/schemas/MediaServerKind" }
+        url: { type: string, format: uri, maxLength: 512 }
+        api_key: { type: string, maxLength: 512, description: Jellyfin / Emby admin API key. }
+        plex_pin_id: { type: string, description: Plex only; the owner token is taken from this completed PIN. }
+        verify_tls: { type: boolean, default: true }
+
+    LlmProviderKind:
+      type: string
+      enum: [openai, anthropic, gemini, mistral, openai_compatible, ollama]
+
+    LlmSettingsInput:
+      type: object
+      required: [connector, provider]
+      properties:
+        connector: { type: string, const: llm }
+        provider: { $ref: "#/components/schemas/LlmProviderKind" }
+        api_key: { type: string, maxLength: 512 }
+        base_url: { type: string, format: uri, maxLength: 512, description: Required for openai_compatible and ollama. }
+        model: { type: string, maxLength: 128 }
+        reasoning_effort: { type: [string, "null"], enum: [low, medium, high, null] }
+
+    RequestsInput:
+      type: object
+      description: Seerr, Jellyseerr or Overseerr.
+      required: [connector, url]
+      properties:
+        connector: { type: string, const: requests }
+        url: { type: string, format: uri, maxLength: 512 }
+        api_key: { type: string, maxLength: 512 }
+        verify_tls: { type: boolean, default: true }
+
+    ApiKeyInput:
+      type: object
+      required: [connector]
+      properties:
+        connector: { type: string, enum: [tmdb, omdb] }
+        api_key: { type: string, maxLength: 512 }
+
+    ConnectorInput:
+      description: "`connector` must match the `kind` path parameter (`code` = `validation_error` otherwise)."
+      oneOf:
+        - $ref: "#/components/schemas/MediaServerConfigInput"
+        - $ref: "#/components/schemas/LlmSettingsInput"
+        - $ref: "#/components/schemas/RequestsInput"
+        - $ref: "#/components/schemas/ApiKeyInput"
+      discriminator:
+        propertyName: connector
+        mapping:
+          media_server: "#/components/schemas/MediaServerConfigInput"
+          llm: "#/components/schemas/LlmSettingsInput"
+          requests: "#/components/schemas/RequestsInput"
+          tmdb: "#/components/schemas/ApiKeyInput"
+          omdb: "#/components/schemas/ApiKeyInput"
+
+    Connector:
+      type: object
+      required: [kind, configured, status]
+      properties:
+        kind: { $ref: "#/components/schemas/ConnectorKind" }
+        configured: { type: boolean }
+        provider: { type: [string, "null"], description: "Media server kind or LLM provider kind." }
+        url: { type: [string, "null"] }
+        model: { type: [string, "null"] }
+        secret: { $ref: "#/components/schemas/SecretState" }
+        locked_fields: { type: array, items: { type: string } }
+        status: { $ref: "#/components/schemas/ConnectorStatus" }
+
+    ServerSettings:
+      type: object
+      required: [name, language, streaming_region, daily_generation_limit, warm_up_enabled, content_filters]
+      properties:
+        name: { type: string }
+        language: { type: string, examples: [fr-FR] }
+        streaming_region: { type: [string, "null"], pattern: "^[A-Z]{2}$" }
+        daily_generation_limit: { type: integer, minimum: 0, description: Default per-user cap; 0 disables generation. }
+        warm_up_enabled: { type: boolean }
+        content_filters: { $ref: "#/components/schemas/ContentFilters" }
+        locked_fields: { type: array, items: { type: string } }
+
+    ServerSettingsPatch:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string, maxLength: 60 }
+        language: { type: string, maxLength: 16 }
+        streaming_region: { type: [string, "null"], pattern: "^[A-Z]{2}$" }
+        daily_generation_limit: { type: integer, minimum: 0 }
+        warm_up_enabled: { type: boolean }
+        content_filters: { $ref: "#/components/schemas/ContentFilters" }
+
+    ContentFilters:
+      type: object
+      properties:
+        exclude_adult: { type: boolean, default: true }
+        min_year: { type: [integer, "null"] }
+        excluded_genres: { type: array, items: { type: string } }
+        excluded_original_languages: { type: array, items: { type: string } }
+
+    UsageDay:
+      type: object
+      required: [date, user_id, generations, input_tokens, output_tokens]
+      properties:
+        date: { type: string, format: date }
+        user_id: { type: string }
+        generations: { type: integer }
+        input_tokens: { type: integer }
+        output_tokens: { type: integer }
+        failures: { type: integer }
