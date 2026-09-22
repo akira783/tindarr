@@ -52,11 +52,6 @@ _MS: Final = 1000
 logger = logging.getLogger(__name__)
 
 
-def auth_url(pin: PlexPin) -> str:
-    """Return the plex.tv page where the user approves ``pin``."""
-    return AUTH_URL_TEMPLATE.format(client_id=pin.client_id, code=pin.code)
-
-
 class PlexTvClient:
     """The ``PlexTv`` port, talking to the real plex.tv (or a test transport)."""
 
@@ -77,6 +72,10 @@ class PlexTvClient:
         return HttpSession(self._base_url, headers=headers, transport=self._transport)
 
     # --- PINs -----------------------------------------------------------------------
+
+    def auth_url(self, pin: PlexPin) -> str:
+        """Return the plex.tv page where the user approves ``pin``."""
+        return AUTH_URL_TEMPLATE.format(client_id=pin.client_id, code=pin.code)
 
     async def create_pin(self, client_id: str, device_name: str) -> PlexPin:
         """Create a strong PIN; ``device_name`` is what the approval page shows."""

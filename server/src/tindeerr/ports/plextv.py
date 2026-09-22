@@ -77,12 +77,33 @@ def as_media_user(account: PlexAccount, *, admin: bool) -> MediaUser:
     return MediaUser(id=user_id, name=account.name, is_admin=admin, remote_access=True)
 
 
+def find_server(resources: list[PlexResource], machine_id: str) -> PlexResource | None:
+    """Return the resource that *is* the configured server, matched by identifier only.
+
+    A resource counts only when it provides ``server``: a player advertising the same
+    identifier must not decide who administers anything. Names and advertised URLs are
+    self-reported and decide nothing (docs/auth.md, section 4).
+    """
+    return next(
+        (
+            resource
+            for resource in resources
+            if resource.is_server and resource.client_identifier == machine_id
+        ),
+        None,
+    )
+
+
 class PlexTv(Protocol):
     """What auth and the Plex adapter ask plex.tv.
 
     Failures are ``ProblemError`` with the contract's codes: ``plex_tv_unreachable``
     when plex.tv does not answer usably, ``rate_limited`` when it asks to slow down.
     """
+
+    def auth_url(self, pin: PlexPin) -> str:
+        """Return the page where the user approves ``pin`` (an ``app.plex.tv`` link)."""
+        ...
 
     async def create_pin(self, client_id: str, device_name: str) -> PlexPin:
         """Create a strong PIN for ``client_id``; ``device_name`` names it on plex.tv."""

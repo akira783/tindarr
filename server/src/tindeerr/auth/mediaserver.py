@@ -16,12 +16,14 @@ PIN handles (also step 2b).
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Final, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tindeerr.auth import errors
 from tindeerr.auth.events import security_event
+from tindeerr.core.clock import Clock, SystemClock
 from tindeerr.ports.media_server import (
     ConnectionCheck,
     MediaServer,
@@ -32,6 +34,8 @@ from tindeerr.ports.media_server import (
     as_media_server_kind,
 )
 from tindeerr.storage import server_state as state_repository
+from tindeerr.storage import sessions as session_repository
+from tindeerr.storage import users as user_repository
 from tindeerr.storage.db import write_transaction
 from tindeerr.storage.settings import SettingLockedError, SettingsStore
 
@@ -44,6 +48,8 @@ SETTING_FOR_FIELD: Final[Mapping[str, str]] = {
 }
 #: The fields that must all be set in the environment for the wizard to skip the step.
 LOCKING_FIELDS: Final = ("server_type", "url", "api_key")
+#: How long the identity read before a sign-in stays good for (docs/auth.md, section 6).
+IDENTITY_CACHE: Final = timedelta(minutes=5)
 
 
 class OwnerTokenHandles(Protocol):
@@ -92,6 +98,16 @@ class MediaServerInput:
 
 
 @dataclass(frozen=True, slots=True)
+class SavedConnector:
+    """What saving the connector produced: the test, the identity, and whether it moved."""
+
+    check: ConnectionCheck
+    identity: ServerIdentity
+    #: True when the saved server is not the one Tindeerr was set up with.
+    identity_changed: bool
+
+
+@dataclass(frozen=True, slots=True)
 class MediaServerSettings:
     """The stored connector, as the adapters need it."""
 
@@ -110,11 +126,14 @@ class MediaServerConnector:
         settings: SettingsStore,
         factory: MediaServerFactory,
         owner_tokens: OwnerTokenHandles | None = None,
+        clock: Clock | None = None,
     ) -> None:
         self._engine = engine
         self._settings = settings
         self._factory = factory
         self._owner_tokens = owner_tokens or NoOwnerTokenHandles()
+        self._clock = clock or SystemClock()
+        self._identity_checked_at: float | None = None
 
     # --- reading --------------------------------------------------------------------
 
@@ -151,6 +170,35 @@ class MediaServerConnector:
             raise errors.setup_required()
         return self._adapter(settings, install_id)
 
+    async def usable(self, install_id: str) -> MediaServer:
+        """Return the adapter, having checked recently that it is still the same server.
+
+        The identity is re-read at most every five minutes before a sign-in uses the
+        media server (docs/auth.md, section 6). A server that no longer answers with the
+        stored identity — reinstalled, replaced, or something else at that address —
+        stops every sign-in with ``media_server_changed`` until an administrator or the
+        operator acts. Tindeerr never re-links on its own.
+        """
+        adapter = await self.connect(install_id)
+        now = self._clock.monotonic()
+        if (
+            self._identity_checked_at is not None
+            and now - self._identity_checked_at < IDENTITY_CACHE.total_seconds()
+        ):
+            return adapter
+        async with self._engine.connect() as connection:
+            stored = (await state_repository.read(connection)).media_server_identity
+        identity = await adapter.identify()
+        if stored is not None and identity.key != stored:
+            security_event("media_server_identity_mismatch", kind=identity.kind)
+            raise errors.media_server_changed()
+        self._identity_checked_at = now
+        return adapter
+
+    def forget_identity_check(self) -> None:
+        """Make the next ``usable`` re-read the identity (the connector just changed)."""
+        self._identity_checked_at = None
+
     def _adapter(self, settings: MediaServerSettings, install_id: str) -> MediaServer:
         return self._factory(
             MediaServerConnection(
@@ -164,10 +212,34 @@ class MediaServerConnector:
 
     # --- saving ---------------------------------------------------------------------
 
-    async def save(
+    async def check(
         self, request: MediaServerInput, *, session_id: str, install_id: str
-    ) -> tuple[ConnectionCheck, ServerIdentity]:
-        """Test the connection and store it; return the test result and the identity.
+    ) -> ConnectionCheck:
+        """Test a connection without saving anything (``…/media_server/test``).
+
+        The owner-token handle is only read, never consumed: the administrator may have
+        to correct the URL and try again with the same PIN.
+        """
+        self._check_locks(request)
+        secret = await self._secret_for(request, session_id=session_id)
+        settings = MediaServerSettings(request.kind, request.url, secret, request.verify_tls)
+        return await self._adapter(settings, install_id).test()
+
+    async def save(
+        self,
+        request: MediaServerInput,
+        *,
+        session_id: str,
+        install_id: str,
+        relink: bool = False,
+    ) -> SavedConnector:
+        """Test the connection and store it; report the test, the identity and a change.
+
+        ``relink`` turns on the identity-change rules of docs/auth.md, section 6: when
+        the saved server is not the one Tindeerr was set up with, the same transaction
+        revokes **every** session and unlinks every user, so nobody keeps access to
+        someone else's account on the new server. First-run setup passes ``False``: no
+        user exists yet, and revoking would only close the wizard's own session.
 
         Raises ``setting_locked`` for a field the environment sets to another value,
         ``secret_required`` when the stored secret cannot be reused, the Plex PIN
@@ -184,11 +256,12 @@ class MediaServerConnector:
             raise errors.media_server_unsupported(
                 "That address answers as another kind of media server."
             )
-        await self._store(settings, identity)
+        changed = await self._store(settings, identity, relink=relink)
         if request.plex_pin_id is not None:
             await self._owner_tokens.consume(request.plex_pin_id, session_id)
-        security_event("media_server_saved", kind=request.kind)
-        return check, identity
+        self.forget_identity_check()
+        security_event("media_server_saved", kind=request.kind, identity_changed=changed)
+        return SavedConnector(check, identity, changed)
 
     def _check_locks(self, request: MediaServerInput) -> None:
         values: Mapping[str, object] = {
@@ -222,7 +295,9 @@ class MediaServerConnector:
             raise errors.secret_required()
         return current.secret
 
-    async def _store(self, settings: MediaServerSettings, identity: ServerIdentity) -> None:
+    async def _store(
+        self, settings: MediaServerSettings, identity: ServerIdentity, *, relink: bool
+    ) -> bool:
         values: dict[str, object] = {
             "media_server_kind": settings.kind,
             "media_server_url": settings.url,
@@ -235,5 +310,13 @@ class MediaServerConnector:
         # The connector and the identity it was read from are written together: a
         # configured connector without its identity would stop every sign-in (section 6).
         async with write_transaction(self._engine) as connection:
+            stored = (await state_repository.read(connection)).media_server_identity
+            changed = stored is not None and stored != identity.key
             await self._settings.set_many(unlocked, connection)
             await state_repository.set_media_server_identity(connection, identity.key)
+            if changed and relink:
+                now = self._clock.now()
+                revoked = await session_repository.revoke_all(connection, "server_changed", now)
+                unlinked = await user_repository.unlink_all(connection)
+                security_event("media_server_replaced", sessions=revoked, users=unlinked)
+        return changed

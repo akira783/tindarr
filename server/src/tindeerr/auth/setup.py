@@ -11,6 +11,7 @@ without touching this file.
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -93,6 +94,19 @@ class SetupService:
         self._connector = connector
         self._settings = settings
         self._limits = limits
+        self._quick_connect_cache: Callable[[], bool | None] | None = None
+
+    def with_quick_connect(self, availability: "Callable[[], bool | None]") -> "SetupService":
+        """Let the wizard see whether Quick Connect is on, once the flows are wired.
+
+        The cache belongs to the sign-in service, which is built after this one because
+        it needs it; this closes the loop without either owning the other.
+        """
+        self._quick_connect_cache = availability
+        return self
+
+    def _quick_connect(self) -> bool | None:
+        return None if self._quick_connect_cache is None else self._quick_connect_cache()
 
     @property
     def code_path(self) -> Path:
@@ -207,9 +221,8 @@ class SetupService:
             None if configured is None else configured.kind,
             password_sign_in=as_password_sign_in(password_sign_in),
             client_is_private=client_is_private,
-            # Quick Connect needs the media server adapter (step 2b); pairing is not a
-            # way to complete setup.
-            quick_connect_enabled=None,
+            quick_connect_enabled=self._quick_connect(),
+            # Pairing needs a signed-in user, so it is not a way to complete setup.
             pairing_available=False,
         )
         return SetupState(
@@ -226,10 +239,10 @@ class SetupService:
         self._limits.connection_tests.hit(session.id)
         async with self._engine.connect() as connection:
             state = await state_repository.read(connection)
-        check, _identity = await self._connector.save(
+        saved = await self._connector.save(
             request, session_id=session.id, install_id=state.install_id
         )
-        return check
+        return saved.check
 
     async def complete_setup(
         self,

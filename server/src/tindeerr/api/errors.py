@@ -5,6 +5,8 @@ tracebacks are logged (redacted), never sent to the client.
 
 - ``ProblemError`` (``tindeerr.core.errors``), raised by any layer, keeps its status,
   code, detail, headers and extensions; for a 5xx its detail is logged, not sent.
+- ``PendingError`` is not a failure: a poll whose work is not finished becomes the
+  contract's ``202`` with ``retry_after_ms`` and a ``Retry-After`` header.
 - ``DecryptionError`` (a stored secret that no longer decrypts, usually after a change of
   secret key) is logged with its own message and answered as a generic 500.
 - Framework errors (404, 405, 429...) get a code from their status; invalid input is a
@@ -13,6 +15,7 @@ tracebacks are logged (redacted), never sent to the client.
 """
 
 import logging
+import math
 from collections.abc import Mapping, Sequence
 from http import HTTPStatus
 from typing import Final, TypedDict
@@ -25,7 +28,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tindeerr.core.crypto import DecryptionError
-from tindeerr.core.errors import ProblemError
+from tindeerr.core.errors import PendingError, ProblemError
 
 PROBLEM_MEDIA_TYPE: Final = "application/problem+json"
 
@@ -113,6 +116,15 @@ async def _problem_error_handler(_request: Request, exc: Exception) -> JSONRespo
     )
 
 
+async def _pending_handler(_request: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, PendingError)  # noqa: S101 - registered for this type
+    return JSONResponse(
+        {"pending": True, "retry_after_ms": exc.retry_after_ms},
+        status_code=HTTPStatus.ACCEPTED,
+        headers={"Retry-After": str(math.ceil(exc.retry_after_ms / 1000))},
+    )
+
+
 async def _decryption_error_handler(_request: Request, exc: Exception) -> JSONResponse:
     logger.error(
         "a stored secret cannot be decrypted; was the secret key changed?",
@@ -127,6 +139,7 @@ def install_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     app.add_exception_handler(RequestValidationError, _validation_exception_handler)
     app.add_exception_handler(ProblemError, _problem_error_handler)
+    app.add_exception_handler(PendingError, _pending_handler)
     app.add_exception_handler(DecryptionError, _decryption_error_handler)
 
 

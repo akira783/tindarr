@@ -14,6 +14,7 @@ from tindeerr.auth.methods import AuthMethod
 from tindeerr.auth.sessions import CookieGrant
 from tindeerr.auth.sessions import TokenPair as TokenPairValue
 from tindeerr.ports.media_server import ConnectionCheck, ConnectorHealth, MediaServerKind
+from tindeerr.storage.sessions import Device
 from tindeerr.storage.users import Role, User
 
 #: A Plex PIN or Quick Connect handle, and the pairing code: 128 bits, base64url.
@@ -165,3 +166,221 @@ class SetupClaimInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     setup_code: Annotated[str, Field(min_length=12, max_length=64)]
+
+
+#: PKCE (RFC 7636): the app keeps the verifier and sends its S256 challenge.
+CodeVerifier = Annotated[str, Field(pattern=r"^[A-Za-z0-9._~-]{43,128}$")]
+CodeChallenge = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{43}$")]
+Username = Annotated[str, Field(min_length=1, max_length=128)]
+Password = Annotated[str, Field(max_length=512)]
+
+
+class DeviceInput(BaseModel):
+    """Contract schema ``DeviceInput``: how the app names the phone it runs on."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: Annotated[str, Field(max_length=80)]
+    platform: Literal["android", "ios"]
+    app_version: Annotated[str, Field(max_length=32)]
+
+    def as_device(self) -> Device:
+        """Return the session row's device columns."""
+        return Device(name=self.name, platform=self.platform, app_version=self.app_version)
+
+
+class LoginInput(BaseModel):
+    """Body of ``POST /auth/login`` (the app signs in with a password)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    username: Username
+    password: Password
+    device: DeviceInput
+
+
+class WebLoginInput(BaseModel):
+    """Body of ``POST /auth/web/login``; the console's device comes from its User-Agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    username: Username
+    password: Password
+
+
+class HandlePurposeMixin(BaseModel):
+    """The rule both handle requests share: ``code_challenge`` belongs to ``sign_in``.
+
+    Without it a ``sign_in`` handle is the console's and is bound to its pre-auth
+    cookie; with it, it is the app's and is bound to the PKCE challenge. A ``reauth`` or
+    ``owner_token`` handle is bound to the session that created it, so a challenge would
+    be meaningless there and is refused rather than ignored.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    code_challenge: CodeChallenge | None = None
+
+    @model_validator(mode="after")
+    def _challenge_is_for_sign_in(self) -> "HandlePurposeMixin":
+        purpose = getattr(self, "purpose", None)
+        if self.code_challenge is not None and purpose != "sign_in":
+            msg = "code_challenge: only a sign_in handle takes a PKCE challenge"
+            raise ValueError(msg)
+        return self
+
+
+class PlexPinRequest(HandlePurposeMixin):
+    """Contract schema ``PlexPinRequest``."""
+
+    purpose: Literal["sign_in", "reauth", "owner_token"]
+
+
+class QuickConnectRequest(HandlePurposeMixin):
+    """Contract schema ``QuickConnectRequest`` (Quick Connect has no owner token)."""
+
+    purpose: Literal["sign_in", "reauth"]
+
+
+class PlexPinResponse(BaseModel):
+    """Answer of ``POST /auth/plex/pins``: a handle, never the plex.tv PIN id."""
+
+    pin_id: str
+    auth_url: str
+    expires_at: datetime
+
+
+class QuickConnectResponse(BaseModel):
+    """Answer of ``POST /auth/quick-connect``: a handle and the code to approve."""
+
+    handle: str
+    code: str
+    expires_at: datetime
+
+
+class PlexPinStatusInput(BaseModel):
+    """Body of ``POST /auth/plex/pins/status``; a POST so no handle reaches a URL."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pin_id: Handle
+
+
+class PlexPinStatusResponse(BaseModel):
+    """Answer of ``POST /auth/plex/pins/status``."""
+
+    status: Literal["pending", "authorized"]
+    expires_at: datetime
+    account_name: str | None = None
+
+
+class PlexLoginInput(BaseModel):
+    """Body of ``POST /auth/plex/login`` (the app proves the handle with PKCE)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pin_id: Handle
+    code_verifier: CodeVerifier
+    device: DeviceInput
+
+
+class WebPlexLoginInput(BaseModel):
+    """Body of ``POST /auth/web/plex/login``; the pre-auth cookie proves the handle."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pin_id: Handle
+
+
+class QuickConnectLoginInput(BaseModel):
+    """Body of ``POST /auth/quick-connect/login``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    handle: Handle
+    code_verifier: CodeVerifier
+    device: DeviceInput
+
+
+class WebQuickConnectLoginInput(BaseModel):
+    """Body of ``POST /auth/web/quick-connect/login``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    handle: Handle
+
+
+class ReauthInput(BaseModel):
+    """Contract schema ``ReauthInput``: exactly one proof, checked on the current server."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    password: Password | None = None
+    pin_id: Handle | None = None
+    handle: Handle | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_proof(self) -> "ReauthInput":
+        given = [value for value in (self.password, self.pin_id, self.handle) if value is not None]
+        if len(given) != 1:
+            msg = "send exactly one of password, pin_id or handle"
+            raise ValueError(msg)
+        return self
+
+
+class ReauthResponse(BaseModel):
+    """Answer of ``POST /auth/web/reauth``."""
+
+    reauth_expires_at: datetime
+
+
+class PendingResponse(BaseModel):
+    """Contract schema ``Pending``: the work is not finished, ask again."""
+
+    pending: Literal[True] = True
+    retry_after_ms: Annotated[int, Field(ge=250)]
+
+
+class AuthResultResponse(BaseModel):
+    """Contract schema ``AuthResult``: the app's token pair and who signed in."""
+
+    access_token: str
+    access_expires_at: datetime
+    refresh_token: str
+    refresh_expires_at: datetime
+    user: UserResponse
+    setup_completed_now: bool = False
+
+    @classmethod
+    def of(cls, tokens: TokenPairValue, user: User) -> "AuthResultResponse":
+        """Build the answer of an app sign-in."""
+        return cls(
+            access_token=tokens.access_token,
+            access_expires_at=tokens.access_expires_at,
+            refresh_token=tokens.refresh_token,
+            refresh_expires_at=tokens.refresh_expires_at,
+            user=UserResponse.of(user),
+        )
+
+
+class SecretStateResponse(BaseModel):
+    """Contract schema ``SecretState``: whether a secret is set, never its value."""
+
+    set: bool
+    last4: str | None = None
+    locked: bool = False
+
+
+class ConnectorResponse(BaseModel):
+    """Contract schema ``Connector``, as far as step 2 fills it in."""
+
+    kind: Literal["media_server", "requests", "tmdb", "omdb", "llm"]
+    configured: bool
+    provider: str | None = None
+    url: str | None = None
+    verify_tls: bool | None = None
+    model: str | None = None
+    tv_seasons: Literal["all", "first"] | None = None
+    secret: SecretStateResponse
+    locked_fields: list[str]
+    status: ConnectorStatusResponse

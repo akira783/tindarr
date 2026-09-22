@@ -45,7 +45,8 @@ async def get_server_info(services: Services, context: Context) -> ServerInfo:
 
     Public and rate-limited per client address. The answer depends on the caller's
     network (``password_sign_in = lan_only``), so it is never cached. It never calls the
-    media server: Quick Connect comes from a cache the adapters fill (step 2b).
+    media server: whether Quick Connect is on comes from the cache a background probe
+    keeps fresh, and the method is left out while that answer is unknown.
     """
     services.limits.public.hit(context.rate_limit_key)
     name = (await services.settings.get("server_name")).value
@@ -58,7 +59,7 @@ async def get_server_info(services: Services, context: Context) -> ServerInfo:
         kind,
         password_sign_in=password_sign_in,
         client_is_private=context.client_is_private,
-        quick_connect_enabled=None,
+        quick_connect_enabled=services.sign_in.quick_connect.cached,
         pairing_available=isinstance(public_url, str),
     )
     return ServerInfo(

@@ -7,10 +7,12 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tindeerr.api.context import HostPolicy
+from tindeerr.auth.brokered import PlexPinFlow, QuickConnectFlow
 from tindeerr.auth.mediaserver import MediaServerConnector
 from tindeerr.auth.ratelimit import RateLimits
 from tindeerr.auth.sessions import SessionService
 from tindeerr.auth.setup import SetupService
+from tindeerr.auth.signin import SignInService
 from tindeerr.core.clock import Clock
 from tindeerr.core.config import ServerConfig
 from tindeerr.storage.server_state import ServerStateRepository
@@ -30,6 +32,10 @@ class AppServices:
     sessions: SessionService
     setup: SetupService
     connector: MediaServerConnector
+    #: Every sign-in method, and the two brokered flows behind their handles.
+    sign_in: SignInService
+    plex_pins: PlexPinFlow
+    quick_connect: QuickConnectFlow
     limits: RateLimits
     hosts: HostPolicy
     #: Random per database: the JWT issuer and the media server ``DeviceId``.

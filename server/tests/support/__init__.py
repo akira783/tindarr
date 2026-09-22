@@ -5,7 +5,7 @@
 and 2c build their own fakes on these.
 """
 
-from tests.support.console import (
+from tests.support.console import (  # noqa: I001 - flows builds on console
     CONSOLE_HOST,
     CONSOLE_ORIGIN,
     CONSOLE_PEER,
@@ -22,17 +22,57 @@ from tests.support.console import (
     services_of,
     setup_code,
     sign_in_console,
+    wiring,
+)
+from tests.support.flows import (
+    ADMIN_NAME,
+    ADMIN_PASSWORD,
+    API,
+    APP_DEVICE,
+    USER_NAME,
+    USER_PASSWORD,
+    app_login,
+    seed_jellyfin,
+    set_up_server,
+    web_login,
 )
 from tests.support.fakes import FakeClock, FakeMediaServer, FakeMediaServers, media_user
+from tests.support.upstream import (
+    ADMIN_API_KEY,
+    ADMIN_ID,
+    MACHINE_ID,
+    MEDIA_SERVER_URL,
+    PLEX_SERVER_URL,
+    USER_ID,
+    FakeInternet,
+    FakeMediaBrowser,
+    FakePlexTv,
+)
 
 __all__ = [
+    "ADMIN_API_KEY",
+    "ADMIN_ID",
+    "ADMIN_NAME",
+    "ADMIN_PASSWORD",
+    "API",
+    "APP_DEVICE",
     "CONSOLE_HOST",
     "CONSOLE_ORIGIN",
     "CONSOLE_PEER",
+    "MACHINE_ID",
+    "MEDIA_SERVER_URL",
+    "PLEX_SERVER_URL",
     "TEST_HOST",
+    "USER_ID",
+    "USER_NAME",
+    "USER_PASSWORD",
     "FakeClock",
+    "FakeInternet",
+    "FakeMediaBrowser",
     "FakeMediaServer",
     "FakeMediaServers",
+    "FakePlexTv",
+    "app_login",
     "build_app",
     "claim",
     "complete_setup",
@@ -42,8 +82,12 @@ __all__ = [
     "cookies_of",
     "media_user",
     "run",
+    "seed_jellyfin",
     "server_config",
     "services_of",
+    "set_up_server",
     "setup_code",
     "sign_in_console",
+    "web_login",
+    "wiring",
 ]

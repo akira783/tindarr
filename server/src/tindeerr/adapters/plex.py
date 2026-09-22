@@ -44,7 +44,7 @@ from tindeerr.ports.media_server import (
     ServerIdentity,
     normalize_server_id,
 )
-from tindeerr.ports.plextv import PlexResource, PlexTv, as_media_user
+from tindeerr.ports.plextv import PlexResource, PlexTv, as_media_user, find_server
 
 #: Plex sends its version in ``MediaContainer.version``.
 _IDENTITY_PATH: Final = "/identity"
@@ -199,19 +199,3 @@ class PlexServer:
             extra={"media_server": "plex", "operation": operation, "reason": failure.reason},
         )
         return problems.media_server_unreachable()
-
-
-def find_server(resources: list[PlexResource], machine_id: str) -> PlexResource | None:
-    """Return the resource that *is* the configured server, matched by identifier only.
-
-    A resource counts only when it provides ``server``: a player advertising the same
-    identifier must not decide who administers anything.
-    """
-    return next(
-        (
-            resource
-            for resource in resources
-            if resource.is_server and resource.client_identifier == machine_id
-        ),
-        None,
-    )

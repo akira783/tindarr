@@ -7,11 +7,11 @@ import httpx2
 import pytest
 
 from tests.support.upstream import MACHINE_ID, FakePlexTv
-from tindeerr.adapters.plex import PlexServer, find_server
-from tindeerr.adapters.plextv import DEFAULT_BACKOFF_MS, PlexTvClient, auth_url
+from tindeerr.adapters.plex import PlexServer
+from tindeerr.adapters.plextv import DEFAULT_BACKOFF_MS, PlexTvClient
 from tindeerr.core.errors import ProblemError, RateLimitedError
 from tindeerr.ports.media_server import MediaServerConnection
-from tindeerr.ports.plextv import PlexAccount, PlexPin, PlexResource, as_media_user
+from tindeerr.ports.plextv import PlexAccount, PlexPin, PlexResource, as_media_user, find_server
 
 pytestmark = pytest.mark.anyio
 
@@ -81,7 +81,7 @@ async def test_a_pin_is_created_with_the_client_identifier_and_device_name(
 
 async def test_the_approval_link_names_tindeerr(plex_tv: FakePlexTv) -> None:
     pin = await client(plex_tv).create_pin("client-1", "Tindeerr (Home)")
-    link = auth_url(pin)
+    link = client(plex_tv).auth_url(pin)
     assert link.startswith("https://app.plex.tv/auth#?clientID=client-1&code=CODE1")
     assert link.endswith("context%5Bdevice%5D%5Bproduct%5D=Tindeerr")
 

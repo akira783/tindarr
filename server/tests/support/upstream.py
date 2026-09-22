@@ -400,3 +400,45 @@ class FakePlexTv:
             for account_id, name, machine_id in self.shared
         )
         return _xml(f"<MediaContainer>{rows}</MediaContainer>")
+
+
+#: Where the tests place each server. The names never resolve: every call is mocked.
+MEDIA_SERVER_URL: Final = "http://media.lan:8096"
+PLEX_SERVER_URL: Final = "http://plex.lan:32400"
+_PLEX_HOST: Final = "plex.lan"
+
+
+@dataclass
+class FakeInternet:
+    """Everything outside Tindeerr: the media server, the Plex server and plex.tv.
+
+    One transport routes by host, so the application can be wired with the **real**
+    adapters and still touch nothing: a test changes the fakes and watches what the
+    server does with them.
+    """
+
+    media: FakeMediaBrowser = field(default_factory=FakeMediaBrowser)
+    plex_tv: FakePlexTv = field(default_factory=FakePlexTv)
+    machine_id: str = MACHINE_ID
+    plex_offline: bool = False
+
+    def handle(self, request: httpx2.Request) -> httpx2.Response:
+        """Route a request to the server that answers at its host."""
+        if request.url.host == _PLEX_HOST:
+            return self._plex(request)
+        return self.media.handle(request)
+
+    def _plex(self, request: httpx2.Request) -> httpx2.Response:
+        if self.plex_offline:
+            raise httpx2.ConnectError("no route to host")
+        if request.url.path == "/identity":
+            return _json({"MediaContainer": {"machineIdentifier": self.machine_id}})
+        if request.url.path == "/":
+            known = request.headers.get("x-plex-token", "") in self.plex_tv.accounts
+            return _json({"MediaContainer": {}}, 200 if known else 401)
+        return _json({"error": "not found"}, 404)
+
+    @property
+    def transport(self) -> httpx2.MockTransport:
+        """The transport the media server adapters talk through."""
+        return httpx2.MockTransport(self.handle)

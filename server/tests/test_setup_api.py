@@ -19,13 +19,16 @@ from tests.support import (
     console_client,
     console_headers,
     cookies_of,
-    server_config,
     services_of,
     setup_code,
 )
 from tests.test_contract import assert_is_problem, assert_matches_contract
+from tindeerr.adapters.emby import EmbyServer
+from tindeerr.adapters.factory import media_server_factory
+from tindeerr.adapters.jellyfin import JellyfinServer
+from tindeerr.adapters.plex import PlexServer
 from tindeerr.api.cookies import PLAIN_NAMES, SECURE_NAMES
-from tindeerr.main.app import create_app
+from tindeerr.ports.media_server import MediaServerConnection, MediaServerKind
 
 CLAIM_PATH = "/api/v1/setup/claim"
 STATE_PATH = "/api/v1/setup/state"
@@ -392,13 +395,16 @@ def test_a_plex_pin_handle_is_unknown_until_step_two_b(app: Any) -> None:
     assert_is_problem(response, 410, "pin_expired")
 
 
-def test_without_an_adapter_the_wizard_gets_a_bad_gateway(data_dir: Path) -> None:
-    # The default wiring has no media server adapter yet (step 2b).
-    app = create_app(server_config(data_dir))
-    with console_client(app) as client:
-        csrf = claim(client, app)
-        response = configure_media_server(client, csrf)
-    assert_is_problem(response, 502, "connector_unexpected_response")
+@pytest.mark.parametrize(
+    ("kind", "adapter"),
+    [("jellyfin", JellyfinServer), ("emby", EmbyServer), ("plex", PlexServer)],
+)
+def test_the_default_wiring_builds_the_real_adapters(kind: MediaServerKind, adapter: type) -> None:
+    # No network here: only which class the composition root would talk through.
+    built = media_server_factory()(
+        MediaServerConnection(kind=kind, url="http://media.lan", secret="s")
+    )
+    assert isinstance(built, adapter)
 
 
 def test_connection_tests_are_limited_per_session(app: Any) -> None:

@@ -14,6 +14,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tests.support.fakes import FakeClock, FakeMediaServers, media_user
+from tests.support.upstream import FakeInternet
+from tindeerr.adapters.factory import media_server_factory
+from tindeerr.adapters.plextv import PlexTvClient
 from tindeerr.api.cookies import SECURE_NAMES
 from tindeerr.api.deps import AppServices
 from tindeerr.auth.setupcode import read_setup_code
@@ -44,14 +47,32 @@ def build_app(
     *,
     clock: FakeClock | None = None,
     media_servers: FakeMediaServers | None = None,
+    internet: FakeInternet | None = None,
     **overrides: Any,
 ) -> FastAPI:
-    """Build the application with the test's clock and fake media server."""
-    wiring = Wiring(
-        clock=clock or FakeClock(),
-        media_servers=media_servers or FakeMediaServers(),
-    )
-    return create_app(server_config(data_dir, **overrides), wiring)
+    """Build the application with the test's clock and its media servers.
+
+    ``internet`` wires the **real** adapters to fake Jellyfin, Emby, Plex and plex.tv
+    servers; ``media_servers`` replaces the adapters themselves, for the tests that only
+    care about what auth does with their answers.
+    """
+    return create_app(server_config(data_dir, **overrides), wiring(clock, media_servers, internet))
+
+
+def wiring(
+    clock: FakeClock | None = None,
+    media_servers: FakeMediaServers | None = None,
+    internet: FakeInternet | None = None,
+) -> Wiring:
+    """The ``Wiring`` for these fakes: real adapters over ``internet``, or stubs."""
+    if internet is not None:
+        plex_tv = PlexTvClient(internet.plex_tv.transport)
+        return Wiring(
+            clock=clock or FakeClock(),
+            media_servers=media_server_factory(plex_tv, internet.transport),
+            plex_tv=plex_tv,
+        )
+    return Wiring(clock=clock or FakeClock(), media_servers=media_servers or FakeMediaServers())
 
 
 @contextmanager
