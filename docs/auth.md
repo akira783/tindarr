@@ -699,7 +699,7 @@ by the server. Times are UTC (`UtcDateTime`).
 **Purge** (daily job): sessions revoked or expired for more than 30 days, with their
 refresh tokens; pairings older than 7 days.
 
-**Settings added in step 2c:** `media_server_name`, what the media server calls itself,
+**Also stored:** `media_server_name`, what the media server calls itself,
 written at each successful connection test so the wizard and `GET /server/info` can show
 "connected to Home Jellyfin" without testing again. It is never set by hand.
 

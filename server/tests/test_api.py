@@ -1,7 +1,7 @@
 import logging
 import sqlite3
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
@@ -406,14 +406,33 @@ def test_hsts_can_be_enabled(data_dir: Path) -> None:
     assert response.headers["strict-transport-security"] == "max-age=31536000"
 
 
+#: Path parameters that name a row rather than prove anything (docs/auth.md, §13).
+#: Knowing one grants nothing: the caller still has to be authorised for that row, and
+#: the answer is the same ``404`` when they are not.
+RESOURCE_ID_PARAMETERS = frozenset({"session_id", "user_id", "pairing_id"})
+
+
+def api_routes(router: object) -> Iterator[APIRoute]:
+    """Every ``APIRoute`` of an application, through the routers it includes.
+
+    FastAPI keeps an included router behind one object in ``routes`` rather than
+    flattening it, so walking only the top level would find nothing at all.
+    """
+    for route in getattr(router, "routes", []):
+        if isinstance(route, APIRoute):
+            yield route
+        else:
+            included = getattr(route, "original_router", None)
+            if included is not None:
+                yield from api_routes(included)
+
+
 def test_no_route_takes_a_credential_in_its_path(config: ServerConfig) -> None:
     # Paths are logged as is: a code or token must travel in a header or a body.
     app = create_app(config)
-    names = [
-        name
-        for route in app.routes
-        if isinstance(route, APIRoute)
-        for name in route.param_convertors
-    ]
-    assert not [name for name in names if is_sensitive_key(name)]
+    routes = list(api_routes(app.router))
+    assert len(routes) > 1, "the walk found no route, so the check would prove nothing"
+    names = {name for route in routes for name in route.param_convertors}
+    assert names, "no route has a path parameter, so the check would prove nothing"
+    assert not [name for name in names - RESOURCE_ID_PARAMETERS if is_sensitive_key(name)]
     assert is_sensitive_key("pairing_code")  # the check itself works
