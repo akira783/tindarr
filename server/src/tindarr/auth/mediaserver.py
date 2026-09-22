@@ -333,9 +333,20 @@ class MediaServerConnector:
         return await self._kept_secret(request)
 
     async def _kept_secret(self, request: MediaServerInput) -> str:
-        """Reuse the stored secret only when the kind and the URL are unchanged."""
+        """Reuse the stored secret only for the same server, reached the same way.
+
+        The kind and the URL are the obvious part. ``verify_tls`` belongs with them:
+        turning it off and omitting the key would otherwise replay the stored
+        administrator key over a connection nobody checks, which is all an on-path
+        attacker needs. A downgrade has to come with the key.
+        """
         current = await self.configured()
-        if current is None or current.kind != request.kind or current.url != request.url:
+        if (
+            current is None
+            or current.kind != request.kind
+            or current.url != request.url
+            or current.verify_tls != request.verify_tls
+        ):
             raise errors.secret_required()
         return current.secret
 

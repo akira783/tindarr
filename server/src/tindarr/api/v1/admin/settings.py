@@ -9,14 +9,20 @@ than a form is the two fields an ordinary administrator may not touch:
 - ``public_url`` is the address every paired phone will come back to, written into
   every QR code. It needs the same administrator **and** a re-authentication less than
   five minutes old, and the address has to prove it reaches this very server before it
-  is stored (``tindarr.auth.publicurl``).
+  is stored (``tindarr.auth.publicurl``). Its host must already be one this server
+  answers to — the console is normally open at it — because the proof is bound to the
+  host the check's request arrives at; an unknown host is refused before any call is
+  made, with the reason that says what to do about it.
 
 A patch is applied as a whole: a locked field, a refused role or an unverified address
 leaves everything unchanged, so the console never has to reason about half a save.
 """
 
+from http import HTTPStatus
+
 from fastapi import APIRouter
 
+from tindarr.api.context import host_of
 from tindarr.api.deps import Services
 from tindarr.api.security import AdminSession
 from tindarr.api.v1.models import (
@@ -29,6 +35,7 @@ from tindarr.api.v1.models import (
 )
 from tindarr.auth import access
 from tindarr.auth.events import security_event
+from tindarr.core.errors import ProblemError
 from tindarr.storage.settings import SettingLockedError
 
 router = APIRouter(tags=["admin", "console"])
@@ -64,10 +71,7 @@ async def update_settings(
         # Checked before it is stored, and before the host policy accepts it: an
         # address that does not answer as this server is never written down.
         services.limits.connection_tests.hit(session.session.id)
-        # The candidate host is accepted for the length of the check, so a server set
-        # up through its IP address can be given a domain name without a restart.
-        with services.hosts.checking(payload.public_url):
-            await services.public_url.verify(payload.public_url)
+        await _verify_public_url(services, payload.public_url)
     await services.settings.set_many(changes)
     if "public_url" in given:
         services.hosts.set_public_url(payload.public_url)
@@ -82,11 +86,32 @@ async def update_settings(
     return await read_server_settings(services.settings)
 
 
+async def _verify_public_url(services: Services, public_url: str) -> None:
+    """Make the address prove it reaches this server, refusing an unknown host first.
+
+    The proof is bound to the host the check's request arrives at, so a host this
+    server does not answer to cannot produce one. Saying that up front — rather than
+    calling the address and reporting "unexpected answer" — is the difference between
+    an administrator adding it to ``TINDARR_ALLOWED_HOSTS`` and giving up.
+    """
+    host = host_of(public_url)
+    if host is None or not services.hosts.allows_name(host):
+        security_event("public_url_unverified", reason="host_not_allowed")
+        raise ProblemError(
+            HTTPStatus.CONFLICT,
+            "public_url_unverified",
+            "This server does not answer to that host name; add it to "
+            "TINDARR_ALLOWED_HOSTS (or set TINDARR_PUBLIC_URL) and restart.",
+            extensions={"reason": "host_not_allowed"},
+        )
+    await services.public_url.verify(public_url, host)
+
+
 def _refuse_locked(services: Services, given: frozenset[str] | set[str]) -> None:
     """Refuse the whole patch when one of its fields is set by an environment variable.
 
-    Done before anything else happens, so a locked ``public_url`` never makes the
-    server call an address it is not going to store either way.
+    Done before the address is called, so a locked ``public_url`` never makes the
+    server contact an address it is not going to store either way.
     """
     for field in sorted(given):
         setting = SETTING_FOR_SETTINGS_FIELD[field]

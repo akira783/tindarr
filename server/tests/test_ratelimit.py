@@ -169,6 +169,13 @@ def test_the_limits_match_the_documented_table(clock: FakeClock) -> None:
         MINUTE,
     )
     assert (limits.pairing.limit.count, limits.pairing.limit.window) == (10, MINUTE)
+    # Completion is polled every two seconds for up to five minutes, so its budget has
+    # to hold that cadence for more than one phone (docs/auth.md, section 8).
+    assert (limits.pairing_complete.limit.count, limits.pairing_complete.limit.window) == (
+        90,
+        MINUTE,
+    )
+    assert limits.pairing_complete.limit.count > 2 * 60 // 2
     assert (limits.handle_creation.limit.count, limits.handle_creation.limit.window) == (
         10,
         timedelta(minutes=15),
@@ -180,7 +187,7 @@ def test_the_limits_match_the_documented_table(clock: FakeClock) -> None:
         timedelta(minutes=15),
     )
     assert limits.claim_failures_global.limit.count == 20
-    assert limits.pairing_global.limit.count == 60
+    assert limits.pairing_global.limit.count == 300
 
 
 def test_a_rate_limited_problem_is_a_problem_error(clock: FakeClock) -> None:

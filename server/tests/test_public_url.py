@@ -14,6 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import anyio
 import httpx2
 import pytest
 from fastapi import FastAPI
@@ -21,6 +22,8 @@ from starlette.types import ASGIApp
 
 from tests.support import (
     API,
+    CONSOLE_HOST,
+    TEST_HOST,
     FakeClock,
     FakeInternet,
     build_app,
@@ -31,9 +34,14 @@ from tests.support import (
     web_login,
 )
 from tests.test_contract import assert_is_problem, assert_matches_contract
-from tindarr.adapters.publicurl import HttpPublicUrlProbe
+from tindarr.adapters.publicurl import MAX_PROOF_BODY_BYTES, HttpPublicUrlProbe
 from tindarr.auth.access import REAUTH_WINDOW
-from tindarr.auth.publicurl import NONCE_LIFETIME, PublicUrlVerifier, proof_for
+from tindarr.auth.publicurl import (
+    MAX_PENDING_NONCES,
+    NONCE_LIFETIME,
+    PublicUrlVerifier,
+    proof_for,
+)
 from tindarr.core.errors import ProblemError
 from tindarr.jobs.publicurl import public_url_check_job
 from tindarr.ports.publicurl import PROOF_FIELD, VERIFY_NONCE_HEADER, ProofResponse
@@ -50,24 +58,38 @@ KEY = b"k" * 32
 class StubProbe:
     """A probe that answers what the test tells it to, and remembers what it was asked."""
 
-    def __init__(self, answer: ProofResponse | None = None, key: bytes | None = None) -> None:
+    def __init__(
+        self, answer: ProofResponse | None = None, key: bytes | None = None, host: str = PUBLIC_HOST
+    ) -> None:
         self.answer = answer
         self.key = key
+        self.host = host
         self.calls: list[tuple[str, str]] = []
 
     async def fetch_proof(self, public_url: str, nonce: str) -> ProofResponse:
         """Record the call and answer as configured."""
         self.calls.append((public_url, nonce))
         if self.key is not None:
-            return ProofResponse(proof=proof_for(self.key, nonce))
+            return ProofResponse(proof=proof_for(self.key, nonce, self.host))
         return self.answer or ProofResponse.failed("unreachable")
 
 
 @pytest.mark.anyio
 async def test_a_matching_proof_passes(clock: FakeClock) -> None:
     probe = StubProbe(key=KEY)
-    await PublicUrlVerifier(KEY, probe, clock).verify(PUBLIC_URL)
+    await PublicUrlVerifier(KEY, probe, clock).verify(PUBLIC_URL, PUBLIC_HOST)
     assert probe.calls[0][0] == PUBLIC_URL
+
+
+@pytest.mark.anyio
+async def test_a_proof_meant_for_another_host_does_not_pass(clock: FakeClock) -> None:
+    # A relay that asked this very server for the proof under its own name (or any
+    # other) gets one that is worthless for the candidate host.
+    probe = StubProbe(key=KEY, host="192.168.1.20")
+    verifier = PublicUrlVerifier(KEY, probe, clock)
+    with pytest.raises(ProblemError) as refused:
+        await verifier.verify(PUBLIC_URL, PUBLIC_HOST)
+    assert refused.value.extensions["reason"] == "proof_mismatch"
 
 
 @pytest.mark.anyio
@@ -75,7 +97,7 @@ async def test_another_servers_answer_is_refused(clock: FakeClock) -> None:
     # Another Tindarr has neither the nonce nor the key, so its proof cannot match.
     verifier = PublicUrlVerifier(KEY, StubProbe(key=b"someone else's key" + b"0" * 14), clock)
     with pytest.raises(ProblemError) as refused:
-        await verifier.verify(PUBLIC_URL)
+        await verifier.verify(PUBLIC_URL, PUBLIC_HOST)
     assert refused.value.code == "public_url_unverified"
     assert refused.value.extensions["reason"] == "proof_mismatch"
 
@@ -87,31 +109,34 @@ async def test_another_servers_answer_is_refused(clock: FakeClock) -> None:
 async def test_every_coarse_reason_reaches_the_caller(clock: FakeClock, failure: Any) -> None:
     verifier = PublicUrlVerifier(KEY, StubProbe(ProofResponse.failed(failure)), clock)
     with pytest.raises(ProblemError) as refused:
-        await verifier.verify(PUBLIC_URL)
+        await verifier.verify(PUBLIC_URL, PUBLIC_HOST)
     assert refused.value.extensions["reason"] == failure
 
 
 @pytest.mark.anyio
-async def test_a_nonce_is_answered_during_its_check_and_never_again(clock: FakeClock) -> None:
+async def test_a_nonce_is_answered_once_and_never_again(clock: FakeClock) -> None:
     seen: list[str] = []
 
     class Peeking:
         async def fetch_proof(self, public_url: str, nonce: str) -> ProofResponse:
             seen.append(nonce)
-            assert verifier.proof(nonce) == proof_for(KEY, nonce)
-            return ProofResponse(proof=proof_for(KEY, nonce))
+            answered = verifier.proof(nonce, PUBLIC_HOST)
+            assert answered == proof_for(KEY, nonce, PUBLIC_HOST)
+            # One nonce, one answer: a second caller holding it gets nothing.
+            assert verifier.proof(nonce, PUBLIC_HOST) is None
+            return ProofResponse(proof=answered)
 
     verifier = PublicUrlVerifier(KEY, Peeking(), clock)
-    await verifier.verify(PUBLIC_URL)
-    assert verifier.proof(seen[0]) is None
+    await verifier.verify(PUBLIC_URL, PUBLIC_HOST)
+    assert verifier.proof(seen[0], PUBLIC_HOST) is None
 
 
 @pytest.mark.anyio
 async def test_a_nonce_nobody_asked_for_is_never_answered(clock: FakeClock) -> None:
     verifier = PublicUrlVerifier(KEY, StubProbe(), clock)
-    assert verifier.proof("made-up") is None
-    assert verifier.proof(None) is None
-    assert verifier.proof("") is None
+    assert verifier.proof("made-up", PUBLIC_HOST) is None
+    assert verifier.proof(None, PUBLIC_HOST) is None
+    assert verifier.proof("", PUBLIC_HOST) is None
 
 
 @pytest.mark.anyio
@@ -122,11 +147,11 @@ async def test_a_nonce_is_forgotten_after_a_minute(clock: FakeClock) -> None:
         async def fetch_proof(self, public_url: str, nonce: str) -> ProofResponse:
             held.append(nonce)
             clock.advance(NONCE_LIFETIME * 2)
-            return ProofResponse(proof=proof_for(KEY, nonce))
+            return ProofResponse(proof=proof_for(KEY, nonce, PUBLIC_HOST))
 
     verifier = PublicUrlVerifier(KEY, Slow(), clock)
-    await verifier.verify(PUBLIC_URL)
-    assert verifier.proof(held[0]) is None
+    await verifier.verify(PUBLIC_URL, PUBLIC_HOST)
+    assert verifier.proof(held[0], PUBLIC_HOST) is None
 
 
 @pytest.mark.anyio
@@ -141,31 +166,30 @@ async def test_a_failing_probe_still_drops_its_nonce(clock: FakeClock) -> None:
 
     verifier = PublicUrlVerifier(KEY, Exploding(), clock)
     with pytest.raises(RuntimeError):
-        await verifier.verify(PUBLIC_URL)
-    assert verifier.proof(held[0]) is None
+        await verifier.verify(PUBLIC_URL, PUBLIC_HOST)
+    assert verifier.proof(held[0], PUBLIC_HOST) is None
 
 
 @pytest.mark.anyio
-async def test_the_pending_nonces_are_bounded(clock: FakeClock) -> None:
-    verifier = PublicUrlVerifier(KEY, StubProbe(), clock)
-    kept: list[str] = []
+async def test_too_many_checks_at_once_are_refused_rather_than_silently_dropped(
+    clock: FakeClock,
+) -> None:
+    # Evicting the oldest nonce would make a check that is still running fail with a
+    # mismatch it cannot explain; the newcomer is refused instead.
+    depth = 0
 
     class Nesting:
-        depth = 0
-
         async def fetch_proof(self, public_url: str, nonce: str) -> ProofResponse:
-            kept.append(nonce)
-            Nesting.depth += 1
-            if Nesting.depth < 70:
-                with pytest.raises(ProblemError):
-                    await verifier.verify(public_url)
-            return ProofResponse.failed("unreachable")
+            nonlocal depth
+            depth += 1
+            if depth <= MAX_PENDING_NONCES:
+                await verifier.verify(public_url, PUBLIC_HOST)
+            return ProofResponse(proof=proof_for(KEY, nonce, PUBLIC_HOST))
 
     verifier = PublicUrlVerifier(KEY, Nesting(), clock)
-    with pytest.raises(ProblemError):
-        await verifier.verify(PUBLIC_URL)
-    # The oldest nonces were dropped long before the innermost call returned.
-    assert all(verifier.proof(nonce) is None for nonce in kept)
+    with pytest.raises(ProblemError) as refused:
+        await verifier.verify(PUBLIC_URL, PUBLIC_HOST)
+    assert refused.value.code == "rate_limited"
 
 
 # --- the adapter ---------------------------------------------------------------------------
@@ -226,6 +250,29 @@ async def test_an_unreachable_address_is_unreachable() -> None:
 
 
 @pytest.mark.anyio
+async def test_a_body_that_does_not_stop_is_abandoned() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, content=b"x" * (MAX_PROOF_BODY_BYTES + 1))
+
+    assert await probe_over(handler).fetch_proof(PUBLIC_URL, "n1") == ProofResponse.failed(
+        "unreachable"
+    )
+
+
+@pytest.mark.anyio
+async def test_an_address_that_never_finishes_answering_gives_up() -> None:
+    # The read timeout is per chunk, so a trickle would otherwise hold the request —
+    # and the administrator — forever. The deadline covers the whole call.
+    async def handler(request: httpx2.Request) -> httpx2.Response:
+        await anyio.sleep(10)
+        return httpx2.Response(200, json={PROOF_FIELD: "too late"})
+
+    probe = HttpPublicUrlProbe(httpx2.MockTransport(handler), timeout_s=0.05)
+    with anyio.fail_after(5):
+        assert await probe.fetch_proof(PUBLIC_URL, "n1") == ProofResponse.failed("unreachable")
+
+
+@pytest.mark.anyio
 async def test_a_tls_failure_is_reported_as_one() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         msg = "handshake"
@@ -266,8 +313,16 @@ def internet() -> FakeInternet:
 def app_with(
     data_dir: Path, clock: FakeClock, internet: FakeInternet, probe: Any, **overrides: Any
 ) -> FastAPI:
-    """An application whose public-URL probe is the test's, answering to the public host."""
-    return build_app(data_dir, clock=clock, internet=internet, public_url_probe=probe, **overrides)
+    """An application whose public-URL probe is the test's.
+
+    ``PUBLIC_HOST`` is an allowed host, as it is in production: the console is opened
+    at the address it is about to declare, or the operator listed it. The proof is
+    bound to that host, so an address this server does not answer to cannot pass.
+    """
+    values: dict[str, Any] = {"allowed_hosts": f"{CONSOLE_HOST},{TEST_HOST},{PUBLIC_HOST}"}
+    return build_app(
+        data_dir, clock=clock, internet=internet, public_url_probe=probe, **(values | overrides)
+    )
 
 
 def test_a_verified_address_is_saved_and_becomes_an_allowed_host(
@@ -321,9 +376,24 @@ def test_an_unverified_address_is_not_saved(
         assert_is_problem(response, 409, "public_url_unverified")
         assert response.json()["reason"] == "redirected"
         assert client.get(SETTINGS).json()["public_url"] is None
-        # And the host was not added either.
-    with console_client(app, host=PUBLIC_HOST) as public:
-        assert_is_problem(public.get(f"{API}/server/info"), 400, "host_not_allowed")
+        assert "pairing" not in client.get(f"{API}/server/info").json()["auth_methods"]
+
+
+def test_a_host_this_server_does_not_answer_to_is_refused_before_any_call(
+    data_dir: Path, clock: FakeClock, internet: FakeInternet
+) -> None:
+    probe = StubProbe(key=KEY)
+    app = app_with(data_dir, clock, internet, probe)
+    with console_client(app) as client:
+        csrf = set_up_server(client, app)
+        response = client.patch(
+            SETTINGS, json={"public_url": "https://somewhere.else"}, headers=console_headers(csrf)
+        )
+        assert_is_problem(response, 409, "public_url_unverified")
+        assert response.json()["reason"] == "host_not_allowed"
+        assert "TINDARR_ALLOWED_HOSTS" in response.json()["detail"]
+    # Nothing was called: the proof is bound to that host, so no answer could pass.
+    assert probe.calls == []
 
 
 @pytest.mark.parametrize(
@@ -362,8 +432,7 @@ def test_clearing_the_address_needs_no_check(
         assert cleared.status_code == 200
         assert cleared.json()["public_url"] is None
         assert len(probe.calls) == 1
-    with console_client(app, host=PUBLIC_HOST) as public:
-        assert_is_problem(public.get(f"{API}/server/info"), 400, "host_not_allowed")
+        assert "pairing" not in client.get(f"{API}/server/info").json()["auth_methods"]
 
 
 def test_a_locked_address_cannot_be_changed_from_the_console(
@@ -391,7 +460,9 @@ async def test_a_failing_environment_address_is_only_logged(
     clock: FakeClock, caplog: pytest.LogCaptureFixture
 ) -> None:
     job = public_url_check_job(
-        PublicUrlVerifier(KEY, StubProbe(ProofResponse.failed("tls_error")), clock), PUBLIC_URL
+        PublicUrlVerifier(KEY, StubProbe(ProofResponse.failed("tls_error")), clock),
+        PUBLIC_URL,
+        PUBLIC_HOST,
     )
     with caplog.at_level(logging.WARNING, logger="tindarr.jobs.publicurl"):
         await job.run_once()
@@ -403,7 +474,9 @@ async def test_a_failing_environment_address_is_only_logged(
 async def test_a_working_environment_address_says_so(
     clock: FakeClock, caplog: pytest.LogCaptureFixture
 ) -> None:
-    job = public_url_check_job(PublicUrlVerifier(KEY, StubProbe(key=KEY), clock), PUBLIC_URL)
+    job = public_url_check_job(
+        PublicUrlVerifier(KEY, StubProbe(key=KEY), clock), PUBLIC_URL, PUBLIC_HOST
+    )
     with caplog.at_level(logging.INFO, logger="tindarr.jobs.publicurl"):
         await job.run_once()
     assert "answers as this server" in caplog.text

@@ -212,11 +212,15 @@ The exact rules and numbers for this section are in
   scheme, so a code opened from the system camera could be intercepted. The app's own
   scanner is the main path, and an intercepted code still needs the console approval.
 - **`public_url` abuse.** The QR link carries `public_url`. An admin session pointing it
-  at another host would send pairing codes there. `public_url` is verified before it is
-  saved (the server fetches its own `server/info` through that URL and checks an HMAC
-  of a fresh nonce), only a media server administrator with a fresh re-authentication
-  can change it, and the console writes the host next to every QR code. A reverse
-  proxy that forwards to this same instance still passes the check, by design.
+  at another host would send pairing codes there. Only a media server administrator with
+  a fresh re-authentication can change it, the console writes the host next to every QR
+  code, and the value is verified before it is saved: the server fetches its own
+  `server/info` through that URL and checks an HMAC of a fresh nonce **bound to the host
+  the request arrives at**. The host must therefore already be one this server answers
+  to, which is what stops an address that can merely *reach* the server from relaying a
+  proof for itself. A reverse proxy that forwards to this same instance still passes, by
+  design ([the reference](auth.md#10-public_url) has the full argument, including the
+  residual case of an IP-literal address).
 - **No short typed code.** Pairing is QR-only, so there is no low-entropy code on the
   public surface; users who cannot scan sign in normally.
 - **Quick Connect phishing.** An attacker could start a Quick Connect sign-in and

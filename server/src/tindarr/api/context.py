@@ -21,9 +21,7 @@ everything else reads. Nothing downstream looks at ``X-Forwarded-*``, ``Host`` o
 
 import logging
 import time
-from collections import Counter
-from collections.abc import Callable, Collection, Generator
-from contextlib import contextmanager
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from typing import Final
 
@@ -108,35 +106,16 @@ class HostPolicy:
     """The hosts this server answers to.
 
     ``TINDARR_ALLOWED_HOSTS`` is fixed at startup; the host of ``public_url`` is added
-    when it is read from the settings and whenever it changes.
-
-    One more host is accepted while its ``public_url`` is being checked
-    (``checking``). Without it, a server set up through its IP address could never be
-    given a domain name from the console: the check calls that very address, and the
-    ``Host`` it would send is exactly the one not allowed yet. The opening is small —
-    a few seconds, only ``GET /server/info``, and only a media server administrator
-    with a fresh re-authentication can ask for it (docs/auth.md, sections 1 and 10).
+    when it is read from the settings and whenever it changes. Nothing else is ever
+    accepted, not even for the length of a ``public_url`` check: the check's proof is
+    bound to the host the request arrives at (docs/auth.md, section 10), so a candidate
+    host this server does not answer to could not be verified anyway, and the console
+    says so instead of opening the door for a few seconds.
     """
 
     def __init__(self, allowed_hosts: Collection[str] = ()) -> None:
         self._names = {name.lower() for name in allowed_hosts}
         self._public_url_host: str | None = None
-        self._checking: Counter[str] = Counter()
-
-    @contextmanager
-    def checking(self, public_url: str | None) -> Generator[None]:
-        """Accept the host of ``public_url`` for as long as its check runs."""
-        host = host_of(public_url)
-        if host is None:
-            yield
-            return
-        self._checking[host] += 1
-        try:
-            yield
-        finally:
-            self._checking[host] -= 1
-            if self._checking[host] <= 0:
-                del self._checking[host]
 
     @property
     def public_url_host(self) -> str | None:
@@ -147,17 +126,17 @@ class HostPolicy:
         """Accept (or stop accepting) the host of ``public_url`` as a ``Host``."""
         self._public_url_host = host_of(public_url)
 
+    def allows_name(self, name: str) -> bool:
+        """Whether a bare host name is one of ours (used before a ``public_url`` check)."""
+        return self.allows(parse_host(name))
+
     def allows(self, host: HostPort | None) -> bool:
         """Whether a parsed ``Host`` header is one of ours (the port never matters)."""
         if host is None:
             return False
         if host.ip is not None or host.host == LOCALHOST:
             return True
-        return (
-            host.host in self._names
-            or host.host == self._public_url_host
-            or host.host in self._checking
-        )
+        return host.host in self._names or host.host == self._public_url_host
 
 
 def host_of(url: str | None) -> str | None:

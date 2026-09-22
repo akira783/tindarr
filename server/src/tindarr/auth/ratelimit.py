@@ -237,8 +237,14 @@ class RateLimits:
         self.password_failures = ExponentialPause(Limit("password_failures", 5, quarter), clock)
         self.password_per_username = SlidingWindow(Limit("password_username", 2, quarter), clock)
         self.handle_creation = SlidingWindow(Limit("handle_creation", 10, quarter), clock)
+        # Preview and pair are the two calls somebody could grind against a code, and
+        # an app makes each of them once. Completion is polled every two seconds for up
+        # to five minutes, so it gets a budget that fits that cadence for the two or
+        # three phones a household pairs at a time; a wrong verifier still gets it
+        # nowhere (docs/auth.md, sections 8 and 9).
         self.pairing = SlidingWindow(Limit("pairing", 10, minute), clock)
-        self.pairing_global = GlobalSlowdown(Limit("pairing_global", 60, minute), clock)
+        self.pairing_complete = SlidingWindow(Limit("pairing_complete", 90, minute), clock)
+        self.pairing_global = GlobalSlowdown(Limit("pairing_global", 300, minute), clock)
         self.refresh = SlidingWindow(Limit("token_refresh", 30, minute), clock)
         self.public = SlidingWindow(Limit("public", 60, minute), clock)
         self.connection_tests = SlidingWindow(Limit("connection_test", 10, minute), clock)

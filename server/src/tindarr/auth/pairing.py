@@ -277,21 +277,35 @@ class PairingService:
         revealed about the pairing's fate.
         """
         now = self._clock.now()
-        async with write_transaction(self._engine) as connection:
+        # The poll is a read until the user has approved: the phone asks every two
+        # seconds for up to five minutes, and taking SQLite's write lock for each of
+        # those would serialise them against every other writer for nothing.
+        async with self._engine.connect() as connection:
             pairing = await self._by_code(connection, code, now)
             self._require_verifier(pairing, code_verifier)
-            if pairing.status == "awaiting_approval":
-                raise PendingError(POLL_INTERVAL_MS)
-            if pairing.status == "revoked":
-                # It was rejected in the console; the app says so and stops polling.
-                raise errors.pairing_rejected()
-            if pairing.status != "approved":
-                raise errors.pairing_expired()
+            self._require_approved(pairing)
+        async with write_transaction(self._engine) as writable:
+            # Read again under the write lock: the compare-and-set inside decides.
+            pairing = await self._by_code(writable, code, now)
+            self._require_verifier(pairing, code_verifier)
+            self._require_approved(pairing)
             completed = await self._open_session(
-                connection, pairing, now, client_is_private=client_is_private
+                writable, pairing, now, client_is_private=client_is_private
             )
         security_event("pairing_completed", user_id=completed.user.id, pairing_id=pairing.id)
         return completed
+
+    @staticmethod
+    def _require_approved(pairing: Pairing) -> None:
+        """Let an approved pairing through; say why not, for the two states that have one."""
+        if pairing.status == "approved":
+            return
+        if pairing.status == "awaiting_approval":
+            raise PendingError(POLL_INTERVAL_MS)
+        if pairing.status == "revoked":
+            # It was rejected in the console; the app says so and stops polling.
+            raise errors.pairing_rejected()
+        raise errors.pairing_expired()
 
     # --- the pieces the three app calls share ---------------------------------------
 

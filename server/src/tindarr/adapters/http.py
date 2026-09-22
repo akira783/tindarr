@@ -108,6 +108,31 @@ class HttpSession:
         except httpx2.RequestError as failure:
             raise RemoteCallError("tls_error" if is_tls_error(failure) else "unreachable") from None
 
+    async def get_bounded(self, url: str, limit: int = MAX_RESPONSE_BYTES) -> httpx2.Response:
+        """GET a response, reading at most ``limit`` bytes of its body.
+
+        ``request`` lets the client read the whole body before anything can look at it,
+        which is fine for a media server the operator configured and wrong for an
+        address somebody typed: this streams instead and gives up as soon as the body
+        is longer than it could legitimately be.
+        """
+        try:
+            async with self._client.stream("GET", url) as response:
+                chunks: list[bytes] = []
+                size = 0
+                async for chunk in response.aiter_bytes():
+                    size += len(chunk)
+                    if size > limit:
+                        raise RemoteCallError("oversized_response")
+                    chunks.append(chunk)
+        except httpx2.TimeoutException:
+            raise RemoteCallError("timeout") from None
+        except httpx2.RequestError as failure:
+            raise RemoteCallError("tls_error" if is_tls_error(failure) else "unreachable") from None
+        return httpx2.Response(
+            response.status_code, headers=response.headers, content=b"".join(chunks)
+        )
+
 
 def is_tls_error(failure: BaseException) -> bool:
     """Whether a transport failure was the TLS handshake (a certificate, usually).

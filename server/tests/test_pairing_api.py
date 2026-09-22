@@ -400,7 +400,18 @@ def test_approving_an_expired_pairing_is_refused(console: Any, clock: FakeClock)
 # --- rate limits -------------------------------------------------------------------------
 
 
-def test_the_three_public_calls_share_one_per_ip_limit(console: Any) -> None:
+def test_polling_for_the_approval_fits_inside_its_own_limit(console: Any) -> None:
+    # The server answers `retry_after_ms = 2000`; a phone that obeys it for a whole
+    # minute must not then be refused for doing what it was told (docs/auth.md, §8).
+    client, csrf = console
+    created = create(client, csrf).json()
+    request_pairing(client, created["code"])
+    for _ in range(60 // 2):
+        assert complete(client, created["code"]).status_code == 202
+    assert complete(client, created["code"]).status_code == 202
+
+
+def test_the_preview_and_the_request_share_one_per_ip_limit(console: Any) -> None:
     client, _ = console
     limit = 10
     for _ in range(limit):

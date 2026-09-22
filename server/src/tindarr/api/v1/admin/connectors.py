@@ -51,6 +51,8 @@ type ConnectorKind = Literal["media_server", "requests", "tmdb", "omdb", "llm"]
 CONNECTOR_KINDS: tuple[ConnectorKind, ...] = get_args(ConnectorKind.__value__)
 #: How many characters of a stored secret the console may show, to tell keys apart.
 _LAST4 = 4
+#: And how long it has to be before showing them gives anything away.
+_MIN_SECRET_TO_HINT = 12
 
 
 def _not_implemented() -> ProblemError:
@@ -92,10 +94,15 @@ def secret_state(settings: MediaServerSettings, locked: list[str]) -> SecretStat
     ever one, so those four characters would identify nothing and only give away part
     of a credential that opens the whole Plex account. It is masked entirely.
     """
-    plex = settings.kind == "plex"
+    shown = (
+        settings.kind != "plex"
+        # Slicing a short string returns all of it: four characters of a four-character
+        # key are the key. Nothing is shown unless there is plenty left unshown.
+        and len(settings.secret) >= _MIN_SECRET_TO_HINT
+    )
     return SecretStateResponse(
         set=bool(settings.secret),
-        last4=None if plex else settings.secret[-_LAST4:] or None,
+        last4=settings.secret[-_LAST4:] if shown else None,
         locked="api_key" in locked,
     )
 

@@ -110,6 +110,7 @@
     "tls_error": "TLS error",
     "redirected": "redirected elsewhere",
     "unexpected_response": "unexpected answer",
-    "proof_mismatch": "another server answered"
+    "proof_mismatch": "another server answered",
+    "host_not_allowed": "this server does not answer to that host name; add it to TINDARR_ALLOWED_HOSTS and restart"
   }
 }

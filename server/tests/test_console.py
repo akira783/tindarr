@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.support import build_app, console_client
+from tests.support import CONSOLE_ORIGIN, build_app, console_client
 from tindarr.api.console import (
     ASSET_CACHE_CONTROL,
     CONSOLE_CSP,
@@ -136,6 +136,18 @@ def test_the_fallback_never_applies_under_api(console: TestClient) -> None:
     assert response.json()["code"] == "not_found"
 
 
+@pytest.mark.parametrize("path", ["//api/v1/server/info", "//api/v1/nope", "//healthz"])
+def test_a_doubled_slash_does_not_reach_the_console(console: TestClient, path: str) -> None:
+    # Nothing collapses these before the console sees them, and answering one with the
+    # page would put an API path behind the looser console policy. The URL is given in
+    # full, because a client would otherwise read `//…` as a scheme-relative address.
+    response = console.request("GET", CONSOLE_ORIGIN + path)
+    assert response.request.url.path == path
+    assert "text/html" not in response.headers["content-type"]
+    assert response.headers["content-security-policy"] == CONTENT_SECURITY_POLICY
+    assert "root" not in response.text
+
+
 def test_the_api_keeps_its_own_answers(console: TestClient) -> None:
     assert console.get("/healthz").json() == {"status": "ok"}
     assert console.get("/api/v1/server/info").status_code == 200
@@ -161,6 +173,12 @@ def test_unsafe_methods_never_reach_the_console(console: TestClient) -> None:
         ("/api", False),
         ("/api/v1/server/info", False),
         ("/api/docs", False),
+        # Nothing collapses these before the check, and answering them with the page
+        # would put an API path behind the looser console policy.
+        ("//api/v1/server/info", False),
+        ("/healthz/", False),
+        ("//healthz", False),
+        ("/./api/v1/server/info", False),
     ],
 )
 def test_reserved_paths_are_not_the_consoles(path: str, served: bool) -> None:

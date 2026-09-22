@@ -382,6 +382,12 @@ def test_a_promoted_admin_cannot_touch_a_media_server_admin(app: FastAPI) -> Non
                 f"{USERS}/{alex['id']}", json=patch, headers=console_headers(token)
             )
             assert_is_problem(refused, 403, "forbidden")
+        # Signing them out repeatedly would achieve the same thing, so it is refused too.
+        assert_is_problem(
+            promoted.delete(f"{USERS}/{alex['id']}/sessions", headers=console_headers(token)),
+            403,
+            "forbidden",
+        )
         # But they may still change something that takes nothing away.
         allowed = promoted.patch(
             f"{USERS}/{alex['id']}",

@@ -322,8 +322,9 @@ export interface paths {
          *     `awaiting_approval`; the code then stops working for preview and pair. The
          *     app shows `confirmation_code`, which the console shows too, and polls
          *     `POST /auth/pair/complete` until the user approves or rejects the request in
-         *     the console (docs/auth.md, section 9). Preview, pair and complete share a
-         *     limit of 10 calls per minute per client IP, with a global slowdown.
+         *     the console (docs/auth.md, section 9). Preview and pair share a limit of 10
+         *     calls per minute per client IP; completion has its own, sized for the polling
+         *     the server asks for. A global threshold only slows every pairing call down.
          */
         post: operations["pairDevice"];
         delete?: never;
@@ -343,8 +344,9 @@ export interface paths {
         put?: never;
         /**
          * Get the tokens once the console approved the pairing
-         * @description Polled by the app every 2 seconds after `POST /auth/pair`. Once the pairing
-         *     is approved, opens a `mobile` session for the user who created it and marks
+         * @description Polled by the app every 2 seconds after `POST /auth/pair`, within its own
+         *     limit of 90 calls per minute per client IP. Once the pairing is approved,
+         *     opens a `mobile` session for the user who created it and marks
          *     the pairing `completed`. Applies the checks of any authenticated request
          *     (user enabled, remote-access rule). Does not contact the media server, so
          *     the administrator flag is not re-synced (docs/adr/0010).
@@ -1023,9 +1025,12 @@ export interface paths {
          *       5 minutes old (`reauth_required`). A new value is verified before it is
          *       saved (docs/auth.md, section 10): the server requests
          *       `GET <public_url>/api/v1/server/info` with a fresh nonce, without
-         *       following redirects, with TLS verification and a 5 s timeout, and expects
-         *       `public_url_proof`. Failure: `409` `public_url_unverified` with a coarse
-         *       `reason`. Limited to 10 checks per minute per session.
+         *       following redirects, with TLS verification and a 5 s deadline, and expects
+         *       the `public_url_proof` **for that host**. Its host must therefore already
+         *       be one this server answers to (`TINDARR_ALLOWED_HOSTS`, or the host the
+         *       console is open at), which is checked before anything is called. Failure:
+         *       `409` `public_url_unverified` with a coarse `reason`. Limited to 10 checks
+         *       per minute per session.
          *     - `password_sign_in`: a media server administrator
          *       (`media_server_admin_required`).
          *     The patch is applied as a whole: when one field is refused, nothing is
@@ -1071,8 +1076,10 @@ export interface paths {
          *     clears `media_server_admin` until the user's next sign-in, where the media
          *     server's flag is read again (a media server administrator is then admin
          *     again). Only a media server administrator can demote or disable another
-         *     one (`forbidden`). The last enabled admin cannot be demoted or disabled
-         *     (`last_admin`). Disabling sets `disabled_reason` = `admin`.
+         *     one (`forbidden`; the same rule guards
+         *     `DELETE /admin/users/{user_id}/sessions`). The last enabled admin cannot be
+         *     demoted or disabled (`last_admin`). Disabling sets `disabled_reason` =
+         *     `admin`.
          */
         patch: operations["updateUser"];
         trace?: never;
@@ -1087,7 +1094,12 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Sign a user out of every device */
+        /**
+         * Sign a user out of every device
+         * @description Only a media server administrator may sign another one out (`forbidden`):
+         *     doing it repeatedly would achieve what demoting them would, which
+         *     `PATCH /admin/users/{user_id}` already refuses (docs/adr/0010).
+         */
         delete: operations["revokeUserSessions"];
         options?: never;
         head?: never;
@@ -1158,8 +1170,9 @@ export interface components {
             retry_after_ms?: number;
             /**
              * @description Coarse cause for `public_url_unverified`, never a response body:
-             *     `unreachable`, `tls_error`, `redirected`, `unexpected_response` or
-             *     `proof_mismatch`.
+             *     `host_not_allowed` (this server does not answer to that host, so no proof
+             *     for it could exist), `unreachable`, `tls_error`, `redirected`,
+             *     `unexpected_response` or `proof_mismatch`.
              * @example proof_mismatch
              */
             reason?: string;
@@ -1210,9 +1223,12 @@ export interface components {
              */
             tmdb_image_base_url: string;
             /**
-             * @description base64url(HMAC-SHA256(key, nonce)) with the `tindarr/v1/public-url-proof`
-             *     sub-key. Present only when the request carried a
-             *     `Tindarr-Verify-Nonce` this server is currently waiting for.
+             * @description base64url(HMAC-SHA256(key, nonce + "|" + host)) with the
+             *     `tindarr/v1/public-url-proof` sub-key, where `host` is the `Host` this
+             *     request arrived at. Present only when the request carried a
+             *     `Tindarr-Verify-Nonce` this server is currently waiting for, and only
+             *     once per nonce: binding it to the host is what stops an address that can
+             *     merely *reach* this server from relaying a proof for itself.
              */
             public_url_proof?: string;
         };
@@ -4157,7 +4173,15 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["AdminForbidden"];
+            /** @description `forbidden` (only a media server administrator can sign another one out), `admin_required`, `csrf_failed` or `remote_access_denied`. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             404: components["responses"]["NotFound"];
         };
     };

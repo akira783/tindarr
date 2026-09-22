@@ -7,11 +7,15 @@ narrowest client in the code base (the security model, section 7, SSRF):
   hop: following one would let a typo point the check at a server that happens to
   answer, and hand it the nonce;
 - **TLS is always verified**, whatever the media server connector's own setting;
-- **five seconds**, once. A hanging address must not hold an administrator's request;
-- the body is bounded like every other adapter's, and only ``public_url_proof`` is
-  read from it. No response body, status or address ever leaves this module.
+- **five seconds for the whole call**, not per chunk. An address that trickles one byte
+  every four seconds would otherwise hold an administrator's request open forever, and
+  the host it was typed as with it;
+- the body is read as a stream and abandoned past 64 KiB — far more than the answer
+  needs — so the same address cannot make the process grow. Only ``public_url_proof``
+  is read from it, and no response body, status or address ever leaves this module.
 """
 
+import asyncio
 import logging
 from http import HTTPStatus
 from typing import Final
@@ -24,7 +28,10 @@ from tindarr.ports.publicurl import PROOF_FIELD, VERIFY_NONCE_HEADER, ProofRespo
 #: The path the proof is read from, on the public address.
 SERVER_INFO_PATH: Final = "/api/v1/server/info"
 #: Shorter than every other outbound call: an administrator is waiting for the answer.
+#: It is a deadline for the whole call, not a per-chunk read timeout.
 TIMEOUT_S: Final = 5.0
+#: ``ServerInfo`` is a few hundred bytes; anything past this is not an answer.
+MAX_PROOF_BODY_BYTES: Final = 64 * 1024
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +39,11 @@ logger = logging.getLogger(__name__)
 class HttpPublicUrlProbe:
     """The ``PublicUrlProbe`` port, over HTTP."""
 
-    def __init__(self, transport: httpx2.AsyncBaseTransport | None = None) -> None:
+    def __init__(
+        self, transport: httpx2.AsyncBaseTransport | None = None, timeout_s: float = TIMEOUT_S
+    ) -> None:
         self._transport = transport
+        self._timeout_s = timeout_s
 
     async def fetch_proof(self, public_url: str, nonce: str) -> ProofResponse:
         """Ask ``public_url`` for ``server/info`` with the nonce, and read the proof."""
@@ -41,13 +51,16 @@ class HttpPublicUrlProbe:
             public_url,
             headers={VERIFY_NONCE_HEADER: nonce},
             verify_tls=True,
-            timeout_s=TIMEOUT_S,
+            timeout_s=self._timeout_s,
             transport=self._transport,
         )
         try:
-            async with session:
-                response = await session.request("GET", SERVER_INFO_PATH)
+            async with asyncio.timeout(self._timeout_s), session:
+                response = await session.get_bounded(SERVER_INFO_PATH, MAX_PROOF_BODY_BYTES)
                 return self._read(response)
+        except TimeoutError:
+            logger.info("the public URL check ran out of time", extra=_log("timeout"))
+            return ProofResponse.failed("unreachable")
         except RemoteCallError as failure:
             logger.info("the public URL check did not reach a server", extra=_log(failure.reason))
             return ProofResponse.failed(

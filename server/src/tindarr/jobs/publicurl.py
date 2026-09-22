@@ -21,12 +21,12 @@ PUBLIC_URL_CHECK_DELAY: Final = timedelta(seconds=10)
 logger = logging.getLogger(__name__)
 
 
-def public_url_check_job(verifier: PublicUrlVerifier, public_url: str) -> OneShotJob:
+def public_url_check_job(verifier: PublicUrlVerifier, public_url: str, host: str) -> OneShotJob:
     """Build the one-shot check of an address the environment forces."""
 
     async def run() -> None:
         try:
-            await verifier.verify(public_url)
+            await verifier.verify(public_url, host)
         except ProblemError as problem:
             logger.warning(
                 "TINDARR_PUBLIC_URL did not answer as this server; phones paired with "

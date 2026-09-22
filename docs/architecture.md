@@ -341,11 +341,13 @@ Details in [the authentication reference](auth.md), with the reasons in
   | `/api/…`, `/healthz`, errors | `Cache-Control: no-store`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-origin` |
   | `index.html` (and the fallback) | `Cache-Control: no-store`, the console CSP of ADR 0009, `Cross-Origin-Opener-Policy: same-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()`, plus `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-origin` |
   | `/assets/…` | `Cache-Control: public, max-age=31536000, immutable`, `nosniff`, `Cross-Origin-Resource-Policy: same-origin` |
-  | other static files (`favicon.ico`, `robots.txt`) | `Cache-Control: no-cache`, `nosniff` |
+  | other static files (`favicon.svg`, `robots.txt`) | `Cache-Control: no-cache`, `nosniff` |
 
-  Over HTTPS (effective scheme), responses also carry
-  `Strict-Transport-Security: max-age=31536000` (no `includeSubDomains`, no
-  `preload`). A route that sets its own `Cache-Control` keeps it.
+  With `TINDARR_HSTS` on, responses also carry
+  `Strict-Transport-Security: max-age=31536000` (no `includeSubDomains`, no `preload`);
+  it is an opt-in rather than a scheme test, because a server behind a TLS-terminating
+  proxy only sees plain HTTP. A route that sets its own `Cache-Control` or
+  `Content-Security-Policy` keeps it.
 - **Development:** the Vite dev server proxies `/api` to a local server with
   `changeOrigin: false`, so the `Host` and `Origin` stay `localhost` and the console
   stays same-origin; CORS stays disabled.

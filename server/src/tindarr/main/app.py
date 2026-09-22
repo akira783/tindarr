@@ -15,7 +15,12 @@ from tindarr.adapters.plextv import PlexTvClient
 from tindarr.adapters.publicurl import HttpPublicUrlProbe
 from tindarr.api import health, v1
 from tindarr.api.console import ConsoleMiddleware, WebConsole
-from tindarr.api.context import AllowedHostMiddleware, HostPolicy, RequestContextMiddleware
+from tindarr.api.context import (
+    AllowedHostMiddleware,
+    HostPolicy,
+    RequestContextMiddleware,
+    host_of,
+)
 from tindarr.api.deps import AppServices
 from tindarr.api.errors import UnhandledErrorMiddleware, install_error_handlers
 from tindarr.api.middleware import RequestIdMiddleware, SecurityHeadersMiddleware
@@ -183,9 +188,10 @@ async def start(
         handle_sweep_job(quick_connect),
         quick_connect_probe_job(quick_connect),
     )
-    if public_url is not None and public_url_setting.locked:
+    public_url_host = host_of(public_url)
+    if public_url is not None and public_url_host is not None and public_url_setting.locked:
         # Only the operator's own value: one set from the console was checked first.
-        jobs += (public_url_check_job(public_url_verifier, public_url),)
+        jobs += (public_url_check_job(public_url_verifier, public_url, public_url_host),)
     return Runtime(engine=engine, services=services, jobs=jobs)
 
 

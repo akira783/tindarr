@@ -88,5 +88,7 @@ async def get_server_info(
         capabilities=[],
         tmdb_image_base_url=TMDB_IMAGE_BASE_URL,
     )
-    proof = services.public_url.proof(verify_nonce)
+    proof = services.public_url.proof(
+        verify_nonce, None if context.host is None else context.host.host
+    )
     return info if proof is None else info.model_copy(update={"public_url_proof": proof})

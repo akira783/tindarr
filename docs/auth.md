@@ -64,17 +64,14 @@ The `Host` header of every request except `/healthz` must be one of:
 - `localhost`, with any port;
 - a host name listed in `TINDARR_ALLOWED_HOSTS` (bootstrap configuration,
   comma-separated host names, compared case-insensitively, any port);
-- the host of `public_url`, once it is set;
-- the host of a `public_url` **being checked**, for the few seconds that check lasts
-  (section 10). Without it a server set up through its IP address could never be given
-  a domain name from the console: the check calls that very address, and the `Host` it
-  would send is the one not allowed yet. Only `GET /server/info` is reachable that way,
-  and only a media server administrator with a fresh re-authentication can open it.
+- the host of `public_url`, once it is set.
 
+Nothing else, ever — not even for the length of a `public_url` check (section 10).
 Anything else gets `400` with `code` = `host_not_allowed`, before routing, for the API
 and the console alike. A server reached by a domain name must therefore have
 `TINDARR_PUBLIC_URL` or `TINDARR_ALLOWED_HOSTS` set before its first start, or be set
-up through its IP address.
+up through its IP address. Setting `public_url` to a name the server does not already
+answer to is refused for the same reason (section 10).
 
 ### Origin
 
@@ -517,7 +514,12 @@ token:
 
 Unchanged from [ADR 0010](adr/0010-roles-and-refresh-tokens.md): effective role `admin`
 when `media_server_admin` or `promoted`; last-admin rule (`409` `last_admin`); only a
-media server administrator can demote or disable another one (`403` `forbidden`).
+media server administrator can demote or disable another one (`403` `forbidden`) — or
+sign them out (`DELETE /admin/users/{id}/sessions`), since doing that repeatedly would
+come to the same thing. The last-admin rule counts `promoted` and `media_server_admin`
+admins alike, so the only media server administrator can still delete their own data
+while another admin remains; nobody can then change the connector or `public_url` until
+they sign in again, which re-reads the flag from the media server.
 On top of it, some actions are reserved to a media server administrator
 (`403` `media_server_admin_required`), with a fresh re-authentication
 (`403` `reauth_required`):
@@ -545,8 +547,9 @@ the traffic lasts, never lock anyone out.
 | Password failures forwarded to the media server | case-folded username | 2 per rolling 15 min | `429` until the oldest leaves the window; a success clears it |
 | Failed setup claims | client IP | 5 per 15 min | `429` |
 | Failed setup claims | global | 20 per hour | slowdown |
-| Pairing preview, pair and complete | client IP | 10 per min | `429` |
-| Pairing preview, pair and complete | global | 60 per min | slowdown |
+| Pairing preview and pair | client IP | 10 per min | `429` |
+| Pairing completion polls | client IP | 90 per min | `429` |
+| Every pairing call | global | 300 per min | slowdown |
 | Handle creation (Plex PIN, Quick Connect) | client IP | 10 per 15 min, 5 outstanding | `429` |
 | Outstanding handles | global | 200 | `429` (memory bound) |
 | Handle polling | handle | one upstream call per second | `202` with `retry_after_ms` |
@@ -554,6 +557,12 @@ the traffic lasts, never lock anyone out.
 | Other public endpoints (`server/info`) | client IP | 60 per min | `429` |
 | Connection tests, `public_url` checks | session | 10 per min | `429` |
 | Pending pairings | user | 3 | `429` |
+| `public_url` checks in flight | global | 64 | `429` |
+
+Completion has its own budget because the server tells the app to poll every 2 s for up
+to 5 minutes: a shared limit of 10 per minute would refuse the app for doing exactly
+what it was told, 16 seconds in. Preview and pair keep the tighter one — they are the
+two calls somebody could grind against a code, and an app makes each of them once.
 
 ## 9. Phone pairing
 
@@ -603,14 +612,28 @@ Pairing does not contact the media server, so it does not re-sync the admin flag
   is open on), later from the settings page, or by `TINDARR_PUBLIC_URL` (then locked).
 - **Only a media server administrator with a fresh re-authentication** can change it
   (section 7).
+- **Its host must already be an allowed host** (section 1), which the console's own
+  origin is. An unknown host is refused before anything is called, with
+  `409` `public_url_unverified` and `reason` = `host_not_allowed`, telling the operator
+  to set `TINDARR_ALLOWED_HOSTS`. This is not a convenience: the proof below is bound
+  to the host, so no answer from a host the server does not serve could pass.
 - **Verified before saving.** The server creates a random nonce (kept in memory for
-  60 s), requests `GET <public_url>/api/v1/server/info` with the header
+  60 s, answered once), requests `GET <public_url>/api/v1/server/info` with the header
   `Tindarr-Verify-Nonce: <nonce>`, without following redirects, with TLS verification
-  and a 5 s timeout, and expects `public_url_proof` = base64url(HMAC-SHA256(key, nonce))
-  with the HKDF sub-key `tindarr/v1/public-url-proof`. `server/info` only includes
-  `public_url_proof` when the nonce is one it is currently waiting for. Failure:
-  `409` `public_url_unverified`, with a coarse reason. A reverse proxy in front of this
-  same instance passes; another server does not.
+  and a 5 s deadline for the whole call, reading at most 64 KiB, and expects
+  `public_url_proof` = base64url(HMAC-SHA256(key, `<nonce>|<host>`)) with the HKDF
+  sub-key `tindarr/v1/public-url-proof`. `server/info` only answers `public_url_proof`
+  when the nonce is one it is currently waiting for, and the proof it answers is for
+  the `Host` **that request** arrived at. Failure: `409` `public_url_unverified`, with
+  a coarse reason. A reverse proxy in front of this same instance passes; another
+  server does not.
+  - **Why the host is part of the proof.** Any address that can reach this server could
+    otherwise relay: take the nonce out of the probe, ask this server for the proof over
+    its own connection, and echo it back. To do that with a host-bound proof it would
+    have to be served under the candidate host, and a host this server does not answer
+    to is refused before routing. The residual case is a `public_url` whose host is an
+    IP literal, which is always an allowed host: an administrator who deliberately
+    types an attacker's IP address there is choosing it.
 - Servers that cannot reach their own public address (no NAT hairpinning) cannot pass
   the check from the console; the operator sets `TINDARR_PUBLIC_URL` instead. An
   environment value is checked once after startup and only logged when it fails.

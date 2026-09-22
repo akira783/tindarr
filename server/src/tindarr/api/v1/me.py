@@ -67,6 +67,7 @@ async def list_my_sessions(services: Services, session: SharedSession) -> Sessio
     operation_id="revokeMySession",
     summary="Revoke one of the caller's sessions",
     status_code=status.HTTP_204_NO_CONTENT,
+    tags=["console"],
 )
 async def revoke_my_session(
     session_id: SessionId,

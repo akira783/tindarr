@@ -96,13 +96,16 @@ async def revoke_pairing(pairing_id: PairingId, services: Services, session: Web
 # --- the app -------------------------------------------------------------------------
 
 
-async def _spend_public_call(services: Services, context: Context) -> None:
-    """Count one of the three public pairing calls against both limits.
+async def _spend_public_call(services: Services, context: Context, *, polled: bool = False) -> None:
+    """Count one public pairing call against its per-address limit and the global one.
 
-    Per client address it refuses; globally it only slows down, so someone hammering
-    the endpoint cannot keep a household's phones from pairing.
+    ``polled`` picks the completion budget, which is sized for the two-second cadence
+    the server itself asks for; preview and pair share the tighter one, because they
+    are the calls somebody could grind against a code. Globally nothing is refused,
+    only slowed down, so hammering the endpoint cannot keep a household from pairing.
     """
-    services.limits.pairing.hit(context.rate_limit_key)
+    limit = services.limits.pairing_complete if polled else services.limits.pairing
+    limit.hit(context.rate_limit_key)
     await services.limits.pairing_global.admit()
     services.limits.pairing_global.record()
 
@@ -158,7 +161,7 @@ async def complete_pairing(
     payload: CompletePairingInput, services: Services, context: Context
 ) -> AuthResultResponse:
     """Open the phone's session once the user approved it; ``202`` until then."""
-    await _spend_public_call(services, context)
+    await _spend_public_call(services, context, polled=True)
     completed = await services.pairings.complete(
         payload.code, payload.code_verifier, client_is_private=context.client_is_private
     )

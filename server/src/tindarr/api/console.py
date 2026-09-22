@@ -80,10 +80,19 @@ logger = logging.getLogger(__name__)
 
 
 def is_console_path(path: str) -> bool:
-    """Whether the console may answer this path (the API and the probe keep theirs)."""
-    if path in RESERVED_PATHS:
-        return False
-    return not any(path == prefix or path.startswith(prefix + "/") for prefix in RESERVED_PREFIXES)
+    """Whether the console may answer this path (the API and the probe keep theirs).
+
+    Decided on the path's segments, not on its text: nothing collapses ``//api/v1/…``
+    or strips the slash from ``/healthz/`` before this, and answering either with the
+    console page would put an API path behind the looser console policy.
+    """
+    segments = relative_path(path)
+    if segments is None:
+        return True
+    reserved = {prefix.lstrip("/") for prefix in RESERVED_PREFIXES}
+    reserved |= {reserved_path.lstrip("/") for reserved_path in RESERVED_PATHS}
+    first = segments.split("/", 1)[0]
+    return first not in reserved
 
 
 def relative_path(path: str) -> str | None:

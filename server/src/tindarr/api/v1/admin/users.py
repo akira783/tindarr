@@ -20,7 +20,13 @@ from tindarr.api.deps import Services
 from tindarr.api.security import AdminSession
 from tindarr.api.v1.models import AdminUserResponse
 from tindarr.auth.events import security_event
-from tindarr.auth.users import UserUpdate, get_user, list_admin_users, update_user
+from tindarr.auth.users import (
+    UserUpdate,
+    get_user,
+    list_admin_users,
+    require_may_act_on,
+    update_user,
+)
 from tindarr.storage.users import Role
 
 router = APIRouter(prefix="/users", tags=["admin", "console"])
@@ -109,7 +115,12 @@ async def patch_user(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def revoke_user_sessions(user_id: UserId, services: Services, session: AdminSession) -> None:
-    """Revoke every session of that user, including the one making this request."""
+    """Revoke every session of that user, including the one making this request.
+
+    A promoted admin cannot do it to a media server administrator: signing them out
+    repeatedly achieves what demoting them would, and the same rule refuses both.
+    """
     user = await get_user(services.engine, user_id)
+    require_may_act_on(user, session.signed_in_user)
     await services.sessions.revoke_user_sessions(user.id, "admin")
     security_event("user_sessions_revoked", user_id=user.id, by=session.signed_in_user.id)

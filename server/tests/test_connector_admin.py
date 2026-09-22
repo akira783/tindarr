@@ -18,6 +18,8 @@ from tests.support import (
     FakeInternet,
     app_login,
     build_app,
+    claim,
+    complete_setup,
     console_client,
     console_headers,
     run,
@@ -397,3 +399,37 @@ def test_the_sync_does_nothing_without_a_media_server(app: FastAPI) -> None:
     with console_client(app) as client:
         assert run(client, sync_of(app).run).ran is False
         assert client.cookies.get(SECURE_NAMES.session) is None
+
+
+def test_turning_tls_verification_off_needs_the_key_again(app: FastAPI) -> None:
+    # Omitting the key replays the stored administrator key; sending it over a
+    # connection nobody checks is all an on-path attacker needs.
+    with console_client(app) as client:
+        csrf = set_up_server(client, app)
+        body = connector_body(verify_tls=False)
+        del body["api_key"]
+        response = client.post(f"{CONNECTOR}/test", json=body, headers=console_headers(csrf))
+        assert_is_problem(response, 409, "secret_required")
+        # With the key, the downgrade is the administrator's call to make.
+        with_key = client.post(
+            f"{CONNECTOR}/test",
+            json=connector_body(verify_tls=False),
+            headers=console_headers(csrf),
+        )
+        assert with_key.status_code == 200
+
+
+def test_a_short_api_key_is_never_shown_in_full(app: FastAPI, internet: FakeInternet) -> None:
+    internet.media.api_key = "abcd"
+    with console_client(app) as client:
+        csrf = claim(client, app)
+        saved = client.put(
+            f"{API}/setup/media-server",
+            json=connector_body(api_key="abcd"),
+            headers=console_headers(csrf),
+        )
+        assert saved.status_code == 200, saved.text
+        complete_setup(client, app)
+        connectors = client.get(f"{API}/admin/connectors").json()["connectors"]
+    media_server = next(item for item in connectors if item["kind"] == "media_server")
+    assert media_server["secret"] == {"set": True, "last4": None, "locked": False}

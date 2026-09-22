@@ -144,6 +144,17 @@ async def update_user(
     return changed
 
 
+def require_may_act_on(user: User, by: User) -> None:
+    """Refuse a promoted admin acting against a media server administrator.
+
+    Demoting, disabling and signing them out all end the same way — the people who can
+    repoint the media server lose the console — so they are refused the same way
+    (ADR 0010, docs/auth.md section 7).
+    """
+    if user.media_server_admin and not by.media_server_admin:
+        raise errors.forbidden("Only an administrator of the media server can act on another one.")
+
+
 async def _check_rules(
     connection: AsyncConnection, user: User, update: UserUpdate, by: User
 ) -> None:
@@ -151,12 +162,9 @@ async def _check_rules(
     takes_access_away = (update.demotes and user.is_admin) or (update.disables and user.enabled)
     if not takes_access_away:
         return
-    if user.media_server_admin and not by.media_server_admin:
-        # A promoted admin must not be able to remove the people who can repoint the
-        # media server, and so lock the household out of its own console.
-        raise errors.forbidden(
-            "Only an administrator of the media server can demote or disable another one."
-        )
+    # A promoted admin must not be able to remove the people who can repoint the media
+    # server, and so lock the household out of its own console.
+    require_may_act_on(user, by)
     if user.is_admin and user.enabled and await repository.count_enabled_admins(connection) <= 1:
         raise errors.last_admin()
 
@@ -184,14 +192,19 @@ async def delete_user(engine: AsyncEngine, user: User) -> None:
     Sessions, refresh tokens and pairings go with the row through the foreign keys.
     Nothing is deleted on the media server: signing in again creates a new, empty
     account. The last-admin rule applies here too — an administrator who deleted
-    themselves would leave the console with no way in.
+    themselves would leave the console with no way in — and it is checked against the
+    row as it stands inside the transaction, not the copy the request was authenticated
+    with: somebody promoted a moment ago is still the last admin.
     """
     async with write_transaction(engine) as connection:
+        current = await repository.get(connection, user.id)
+        if current is None:
+            return
         if (
-            user.is_admin
-            and user.enabled
+            current.is_admin
+            and current.enabled
             and await repository.count_enabled_admins(connection) <= 1
         ):
             raise errors.last_admin()
-        await repository.delete(connection, user.id)
+        await repository.delete(connection, current.id)
     security_event("user_deleted", user_id=user.id)
