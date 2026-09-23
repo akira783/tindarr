@@ -29,6 +29,8 @@ from urllib.parse import parse_qsl, urlencode
 
 import httpx2
 
+from tindarr.adapters.http import decoded_response
+
 __all__ = [
     "Cassette",
     "CassetteFormatError",
@@ -245,7 +247,13 @@ class RecordingTransport(httpx2.AsyncBaseTransport):
         self._recorded: list[Interaction] = []
 
     async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
-        """Make the call for real, record the answer, and return it unchanged."""
+        """Make the call for real, record the answer, and hand it on decoded.
+
+        ``aread`` decompresses, so what is recorded is the readable JSON a reviewer can
+        diff — and what is handed back must no longer claim to be compressed, or the
+        client above decodes it a second time and the whole live run dies as "the
+        service did not answer" (``decoded_response``).
+        """
         response = await self._inner.handle_async_request(request)
         body = await response.aread()
         self._recorded.append(
@@ -256,7 +264,7 @@ class RecordingTransport(httpx2.AsyncBaseTransport):
                 content_type=response.headers.get("Content-Type", "application/json"),
             )
         )
-        return httpx2.Response(response.status_code, headers=response.headers, content=body)
+        return decoded_response(response, body)
 
     async def aclose(self) -> None:
         """Close the transport underneath."""

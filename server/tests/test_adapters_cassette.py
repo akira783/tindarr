@@ -1,5 +1,6 @@
 """Recorded provider answers: replay never dials out, and never writes down a key."""
 
+import gzip
 import json
 from pathlib import Path
 
@@ -99,6 +100,38 @@ async def test_recording_keeps_the_answer_and_not_the_key() -> None:
     assert TMDB_BEARER not in written
     # And the recording replays into the same answer.
     replayed = await TmdbMetadata("other-key", transport=cassette.transport()).details(
+        ARRIVAL, "en"
+    )
+    assert replayed == live
+    await recorder.aclose()
+
+
+async def test_recording_a_compressed_answer_does_not_break_the_live_run() -> None:
+    """The one thing a mock transport never does: answer ``Content-Encoding: gzip``.
+
+    Every other test here answers in plain bytes, so a recorder that handed the decoded
+    body back under the original headers looked perfect offline and killed every live
+    run: the client decompressed a second time, ``httpx`` raised ``DecodingError``, and
+    the adapter reported it as "the metadata service did not answer".
+    """
+    details = {"id": 329865, "title": "Arrival", "release_date": "2016-11-11"}
+    body = json.dumps(details).encode()
+    compressed = httpx2.MockTransport(
+        lambda _request: httpx2.Response(
+            200,
+            headers={"Content-Encoding": "gzip", "Content-Type": "application/json"},
+            content=gzip.compress(body),
+        )
+    )
+    recorder = RecordingTransport(compressed, provider="tmdb")
+
+    live = await TmdbMetadata(TMDB_API_KEY, transport=recorder).details(ARRIVAL, "en")
+
+    assert live.title == "Arrival"
+    # And what was written down is the readable JSON, not the compressed bytes.
+    interaction = recorder.cassette.interactions[0]
+    assert json.loads(interaction.body)["title"] == "Arrival"
+    replayed = await TmdbMetadata("other-key", transport=recorder.cassette.transport()).details(
         ARRIVAL, "en"
     )
     assert replayed == live

@@ -35,6 +35,12 @@ DEFAULT_TIMEOUT_S: Final = 10.0
 NO_RESPONSE_REASONS: Final = ("timeout", "unreachable", "tls_error")
 #: Largest response body an adapter reads. Far above any real answer.
 MAX_RESPONSE_BYTES: Final = 4 * 1024 * 1024
+#: Headers that describe the *wire* form of a body rather than the body itself. Once a
+#: body has been decoded, they are lies: keeping them on a rebuilt response makes the
+#: next layer decompress a second time, and the length no longer matches either.
+TRANSFER_HEADERS: Final[frozenset[str]] = frozenset(
+    {"content-encoding", "content-length", "transfer-encoding"}
+)
 _XML_PARSE_ERROR: Final = "the response is not the XML this endpoint returns"
 
 
@@ -149,21 +155,30 @@ class HttpSession:
             raise RemoteCallError("timeout") from None
         except httpx2.RequestError as failure:
             raise RemoteCallError("tls_error" if is_tls_error(failure) else "unreachable") from None
-        # ``aiter_bytes`` decodes as it goes, so the body here is plain text while the
-        # original headers still describe it as compressed. Keeping them would make the
-        # caller decompress a second time; the length no longer matches either.
-        headers = httpx2.Headers(
-            [
-                (name, value)
-                for name, value in response.headers.multi_items()
-                if name.lower() not in ("content-encoding", "content-length", "transfer-encoding")
-            ]
-        )
-        return httpx2.Response(response.status_code, headers=headers, content=b"".join(chunks))
+        return decoded_response(response, b"".join(chunks))
 
     async def get_bounded(self, url: str, limit: int = MAX_RESPONSE_BYTES) -> httpx2.Response:
         """GET a response, reading at most ``limit`` bytes of its body."""
         return await self.request_bounded("GET", url, limit=limit)
+
+
+def decoded_response(response: httpx2.Response, content: bytes) -> httpx2.Response:
+    """Return ``content`` as a fresh response carrying ``response``'s other headers.
+
+    ``aread`` and ``aiter_bytes`` decode as they go, so ``content`` is plain bytes while
+    the original headers still describe it as ``gzip``. A response rebuilt with those
+    headers is decoded a **second** time by whoever reads it next, which raises a
+    ``DecodingError`` — reported, four layers up, as "the service did not answer". Any
+    code that reads a body and re-attaches it to a new response goes through here.
+    """
+    headers = httpx2.Headers(
+        [
+            (name, value)
+            for name, value in response.headers.multi_items()
+            if name.lower() not in TRANSFER_HEADERS
+        ]
+    )
+    return httpx2.Response(response.status_code, headers=headers, content=content)
 
 
 def is_tls_error(failure: BaseException) -> bool:
