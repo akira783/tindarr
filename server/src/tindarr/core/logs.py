@@ -256,6 +256,11 @@ def quiet_noisy_libraries() -> None:
     drivers log every statement with its bound parameters at DEBUG: session tokens, CSRF
     tokens and hashes would end up in the log of a server started with ``DEBUG``.
     Adapters and repositories log what matters themselves, redacted.
+
+    The AI provider SDKs are here for the same reason and one more: they log request
+    bodies at DEBUG, which for Tindarr means the prompt — other people's watch history.
+    ``google_genai`` also prints advice about function calling at WARNING on every
+    single call, which is neither advice an operator can act on nor news.
     """
     # Tindarr logs its own migration summary; Alembic's step-by-step lines are noise.
     logging.getLogger("alembic").setLevel(logging.WARNING)
@@ -267,8 +272,11 @@ def quiet_noisy_libraries() -> None:
         "aiosqlite",
         "sqlalchemy.engine",
         "sqlalchemy.pool",
+        "openai",
+        "anthropic",
     ):
         logging.getLogger(name).setLevel(logging.WARNING)
+    logging.getLogger("google_genai").setLevel(logging.ERROR)
 
 
 def configure_logging(level: str) -> None:

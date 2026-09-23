@@ -185,6 +185,14 @@ class Metadata(Protocol):
         ...
 
 
+class MetadataFactory(Protocol):
+    """Builds the TMDb adapter for a stored key. Only ``tindarr.main`` implements it."""
+
+    def __call__(self, api_key: str) -> Metadata:
+        """Return an adapter using ``api_key``."""
+        ...
+
+
 class RatingsSource(Protocol):
     """OMDb: the optional enricher of the metadata port."""
 
@@ -194,4 +202,12 @@ class RatingsSource(Protocol):
 
     async def ratings(self, imdb_id: str) -> Ratings | None:
         """Return the ratings for an IMDb id, or ``None`` when OMDb does not know it."""
+        ...
+
+
+class RatingsFactory(Protocol):
+    """Builds the OMDb adapter for a stored key. Only ``tindarr.main`` implements it."""
+
+    def __call__(self, api_key: str) -> RatingsSource:
+        """Return an adapter using ``api_key``."""
         ...

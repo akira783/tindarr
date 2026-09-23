@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 from tindarr.ports.connectors import ConnectionCheck
-from tindarr.ports.media_server import MediaUser
+from tindarr.ports.media_server import MediaServerKind, MediaUser
 from tindarr.ports.titles import TitleRef
 
 #: How far a title has got, named as the HTTP contract's ``Availability``.
@@ -53,6 +53,22 @@ class RequestResult:
     availability: Availability = "requested"
 
 
+@dataclass(frozen=True, slots=True)
+class RequestBackendConnection:
+    """Everything an adapter needs to talk to the configured request backend.
+
+    ``media_server_kind`` is part of the connection because it decides which stored id
+    a backend user is matched on, and a household that repoints its media server has to
+    match again on the other one.
+    """
+
+    url: str
+    api_key: str
+    media_server_kind: MediaServerKind
+    tv_seasons: SeasonPolicy = "all"
+    verify_tls: bool = True
+
+
 class RequestBackend(Protocol):
     """Seerr v3 and its relatives, behind one interface."""
 
@@ -70,4 +86,12 @@ class RequestBackend(Protocol):
 
     async def status(self, titles: Sequence[TitleRef]) -> dict[TitleRef, Availability]:
         """Return how far each title has got; unknown titles come back as ``none``."""
+        ...
+
+
+class RequestBackendFactory(Protocol):
+    """Builds the adapter for a connection. Only ``tindarr.main`` implements it."""
+
+    def __call__(self, connection: RequestBackendConnection) -> RequestBackend:
+        """Return an adapter talking to ``connection``."""
         ...

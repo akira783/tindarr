@@ -38,6 +38,9 @@ class LlmCapabilities:
     structured: StructuredMode = "json_schema"
     #: Whether ``reasoning_effort`` may be sent at all (most endpoints reject it).
     reasoning_effort: bool = False
+    #: Whether the provider still has a temperature. Anthropic's current API has none:
+    #: variety is asked for in the prompt there, not turned up with a dial.
+    temperature: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +77,22 @@ class Generation[T: BaseModel]:
     retried: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class LlmConnection:
+    """Everything an adapter needs to talk to the configured AI provider.
+
+    ``base_url`` is required for ``openai_compatible`` and ``ollama`` and ignored for
+    the three that have one address; ``api_key`` is required for everything but
+    ``ollama``, which has no accounts.
+    """
+
+    kind: LlmProviderKind
+    api_key: str = ""
+    base_url: str | None = None
+    model: str = ""
+    reasoning_effort: ReasoningEffort | None = None
+
+
 class LlmProvider(Protocol):
     """One AI provider, reduced to what the swipe engine needs."""
 
@@ -90,4 +109,12 @@ class LlmProvider(Protocol):
 
     async def generate[T: BaseModel](self, prompt: Prompt, schema: type[T]) -> Generation[T]:
         """Ask for one object of ``schema`` and return it validated."""
+        ...
+
+
+class LlmProviderFactory(Protocol):
+    """Builds the adapter for a connection. Only ``tindarr.main`` implements it."""
+
+    def __call__(self, connection: LlmConnection) -> LlmProvider:
+        """Return an adapter talking to ``connection``."""
         ...

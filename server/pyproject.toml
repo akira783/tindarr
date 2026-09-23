@@ -15,6 +15,9 @@ dependencies = [
     "uvicorn>=0.53",
     "pyjwt>=2.10",
     "httpx2>=2.13",
+    "openai>=2",
+    "anthropic>=0.75",
+    "google-genai>=1.30",
 ]
 
 [project.scripts]
