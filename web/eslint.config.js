@@ -97,4 +97,11 @@ export default defineConfig([
     languageOptions: { globals: { ...globals.node } },
     rules: { "no-restricted-globals": "off" },
   },
+  {
+    // The end-to-end suite drives a browser from Node; it is not part of the bundle,
+    // so the rules that protect the console's own code do not apply to it.
+    files: ["e2e/**", "playwright.config.ts"],
+    languageOptions: { globals: { ...globals.node } },
+    rules: { "no-restricted-globals": "off" },
+  },
 ]);

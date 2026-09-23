@@ -13,22 +13,37 @@ export interface CspViolation {
 }
 
 export interface MinimalPage {
-  addInitScript: (script: string) => Promise<void>;
+  // Playwright returns a handle that can remove the script again; nothing here needs
+  // it, and `unknown` keeps this file free of a dependency on Playwright's types.
+  addInitScript: (script: string) => Promise<unknown>;
   evaluate: <T>(script: string) => Promise<T>;
 }
 
 export const VIOLATIONS_KEY = "__tindarrCspViolations";
+
+/**
+ * Name of the optional binding the test process exposes on the page.
+ *
+ * The array below only lives as long as its document, so a test that navigates
+ * would lose what an earlier page refused. When this binding exists, every
+ * violation is also handed to the test process the moment it happens, which
+ * outlives any navigation.
+ */
+export const REPORT_BINDING = "__tindarrOnCspViolation";
 
 /** Injected before any page script runs: records what the browser refuses. */
 export const collectorScript = `(() => {
   const store = [];
   Object.defineProperty(window, ${JSON.stringify(VIOLATIONS_KEY)}, { value: store });
   document.addEventListener("securitypolicyviolation", (event) => {
-    store.push({
+    const violation = {
       directive: event.effectiveDirective || event.violatedDirective,
       blockedUri: event.blockedURI,
       url: event.documentURI,
-    });
+    };
+    store.push(violation);
+    const report = window[${JSON.stringify(REPORT_BINDING)}];
+    if (typeof report === "function") report(violation);
   });
 })();`;
 

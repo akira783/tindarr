@@ -16,6 +16,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:browser": "playwright install --with-deps chromium",
     "gen:api": "openapi-typescript ../api/openapi.yaml --output src/api/schema.d.ts",
     "check:api": "node scripts/check-api-client.mjs"
   },
@@ -32,6 +34,7 @@
   "devDependencies": {
     "@eslint-react/eslint-plugin": "5.20.5",
     "@eslint/js": "10.0.1",
+    "@playwright/test": "1.63.0",
     "@testing-library/dom": "10.4.2",
     "@testing-library/jest-dom": "7.0.1",
     "@testing-library/react": "16.3.3",

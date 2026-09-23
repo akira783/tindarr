@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  REPORT_BINDING,
   VIOLATIONS_KEY,
   assertNoCspViolations,
   collectorScript,
@@ -43,6 +44,12 @@ describe("the end-to-end CSP helper", () => {
     await expect(assertNoCspViolations(page)).rejects.toThrow(
       /script-src blocked inline on https:\/\/tindarr.example\/settings/,
     );
+  });
+
+  it("also hands each violation to the test process, so a navigation loses none", () => {
+    // The per-document array dies with its document; the binding does not.
+    expect(collectorScript).toContain(REPORT_BINDING);
+    expect(collectorScript).toMatch(/typeof report === "function"/);
   });
 
   it("reads back what the collector stored", async () => {

@@ -33,3 +33,9 @@ setup-code
 # Web console build output
 web/dist/
 web/coverage/
+
+# End-to-end runs (.github/scripts/e2e-stack.sh)
+.e2e-state/
+e2e-logs/
+web/playwright-report/
+web/test-results/

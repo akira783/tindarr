@@ -32,5 +32,5 @@
       "@i18n/*": ["../shared/i18n/*"]
     }
   },
-  "include": ["src", "test", "e2e", "scripts", "vite.config.ts"]
+  "include": ["src", "test", "e2e", "scripts", "vite.config.ts", "playwright.config.ts"]
 }
