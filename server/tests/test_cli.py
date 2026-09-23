@@ -147,6 +147,8 @@ def test_serve_runs_uvicorn_without_proxy_headers(monkeypatch: pytest.MonkeyPatc
     assert kwargs["proxy_headers"] is False
     assert kwargs["server_header"] is False
     assert kwargs["log_config"] is None
+    # Requests the application holds open must not be able to pile up (M3).
+    assert kwargs["limit_concurrency"] == cli.MAX_CONCURRENCY
 
 
 def test_version(capsys: pytest.CaptureFixture[str]) -> None:

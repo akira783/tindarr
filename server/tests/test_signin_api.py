@@ -36,6 +36,8 @@ from tests.support import (
 from tests.support.flows import configure_media_server
 from tests.test_contract import assert_is_problem, assert_matches_contract
 from tindarr.api.cookies import SECURE_NAMES
+from tindarr.auth.ratelimit import DEFAULT_MAX_KEYS
+from tindarr.core.errors import ProblemError
 
 PUBLIC_PEER = "203.0.113.5"
 
@@ -215,6 +217,36 @@ def test_at_most_two_failures_per_username_reach_the_media_server(
         # It is a pause, not a lock: the window empties on its own.
         clock.advance(15 * 60 + 1)
         assert app_login(client, USER_NAME, USER_PASSWORD).status_code == 200
+
+
+def test_a_flood_of_unknown_usernames_cannot_free_the_cap(
+    app: FastAPI, internet: FakeInternet
+) -> None:
+    """H1: the per-username cap has to survive its own table filling up.
+
+    The limiter remembers a bounded number of keys. Whatever happens at that bound, a
+    user name that already reached its cap must never come back under it — otherwise a
+    guesser buys unlimited forwarded attempts and the media server locks the account.
+    """
+    with console_client(app) as client:
+        set_up_server(client, app)
+        services: Any = app.state.services
+        limiter = services.limits.password_per_username
+        for _ in range(2):
+            assert app_login(client, USER_NAME, "wrong").status_code == 401
+
+        for index in range(11_000):  # more keys than the limiter can remember
+            key = f"flood-{index}"
+            try:
+                limiter.check(key)
+            except ProblemError:
+                continue
+            limiter.record(key)
+
+        before = sign_in_attempts(internet)
+        assert_is_problem(app_login(client, USER_NAME, "wrong"), 429, "rate_limited")
+        assert sign_in_attempts(internet) == before  # nothing reached the media server
+        assert limiter.tracked_keys <= DEFAULT_MAX_KEYS
 
 
 def test_the_cap_is_the_same_for_a_username_that_does_not_exist(

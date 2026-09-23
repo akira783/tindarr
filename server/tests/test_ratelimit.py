@@ -20,6 +20,19 @@ pytestmark = pytest.mark.anyio
 MINUTE = timedelta(minutes=1)
 
 
+class BlockingClock(FakeClock):
+    """A clock whose ``sleep`` really suspends, to observe requests waiting together."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = asyncio.Event()
+
+    async def sleep(self, seconds: float) -> None:
+        """Wait until the test releases the sleepers."""
+        self.slept.append(seconds)
+        await self.release.wait()
+
+
 def test_a_window_allows_its_count_then_refuses(clock: FakeClock) -> None:
     window = SlidingWindow(Limit("test", 3, MINUTE), clock)
     for _ in range(3):
@@ -69,7 +82,9 @@ def test_a_success_clears_the_failures(clock: FakeClock) -> None:
     window.check("k")
 
 
-def test_a_window_forgets_the_oldest_keys_when_full(clock: FakeClock) -> None:
+def test_an_evicting_window_forgets_the_oldest_keys_when_full(clock: FakeClock) -> None:
+    # The default policy for limits keyed by client address: a full table costs the
+    # least recently seen key, never a `429` to a caller who did nothing.
     window = SlidingWindow(Limit("test", 1, MINUTE), clock, max_keys=2)
     window.record("first")
     window.record("second")
@@ -77,6 +92,79 @@ def test_a_window_forgets_the_oldest_keys_when_full(clock: FakeClock) -> None:
     window.check("first")  # dropped to keep the limiter's memory bounded
     with pytest.raises(RateLimitedError):
         window.check("third")
+
+
+def test_a_refusing_window_never_drops_a_live_bucket(clock: FakeClock) -> None:
+    """The per-username cap must survive a flood of unknown names (H1).
+
+    Without this, ~`max_keys` sign-in attempts with random user names push the account
+    under attack out of the table and hand the guesser a clean slate — and the media
+    server's own lockout counter is what pays for it.
+    """
+    window = SlidingWindow(Limit("test", 2, MINUTE), clock, max_keys=4, when_full="refuse")
+    window.record("admin")  # one failure already forwarded for the account under attack
+
+    for index in range(1_000):
+        window.check(f"flood-{index}")  # aborted before any failure is recorded
+
+    assert window.tracked_keys <= 4  # memory is still bounded
+    assert window.count("admin") == 1  # and the bucket that matters is still there
+    window.record("admin")
+    with pytest.raises(RateLimitedError):
+        window.check("admin")
+
+
+def test_a_refusing_window_refuses_the_new_key_when_every_bucket_is_live(
+    clock: FakeClock,
+) -> None:
+    window = SlidingWindow(Limit("test", 2, MINUTE), clock, max_keys=2, when_full="refuse")
+    window.record("a")
+    window.record("b")
+    with pytest.raises(RateLimitedError) as caught:
+        window.check("c")
+    assert caught.value.retry_after_ms > 0
+    window.check("a")  # the live buckets are untouched
+    assert (window.count("a"), window.count("b")) == (1, 1)
+    clock.advance(61)  # they expired: the table has room again
+    window.check("c")
+    assert window.tracked_keys <= 2
+
+
+def test_a_success_frees_a_slot_in_a_full_refusing_window(clock: FakeClock) -> None:
+    window = SlidingWindow(Limit("test", 2, MINUTE), clock, max_keys=2, when_full="refuse")
+    window.record("a")
+    window.record("b")
+    with pytest.raises(RateLimitedError):
+        window.check("c")
+    window.forget("a")  # a successful sign-in clears its failures
+    window.check("c")
+
+
+def test_a_full_refusing_window_answers_for_a_key_it_cannot_create(clock: FakeClock) -> None:
+    # Nothing is remembered about an unknown key while the table is full — and nothing
+    # needs to be, because every `check` for one is refused until a slot frees up.
+    window = SlidingWindow(Limit("test", 2, MINUTE), clock, max_keys=1, when_full="refuse")
+    window.record("a")
+    assert window.count("b") == 0
+    window.record("b")
+    assert window.tracked_keys == 1
+    with pytest.raises(RateLimitedError):
+        window.check("b")
+
+
+def test_a_refusing_window_stays_bounded_while_it_is_flooded(clock: FakeClock) -> None:
+    window = SlidingWindow(Limit("test", 2, MINUTE), clock, max_keys=8, when_full="refuse")
+    refused = 0
+    for index in range(500):
+        key = f"flood-{index}"
+        try:
+            window.check(key)
+        except RateLimitedError:
+            refused += 1
+            continue
+        window.record(key)
+    assert refused > 0  # the flood is refused instead of evicting somebody
+    assert window.tracked_keys <= 8
 
 
 def test_the_pause_starts_after_the_threshold_and_doubles(clock: FakeClock) -> None:
@@ -110,6 +198,23 @@ async def test_waiting_sleeps_for_the_pause(clock: FakeClock) -> None:
     assert clock.slept == [1, 2]
 
 
+async def test_only_the_requests_beyond_the_queue_are_paused() -> None:
+    """A pause holds a request, a socket and a task: bound how many at once (M3)."""
+    clock = BlockingClock()
+    pause = ExponentialPause(Limit("test", 1, MINUTE), clock, max_waiting=2)
+    for key in ("a", "b", "c"):
+        pause.record_failure(key)
+    waiting = [asyncio.create_task(pause.wait(key)) for key in ("a", "b")]
+    await asyncio.sleep(0)
+    assert pause.waiting == 2
+    with pytest.raises(RateLimitedError) as caught:
+        await pause.wait("c")
+    assert caught.value.retry_after_ms > 0
+    clock.release.set()
+    await asyncio.gather(*waiting)
+    assert pause.waiting == 0
+
+
 def test_a_success_clears_the_pause(clock: FakeClock) -> None:
     pause = ExponentialPause(Limit("test", 1, MINUTE), clock)
     pause.record_failure("k")
@@ -126,19 +231,6 @@ async def test_the_global_guard_slows_down_instead_of_refusing(clock: FakeClock)
         guard.record()
     await guard.admit()
     assert clock.slept == [1.0]
-
-
-class BlockingClock(FakeClock):
-    """A clock whose ``sleep`` really suspends, to observe requests waiting together."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.release = asyncio.Event()
-
-    async def sleep(self, seconds: float) -> None:
-        """Wait until the test releases the sleepers."""
-        self.slept.append(seconds)
-        await self.release.wait()
 
 
 async def test_only_the_requests_beyond_the_queue_are_refused() -> None:

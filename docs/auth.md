@@ -541,10 +541,25 @@ answered after an extra 1 s delay, with at most 50 requests waiting; beyond that
 request gets `429` with `retry_after_ms` = 1000. An attacker can slow everyone down while
 the traffic lasts, never lock anyone out.
 
+**Bounded memory.** A limiter remembers at most 10 000 keys. When that table is full,
+a limit keyed by the client address drops the least recently seen key: nobody is ever
+refused because of somebody else's traffic. The per-username cap is the exception, and
+deliberately so — it is all that stands between a guesser and the media server's own
+lockout counter, so it never drops a bucket that still holds failures inside its
+window. It prunes the expired ones, and if every remaining bucket is live it answers
+`429` for the new name until one frees up. Flooding it with unknown names therefore
+costs the attacker the flood and buys no extra attempt against a real account.
+
+**Bounded queues.** A pause is a request, a socket and a task held open, so at most 50
+of them sleep at the same time per limiter; a request arriving past that gets `429`
+immediately (it is already past the threshold that earns a pause, so a refusal is
+friendlier than the wait it replaces). The server itself serves at most 256 connections
+at a time.
+
 | What | Key | Limit | Over the limit |
 |---|---|---|---|
-| Failed password sign-ins and re-auths | client IP | 5 per 15 min | pause of 1 s, doubling at each further failure up to 15 min |
-| Password failures forwarded to the media server | case-folded username | 2 per rolling 15 min | `429` until the oldest leaves the window; a success clears it |
+| Failed password sign-ins and re-auths | client IP | 5 per 15 min | pause of 1 s, doubling at each further failure up to 15 min, at most 50 paused at once (`429` beyond) |
+| Password failures forwarded to the media server | case-folded username | 2 per rolling 15 min | `429` until the oldest leaves the window; a success clears it. A live bucket is never evicted: a full table answers `429` for new names instead |
 | Failed setup claims | client IP | 5 per 15 min | `429` |
 | Failed setup claims | global | 20 per hour | slowdown |
 | Pairing preview and pair | client IP | 10 per min | `429` |

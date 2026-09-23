@@ -22,6 +22,11 @@ from tindarr.main.app import create_app, start
 from tindarr.storage.settings import environment_overrides
 
 HEALTHCHECK_TIMEOUT_S = 3
+#: Connections uvicorn serves at the same time; beyond it a connection gets `503` and
+#: is closed rather than queued. A household needs a handful; the number is there so a
+#: flood of requests the application deliberately holds open (the sign-in pause of
+#: docs/auth.md, section 8) cannot accumulate sockets and tasks without end.
+MAX_CONCURRENCY = 256
 _WILDCARD_HOSTS = frozenset({"0.0.0.0", "::", ""})  # noqa: S104 - compared, not bound
 RESET_CONFIRMATION = "reset"
 
@@ -55,6 +60,7 @@ def serve(config: ServerConfig) -> int:
         access_log=False,
         proxy_headers=False,  # handled by the app, from TINDARR_TRUSTED_PROXIES only
         server_header=False,
+        limit_concurrency=MAX_CONCURRENCY,
     )
     return 0
 
