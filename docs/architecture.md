@@ -75,7 +75,8 @@ class MediaServer(Protocol):
     async def list_users(self) -> list[MediaUser]                    # hourly sync
     # Step 3: what the swipe engine reads.
     async def library_ids(self) -> LibraryIndex                      # TMDb ids already owned
-    async def engagement(self, user: MediaUser) -> list[Engagement]  # watched / abandoned / in progress
+    async def engagement(self, user: MediaUser) -> list[Engagement]  # watched / mostly watched /
+                                                                     # in progress / paused / abandoned
     def deep_link(self, item: LibraryItem) -> str | None              # "open in Jellyfin"
 
 class PlexTv(Protocol):            # step 2; used by auth and by the Plex adapter
@@ -91,23 +92,36 @@ class PublicUrlProbe(Protocol):    # step 2; the one call Tindarr makes to its o
     async def fetch_proof(self, public_url: str, nonce: str) -> ProofResponse  # no redirect, 5 s
 
 
-class RequestBackend(Protocol):
+class RequestBackend(Protocol):    # Seerr v3; Jellyseerr legacy, Overseerr for Plex
+    async def test(self) -> ConnectionCheck
     async def find_user(self, media_user: MediaUser) -> BackendUser | None
     async def request(self, title: TitleRef, on_behalf_of: BackendUser) -> RequestResult
-    async def status(self, titles: list[TitleRef]) -> dict[TitleRef, Availability]
+    async def status(self, titles: Sequence[TitleRef]) -> dict[TitleRef, Availability]
 
-class Metadata(Protocol):          # TMDb; OMDb is an optional enricher
-    async def search(self, title: str, year: int | None, kind: MediaKind) -> list[Title]
+class Metadata(Protocol):          # TMDb
+    async def test(self) -> ConnectionCheck
+    async def search(self, query: SearchQuery) -> list[Title]
+    async def match(self, query: SearchQuery) -> Title | None        # search, then pick one
     async def details(self, ref: TitleRef, language: str) -> TitleDetails
     async def watch_providers(self, ref: TitleRef, region: str) -> list[Provider]
     async def trailer(self, ref: TitleRef, language: str) -> Trailer | None
+    async def region_providers(self, region: str) -> list[Provider]
+
+class RatingsSource(Protocol):     # OMDb, the optional enricher of the metadata port
+    async def test(self) -> ConnectionCheck
+    async def ratings(self, imdb_id: str) -> Ratings | None
 
 class LlmProvider(Protocol):
-    kind: str
+    kind: LlmProviderKind
     capabilities: LlmCapabilities   # json_schema | json_mode | text
+    async def test(self) -> ConnectionCheck
     async def list_models(self) -> list[str]
-    async def generate(self, prompt: Prompt, schema: type[BaseModel]) -> BaseModel
+    async def generate[T: BaseModel](self, prompt: Prompt, schema: type[T]) -> Generation[T]
 ```
+
+Every connector answers the same `ConnectionCheck` (`tindarr.ports.connectors`): a coarse
+health value and, at most, the remote product's name and version — never a response body
+([the security model](security.md#7-admin-configured-urls-ssrf)).
 
 `MediaUser` carries the normalised user id, the name, and the `is_admin`,
 `remote_access` and `disabled` flags. Adapters own the media server's wire details

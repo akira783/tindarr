@@ -64,12 +64,96 @@ def _token_of(request: httpx2.Request) -> str | None:
     return None
 
 
+def _legacy_user_of(path: str) -> tuple[str, str] | None:
+    """Split ``/Users/{id}/Items[/Resume]`` into the user id and what follows."""
+    if not path.startswith("/Users/"):
+        return None
+    rest = path.removeprefix("/Users/")
+    user_id, separator, suffix = rest.partition("/Items")
+    if not separator or "/" in user_id or suffix not in ("", "/Resume"):
+        return None
+    return user_id, suffix
+
+
 def _body(request: httpx2.Request) -> Mapping[str, Any]:
     try:
         payload: Any = json.loads(request.content or b"{}")
     except ValueError:
         return {}
     return cast("Mapping[str, Any]", payload) if isinstance(payload, dict) else {}
+
+
+@dataclass
+class LibraryRow:
+    """One film or series in a fake library, with each user's play state."""
+
+    item_id: str
+    name: str
+    item_type: str = "Movie"
+    tmdb_id: str | None = None
+    year: int | None = 2020
+    #: ``user id -> the ``UserData`` block that user sees on this item``.
+    user_data: dict[str, dict[str, Any]] = field(default_factory=dict[str, dict[str, Any]])
+
+    def payload(self, user_id: str | None) -> dict[str, Any]:
+        """Serialise the row as a listing entry, with user data when one was asked for."""
+        row: dict[str, Any] = {
+            "Id": self.item_id,
+            "Name": self.name,
+            "Type": self.item_type,
+            "ProviderIds": {} if self.tmdb_id is None else {"Tmdb": self.tmdb_id},
+        }
+        if self.year is not None:
+            row["ProductionYear"] = self.year
+        if user_id is not None:
+            row["UserData"] = dict(self.user_data.get(user_id, {}))
+        return row
+
+
+@dataclass
+class PlayedEpisode:
+    """One episode a user has played, as the ``IsPlayed=true`` listing returns it."""
+
+    episode_id: str
+    series_id: str
+    user_id: str
+    last_played: str | None = None
+
+    def payload(self) -> dict[str, Any]:
+        """Serialise the episode as a listing entry."""
+        return {
+            "Id": self.episode_id,
+            "Name": f"Episode {self.episode_id}",
+            "Type": "Episode",
+            "SeriesId": self.series_id,
+            "UserData": {"Played": True, "LastPlayedDate": self.last_played},
+        }
+
+
+@dataclass
+class ResumeEntry:
+    """One "continue watching" entry."""
+
+    item_id: str
+    user_id: str
+    percentage: float = 30.0
+    last_played: str | None = None
+    series_id: str | None = None
+    item_type: str = "Movie"
+
+    def payload(self) -> dict[str, Any]:
+        """Serialise the entry as the resume listing returns it."""
+        row: dict[str, Any] = {
+            "Id": self.item_id,
+            "Type": self.item_type,
+            "UserData": {
+                "PlayedPercentage": self.percentage,
+                "LastPlayedDate": self.last_played,
+            },
+        }
+        if self.series_id is not None:
+            row["SeriesId"] = self.series_id
+        return row
 
 
 @dataclass
@@ -106,6 +190,14 @@ class FakeMediaBrowser:
         default_factory=dict[str, QuickConnectRequest]
     )
     logouts: list[str] = field(default_factory=list[str])
+    #: The library and the play state of each user (roadmap step 3).
+    library: list[LibraryRow] = field(default_factory=list[LibraryRow])
+    played_episodes: list[PlayedEpisode] = field(default_factory=list[PlayedEpisode])
+    resume: list[ResumeEntry] = field(default_factory=list[ResumeEntry])
+    #: ``True`` for a server that only has ``GET /Users/{id}/Items`` (Emby, Jellyfin
+    #: before 10.9); ``False`` for one that only has ``GET /Items?userId=`` (Jellyfin 12).
+    legacy_user_items: bool = False
+    modern_user_items: bool = True
     requests: list[httpx2.Request] = field(default_factory=list[httpx2.Request])
     _tokens: dict[str, str] = field(default_factory=dict[str, str])
     _next_secret: int = 0
@@ -129,6 +221,21 @@ class FakeMediaBrowser:
         token = f"user-token-{name}"
         self._tokens[token] = name
         return token
+
+    def add_library_item(
+        self,
+        item_id: str,
+        name: str,
+        item_type: str = "Movie",
+        tmdb_id: str | None = None,
+        year: int | None = 2020,
+    ) -> LibraryRow:
+        """Add one film or series to the library and return it, to set play state on."""
+        row = LibraryRow(
+            item_id=item_id, name=name, item_type=item_type, tmdb_id=tmdb_id, year=year
+        )
+        self.library.append(row)
+        return row
 
     def approve(self, secret: str, user_name: str) -> None:
         """Approve a Quick Connect request, as a signed-in Jellyfin client would."""
@@ -159,10 +266,66 @@ class FakeMediaBrowser:
         forced = self.fails.pop(path, None)
         if forced is not None:
             return httpx2.Response(forced, json={"error": "forced"})
+        listing = self._listing(request, path)
+        if listing is not None:
+            return listing
         route = self._routes().get((request.method, path))
         if route is None:
             return _json({"error": "not found"}, 404)
         return route(request)
+
+    # --- listings (roadmap step 3) --------------------------------------------------
+
+    def _listing(  # noqa: PLR0911 - one return per spelling of a listing route
+        self, request: httpx2.Request, path: str
+    ) -> httpx2.Response | None:
+        """Answer the four spellings of a listing, or ``None`` when this is not one."""
+        if request.method != "GET":
+            return None
+        query = parse_qs(request.url.query.decode())
+        modern_user = query.get("userId", [None])[0]
+        if path == "/Items":
+            if modern_user is not None and not self.modern_user_items:
+                return _json({"error": "gone"}, 404)
+            return self._items(query, modern_user)
+        if path == "/UserItems/Resume":
+            if not self.modern_user_items:
+                return _json({"error": "gone"}, 404)
+            return self._resume(modern_user)
+        legacy = _legacy_user_of(path)
+        if legacy is None:
+            return None
+        user_id, suffix = legacy
+        if not self.legacy_user_items:
+            return _json({"error": "gone"}, 404)
+        if suffix == "/Resume":
+            return self._resume(user_id)
+        return self._items(query, user_id)
+
+    def _items(self, query: Mapping[str, list[str]], user_id: str | None) -> httpx2.Response:
+        types = set((query.get("IncludeItemTypes", [""])[0]).split(","))
+        if "Episode" in types:
+            rows = [
+                episode.payload()
+                for episode in self.played_episodes
+                if user_id is None or episode.user_id == user_id
+            ]
+        else:
+            rows = [
+                row.payload(user_id)
+                for row in self.library
+                if row.item_type in types or not types - {""}
+            ]
+        start = int(query.get("StartIndex", ["0"])[0])
+        limit = int(query.get("Limit", ["500"])[0])
+        page = rows[start : start + limit]
+        return _json({"Items": page, "TotalRecordCount": len(rows), "StartIndex": start})
+
+    def _resume(self, user_id: str | None) -> httpx2.Response:
+        rows = [
+            entry.payload() for entry in self.resume if user_id is None or entry.user_id == user_id
+        ]
+        return _json({"Items": rows, "TotalRecordCount": len(rows), "StartIndex": 0})
 
     def _routes(self) -> dict[tuple[str, str], Callable[[httpx2.Request], httpx2.Response]]:
         return {
@@ -450,6 +613,16 @@ class FakeInternet:
     plex_tv: FakePlexTv = field(default_factory=FakePlexTv)
     machine_id: str = MACHINE_ID
     plex_offline: bool = False
+    #: ``/library/sections``: one entry per library the fake Plex server serves.
+    plex_sections: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+    #: ``section key -> the ``Metadata`` rows that library holds``.
+    plex_items: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict[str, list[dict[str, Any]]]
+    )
+    #: ``/status/sessions/history/all``: one row per viewing, with its ``accountID``.
+    plex_history: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+    #: Every request the fake Plex **server** received (plex.tv keeps its own list).
+    plex_requests: list[httpx2.Request] = field(default_factory=list[httpx2.Request])
 
     def handle(self, request: httpx2.Request) -> httpx2.Response:
         """Route a request to the server that answers at its host.
@@ -464,15 +637,47 @@ class FakeInternet:
             return self.media.handle(request)
         raise httpx2.ConnectError(f"nothing answers at {request.url.host}")
 
-    def _plex(self, request: httpx2.Request) -> httpx2.Response:
+    def _plex(  # noqa: PLR0911 - one return per Plex endpoint the fake serves
+        self, request: httpx2.Request
+    ) -> httpx2.Response:
+        self.plex_requests.append(request)
         if self.plex_offline:
             raise httpx2.ConnectError("no route to host")
-        if request.url.path == "/identity":
+        path = request.url.path
+        if path == "/identity":
             return _json({"MediaContainer": {"machineIdentifier": self.machine_id}})
-        if request.url.path == "/":
-            known = request.headers.get("x-plex-token", "") in self.plex_tv.accounts
+        known = request.headers.get("x-plex-token", "") in self.plex_tv.accounts
+        if path == "/":
             return _json({"MediaContainer": {}}, 200 if known else 401)
+        if not known:
+            return _json({"error": "unauthorized"}, 401)
+        if path == "/library/sections":
+            return _json({"MediaContainer": {"Directory": self.plex_sections}})
+        if path.startswith("/library/sections/") and path.endswith("/all"):
+            key = path.removeprefix("/library/sections/").removesuffix("/all")
+            return self._plex_container(request, self.plex_items.get(key, []))
+        if path == "/status/sessions/history/all":
+            return self._plex_container(request, self._plex_viewings(request))
         return _json({"error": "not found"}, 404)
+
+    def _plex_viewings(self, request: httpx2.Request) -> list[dict[str, Any]]:
+        account = parse_qs(request.url.query.decode()).get("accountID", [None])[0]
+        return [
+            row
+            for row in self.plex_history
+            if account is None or str(row.get("accountID", "")) == account
+        ]
+
+    @staticmethod
+    def _plex_container(request: httpx2.Request, rows: list[dict[str, Any]]) -> httpx2.Response:
+        """Answer one page, honouring Plex's own container range parameters."""
+        query = parse_qs(request.url.query.decode())
+        start = int(query.get("X-Plex-Container-Start", ["0"])[0])
+        size = int(query.get("X-Plex-Container-Size", ["500"])[0])
+        page = rows[start : start + size]
+        return _json(
+            {"MediaContainer": {"size": len(page), "totalSize": len(rows), "Metadata": page}}
+        )
 
     @property
     def transport(self) -> httpx2.MockTransport:

@@ -47,10 +47,26 @@ from tindarr.adapters.http import (
     read_list,
     read_mapping,
 )
+from tindarr.adapters.mediabrowser_library import (
+    ENGAGEMENT_PARAMS,
+    LIBRARY_PARAMS,
+    PLAYED_EPISODE_PARAMS,
+    RESUME_LIMIT,
+    EpisodeTally,
+    ResumeList,
+    UserItemsReader,
+    build_engagements,
+    library_item,
+    rows_of,
+)
+from tindarr.core.clock import Clock, SystemClock
 from tindarr.ports import problems
 from tindarr.ports.media_server import (
     ConnectionCheck,
     ConnectorHealth,
+    Engagement,
+    LibraryIndex,
+    LibraryItem,
     MediaServerConnection,
     MediaServerKind,
     MediaUser,
@@ -106,13 +122,18 @@ class MediaBrowserServer:
     #: Oldest version supported, or ``()`` when no floor is enforced.
     minimum_version: tuple[int, ...] = ()
 
+    #: Where this product's own web client opens an item. ``{id}`` is the item id.
+    item_path: str = "/web/#/details?id={id}"
+
     def __init__(
         self,
         connection: MediaServerConnection,
         transport: httpx2.AsyncBaseTransport | None = None,
+        clock: Clock | None = None,
     ) -> None:
         self._connection = connection
         self._transport = transport
+        self._clock = clock or SystemClock()
 
     # --- plumbing -------------------------------------------------------------------
 
@@ -360,6 +381,58 @@ class MediaBrowserServer:
     async def quick_connect_poll(self, secret: str) -> MediaUser | None:
         """Refuse: this server has no Quick Connect."""
         raise problems.quick_connect_unavailable()
+
+    # --- the library and one user's history (step 3) --------------------------------
+
+    async def library_ids(self) -> LibraryIndex:
+        """List every film and series, with the TMDb ids the server matched to them.
+
+        Read with the administrator API key and no user, so the answer is the
+        household's library rather than one account's filtered view of it.
+        """
+        try:
+            async with self._api_key_session() as session:
+                rows = await UserItemsReader(session).all_rows(LIBRARY_PARAMS)
+        except RemoteCallError as failure:
+            raise self._unreachable("library_ids", failure) from None
+        items = [item for row in rows if (item := library_item(row)) is not None]
+        logger.debug(
+            "read the media server library",
+            extra=self._log() | {"items": len(items)},
+        )
+        return LibraryIndex(items)
+
+    async def engagement(self, user: MediaUser) -> list[Engagement]:
+        """Read what one user watched, is watching, or gave up on.
+
+        Three listings, because no single one answers it: the titles with this user's
+        play state, their played episodes (which is how a series' progress is counted,
+        never a play count), and the "continue watching" list, which is the only place
+        either product reports how far into something somebody got.
+        """
+        try:
+            async with self._api_key_session() as session:
+                reader = UserItemsReader(session, user.id)
+                titles = await reader.all_rows(ENGAGEMENT_PARAMS)
+                episodes = EpisodeTally(await reader.all_rows(PLAYED_EPISODE_PARAMS))
+                resume = ResumeList(rows_of(await self._resume(session, user.id)))
+        except RemoteCallError as failure:
+            raise self._unreachable("engagement", failure) from None
+        return build_engagements(titles, episodes, resume, self._clock.now())
+
+    @staticmethod
+    async def _resume(session: HttpSession, user_id: str) -> Mapping[str, Any]:
+        return await UserItemsReader(session, user_id).page(
+            "/Resume", {"Limit": str(RESUME_LIMIT), "EnableUserData": "true"}
+        )
+
+    def deep_link(self, item: LibraryItem) -> str | None:
+        """Return the URL that opens the item in this server's own web client.
+
+        Built from the **configured** address, which is the one this household reaches
+        the server at; nothing the server said about itself goes into it.
+        """
+        return self._connection.url.rstrip("/") + self.item_path.format(id=item.item_id)
 
     # --- failures -------------------------------------------------------------------
 

@@ -17,14 +17,23 @@ from tindarr.core.errors import ProblemError
 __all__ = [
     "account_disabled",
     "invalid_credentials",
+    "llm_auth_failed",
+    "llm_invalid_output",
+    "llm_model_not_found",
+    "llm_quota",
+    "llm_unreachable",
     "media_server_changed",
     "media_server_unreachable",
     "media_server_unsupported",
+    "metadata_unreachable",
     "not_a_server_user",
     "plex_owner_required",
     "plex_tv_unreachable",
     "quick_connect_expired",
     "quick_connect_unavailable",
+    "quota_exceeded",
+    "request_backend_error",
+    "request_not_allowed",
     "sign_in_method_unavailable",
 ]
 
@@ -113,4 +122,88 @@ def plex_tv_unreachable() -> ProblemError:
         HTTPStatus.SERVICE_UNAVAILABLE,
         "plex_tv_unreachable",
         "plex.tv did not answer; try again in a moment.",
+    )
+
+
+# --- metadata, the request backend and the AI providers (step 3) --------------------
+
+
+def metadata_unreachable() -> ProblemError:
+    """503: TMDb or OMDb did not answer, or answered something unusable."""
+    return ProblemError(
+        HTTPStatus.SERVICE_UNAVAILABLE,
+        "metadata_unreachable",
+        "The metadata service did not answer; try again in a moment.",
+    )
+
+
+def request_backend_error() -> ProblemError:
+    """502: the request backend answered something Tindarr cannot act on."""
+    return ProblemError(
+        HTTPStatus.BAD_GATEWAY,
+        "request_backend_error",
+        "The request service answered with an error; an administrator should check it.",
+    )
+
+
+def request_not_allowed() -> ProblemError:
+    """403: the backend refuses this request for this user (permissions)."""
+    return ProblemError(
+        HTTPStatus.FORBIDDEN,
+        "request_not_allowed",
+        "Your account on the request service may not request this.",
+    )
+
+
+def quota_exceeded() -> ProblemError:
+    """403: the backend's own per-user quota is spent."""
+    return ProblemError(
+        HTTPStatus.FORBIDDEN,
+        "quota_exceeded",
+        "Your request quota on the request service is used up for now.",
+    )
+
+
+def llm_auth_failed() -> ProblemError:
+    """502: the AI provider rejected the API key."""
+    return ProblemError(
+        HTTPStatus.BAD_GATEWAY,
+        "llm_auth_failed",
+        "The AI provider rejected the API key; an administrator should check it.",
+    )
+
+
+def llm_quota() -> ProblemError:
+    """502: the AI provider's rate limit or paid quota is exhausted."""
+    return ProblemError(
+        HTTPStatus.BAD_GATEWAY,
+        "llm_quota",
+        "The AI provider's rate limit or quota was reached; try again later.",
+    )
+
+
+def llm_model_not_found() -> ProblemError:
+    """502: the AI provider does not serve the configured model."""
+    return ProblemError(
+        HTTPStatus.BAD_GATEWAY,
+        "llm_model_not_found",
+        "The AI provider does not know the configured model.",
+    )
+
+
+def llm_unreachable() -> ProblemError:
+    """502: the AI provider did not answer at all."""
+    return ProblemError(
+        HTTPStatus.BAD_GATEWAY,
+        "llm_unreachable",
+        "The AI provider could not be reached; check its address and the network.",
+    )
+
+
+def llm_invalid_output() -> ProblemError:
+    """502: the model's answer did not fit the schema, twice running."""
+    return ProblemError(
+        HTTPStatus.BAD_GATEWAY,
+        "llm_invalid_output",
+        "The AI provider did not answer in the expected format; try again.",
     )

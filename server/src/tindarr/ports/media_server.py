@@ -12,14 +12,40 @@ contract's codes (``media_server_unreachable``, ``invalid_credentials``,
 coarse health value and never raises for a remote failure.
 """
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Final, Literal, Protocol, get_args
 
-type MediaServerKind = Literal["jellyfin", "emby", "plex"]
-type ConnectorHealth = Literal[
-    "ok", "unauthorized", "unreachable", "unexpected_response", "unsupported_version"
+from tindarr.ports.connectors import ConnectionCheck, ConnectorHealth
+from tindarr.ports.titles import MediaKind, TitleRef
+
+__all__ = [
+    "MEDIA_SERVER_KINDS",
+    "NEGATIVE_ENGAGEMENT",
+    "POSITIVE_ENGAGEMENT",
+    "ConnectionCheck",
+    "ConnectorHealth",
+    "Engagement",
+    "EngagementState",
+    "LibraryIndex",
+    "LibraryItem",
+    "MediaKind",
+    "MediaServer",
+    "MediaServerConnection",
+    "MediaServerFactory",
+    "MediaServerKind",
+    "MediaUser",
+    "QuickConnectStart",
+    "ServerIdentity",
+    "as_media_server_kind",
+    "film_engagement",
+    "normalize_server_id",
+    "normalize_user_id",
+    "series_engagement",
 ]
+
+type MediaServerKind = Literal["jellyfin", "emby", "plex"]
 
 MEDIA_SERVER_KINDS: Final[tuple[MediaServerKind, ...]] = get_args(MediaServerKind.__value__)
 #: Jellyfin and Emby user ids are 32 hex digits; Plex users are keyed by account id.
@@ -108,20 +134,6 @@ class ServerIdentity:
 
 
 @dataclass(frozen=True, slots=True)
-class ConnectionCheck:
-    """Result of a connection test: coarse health, never a response body."""
-
-    health: ConnectorHealth
-    server_name: str | None = None
-    server_version: str | None = None
-
-    @property
-    def ok(self) -> bool:
-        """Whether the connector works."""
-        return self.health == "ok"
-
-
-@dataclass(frozen=True, slots=True)
 class QuickConnectStart:
     """A Quick Connect request: the code the user approves, and the secret to poll with."""
 
@@ -140,6 +152,163 @@ class MediaServerConnection:
     verify_tls: bool = True
     #: Stable per install; the ``DeviceId`` of the Jellyfin / Emby client identity.
     device_id: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class LibraryItem:
+    """One film or series the household already owns, as the media server lists it.
+
+    ``tmdb_id`` is ``None`` for an item the media server never matched to TMDb (a home
+    video, a badly named folder). Such an item cannot be compared with a suggestion, but
+    it is still kept: it is what ``deep_link`` needs and what the console counts.
+    """
+
+    kind: MediaKind
+    #: The media server's own id for the item; a Plex ``ratingKey``.
+    item_id: str
+    name: str
+    tmdb_id: int | None = None
+    year: int | None = None
+
+    @property
+    def ref(self) -> TitleRef | None:
+        """The title this item is, when the media server matched it to TMDb."""
+        return None if self.tmdb_id is None else TitleRef(self.kind, self.tmdb_id)
+
+
+class LibraryIndex:
+    """What the household already owns, ready to be looked up by TMDb id.
+
+    The swipe engine asks two questions of it — "do we have this?" and "where do I send
+    the user to watch it?" — so both are answered from one read of the library, through
+    a map built once rather than a scan per suggestion.
+    """
+
+    def __init__(self, items: Iterable[LibraryItem] = ()) -> None:
+        self.items: tuple[LibraryItem, ...] = tuple(items)
+        # First wins: a duplicate is the same title in two libraries, and the first is
+        # as good a link target as the second.
+        by_ref: dict[TitleRef, LibraryItem] = {}
+        for item in self.items:
+            ref = item.ref
+            if ref is not None:
+                by_ref.setdefault(ref, item)
+        self._by_ref: Mapping[TitleRef, LibraryItem] = by_ref
+
+    def __len__(self) -> int:
+        """How many items the library holds, matched to TMDb or not."""
+        return len(self.items)
+
+    @property
+    def refs(self) -> frozenset[TitleRef]:
+        """Every title the library holds and the media server matched to TMDb."""
+        return frozenset(self._by_ref)
+
+    def find(self, ref: TitleRef) -> LibraryItem | None:
+        """Return the owned item for ``ref``, or ``None`` when it is not owned."""
+        return self._by_ref.get(ref)
+
+    def owns(self, ref: TitleRef) -> bool:
+        """Whether the household already owns this title."""
+        return ref in self._by_ref
+
+
+#: Five states, ordered from "liked it enough to finish" to "gave up on it". They are
+#: the fork's seven labels minus the two it never produces: ``rewatched``, which needs a
+#: source that counts real completed views, and the movie/series spelling of
+#: "finished" (``completed``), which says nothing extra once ``progress`` is carried.
+type EngagementState = Literal["watched", "mostly_watched", "in_progress", "paused", "abandoned"]
+
+#: States that say "this person likes this sort of thing".
+POSITIVE_ENGAGEMENT: Final[frozenset[EngagementState]] = frozenset(
+    {"watched", "mostly_watched", "in_progress"}
+)
+#: The one state that says the opposite. ``paused`` deliberately says neither: a title
+#: somebody stopped watching months ago is as often a lost evening as a rejection.
+NEGATIVE_ENGAGEMENT: Final[frozenset[EngagementState]] = frozenset({"abandoned"})
+
+
+@dataclass(frozen=True, slots=True)
+class Engagement:
+    """What one user did with one title they own.
+
+    Three numbers and nothing about how *often* it was played. Media server play counts
+    are useless as a rewatch signal here: a debrid or shared setup inflates them (the
+    fork measured nine "plays" for fifty-four minutes actually watched), so a title
+    somebody half-watched would outrank one they loved. ``progress`` is the fraction
+    watched — of the runtime for a film, of the episodes for a series — and that,
+    with how long ago it happened, is all the engine reads.
+    """
+
+    item: LibraryItem
+    state: EngagementState
+    progress: float = 0.0
+    episodes_played: int | None = None
+    episodes_total: int | None = None
+    last_played_at: datetime | None = None
+
+    @property
+    def ref(self) -> TitleRef | None:
+        """The title this engagement is about, when it is one TMDb knows."""
+        return self.item.ref
+
+    @property
+    def positive(self) -> bool:
+        """Whether this is evidence in favour of more of the same."""
+        return self.state in POSITIVE_ENGAGEMENT
+
+
+#: A film counted as watched from here, even without the server's "played" flag: the
+#: last tenth is credits, a phone call, or falling asleep two minutes from the end.
+FINISHED_FILM_RATIO: Final = 0.9
+#: A series counted as watched from here (the architecture's 60 % rule).
+MOSTLY_WATCHED_RATIO: Final = 0.6
+#: Watched this recently, it is being watched now, whatever the numbers say.
+RECENT_DAYS: Final = 30
+#: Untouched for this long, it is a candidate for "gave up on it".
+ABANDONED_AFTER_DAYS: Final = 60
+#: ...but only when little was invested: a third of a hundred-episode show, paused for
+#: months, is a fan taking a break, not a rejection.
+ABANDONED_RATIO: Final = 0.5
+ABANDONED_MAX_EPISODES: Final = 5
+
+
+def film_engagement(*, played: bool, progress: float, days_since: int | None) -> EngagementState:
+    """Classify a film from the three facts every media server agrees on.
+
+    The server's own "played" flag wins, then the position in the file, then how long
+    ago it was touched. A film nobody has opened since before ``RECENT_DAYS`` and never
+    finished was abandoned; one with no date at all is only ``paused``, because "we do
+    not know when" is not evidence of anything.
+    """
+    if played or progress >= FINISHED_FILM_RATIO:
+        return "watched"
+    if days_since is not None and days_since <= RECENT_DAYS:
+        return "in_progress"
+    return "abandoned" if days_since is not None else "paused"
+
+
+def series_engagement(
+    *, episodes_played: int, episodes_total: int | None, days_since: int | None
+) -> EngagementState:
+    """Classify a series from how many of its episodes were played.
+
+    ``MOSTLY_WATCHED_RATIO`` of them is "watched" and beats every other rule, recency
+    included: four episodes of five is nearly finished, not dropped, however long ago it
+    was. An unknown total can never reach that bar, so a series whose episode count the
+    server did not give is judged on recency alone and never on a ratio.
+    """
+    ratio = episodes_played / episodes_total if episodes_total else None
+    if ratio is not None and ratio >= MOSTLY_WATCHED_RATIO:
+        return "watched" if ratio >= FINISHED_FILM_RATIO else "mostly_watched"
+    if days_since is not None and days_since <= RECENT_DAYS:
+        return "in_progress"
+    barely_started = episodes_played <= ABANDONED_MAX_EPISODES and (
+        ratio is None or ratio < ABANDONED_RATIO
+    )
+    if days_since is not None and days_since > ABANDONED_AFTER_DAYS and barely_started:
+        return "abandoned"
+    return "paused"
 
 
 class MediaServer(Protocol):
@@ -173,6 +342,18 @@ class MediaServer(Protocol):
 
     async def list_users(self) -> list[MediaUser]:
         """Every user of the server, for the periodic sync."""
+        ...
+
+    async def library_ids(self) -> LibraryIndex:
+        """Every film and series the household owns, with the TMDb ids matched to them."""
+        ...
+
+    async def engagement(self, user: MediaUser) -> list[Engagement]:
+        """Return what this user has watched, is watching, or gave up on."""
+        ...
+
+    def deep_link(self, item: LibraryItem) -> str | None:
+        """Return a URL that opens the item in this server's own client, if one exists."""
         ...
 
 

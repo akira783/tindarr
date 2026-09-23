@@ -22,3 +22,5 @@ class EmbyServer(MediaBrowserServer):
     """The ``MediaServer`` port for Emby."""
 
     kind: MediaServerKind = "emby"
+    #: Emby's web client routes items through ``index.html``, Jellyfin's does not.
+    item_path: str = "/web/index.html#!/item?id={id}"

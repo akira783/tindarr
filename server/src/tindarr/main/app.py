@@ -132,7 +132,7 @@ async def start(
     connector = MediaServerConnector(
         engine,
         settings,
-        wiring.media_servers or media_server_factory(plex_tv),
+        wiring.media_servers or media_server_factory(plex_tv, clock=wiring.clock),
         handles,
         wiring.clock,
     )

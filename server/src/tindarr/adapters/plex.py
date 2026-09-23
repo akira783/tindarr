@@ -21,7 +21,8 @@ Consequences this adapter encodes:
 import logging
 from collections.abc import Mapping
 from http import HTTPStatus
-from typing import Any, Final
+from typing import Any, Final, cast
+from urllib.parse import quote
 
 import httpx2
 
@@ -32,11 +33,23 @@ from tindarr.adapters.http import (
     as_text,
     read_mapping,
 )
+from tindarr.adapters.plex_library import (
+    HISTORY_LIMIT,
+    MAX_PAGES,
+    PAGE_SIZE,
+    WatchHistory,
+    library_item,
+    owner_engagement,
+)
+from tindarr.core.clock import Clock, SystemClock
 from tindarr.core.errors import ProblemError, RateLimitedError
 from tindarr.ports import problems
 from tindarr.ports.media_server import (
     ConnectionCheck,
     ConnectorHealth,
+    Engagement,
+    LibraryIndex,
+    LibraryItem,
     MediaServerConnection,
     MediaServerKind,
     MediaUser,
@@ -48,6 +61,12 @@ from tindarr.ports.plextv import PlexResource, PlexTv, as_media_user, find_serve
 
 #: What the server answers its own ``machineIdentifier`` and version on.
 _IDENTITY_PATH: Final = "/identity"
+#: The libraries, and everything in one of them.
+_SECTIONS_PATH: Final = "/library/sections"
+#: Every viewing the server recorded, filterable by account for its owner.
+_HISTORY_PATH: Final = "/status/sessions/history/all"
+#: Where Plex's own web client opens an item, by server and metadata key.
+_APP_URL: Final = "https://app.plex.tv/desktop/#!/server/{machine_id}/details?key={key}"
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +88,14 @@ class PlexServer:
         connection: MediaServerConnection,
         plex_tv: PlexTv,
         transport: httpx2.AsyncBaseTransport | None = None,
+        clock: Clock | None = None,
     ) -> None:
         self._connection = connection
         self._plex_tv = plex_tv
         self._transport = transport
+        self._clock = clock or SystemClock()
+        #: Read from ``/identity``; a deep link cannot be built before it is known.
+        self._machine_id: str | None = None
 
     def _session(self, *, token: str | None = None) -> HttpSession:
         headers = {"Accept": "application/json"}
@@ -99,6 +122,7 @@ class PlexServer:
         machine_id = normalize_server_id(as_text(container.get("machineIdentifier")) or "")
         if machine_id is None:
             raise self._unreachable("identify", RemoteCallError("no_machine_identifier"))
+        self._machine_id = machine_id
         return ServerIdentity(
             kind="plex",
             server_id=machine_id,
@@ -190,6 +214,121 @@ class PlexServer:
             as_media_user(account, admin=False) for account in shared if account.id != owner.id
         )
         return users
+
+    # --- the library and one user's history (step 3) --------------------------------
+
+    async def library_ids(self) -> LibraryIndex:
+        """List every film and series in every library, with their TMDb ids."""
+        await self.identify()
+        try:
+            async with self._session(token=self._connection.secret) as session:
+                items = [
+                    item
+                    for key in await self._section_keys(session)
+                    for row in await self._section_rows(session, key)
+                    if (item := library_item(row)) is not None
+                ]
+        except RemoteCallError as failure:
+            raise self._unreachable("library_ids", failure) from None
+        logger.debug("read the Plex library", extra={"items": len(items)})
+        return LibraryIndex(items)
+
+    async def engagement(self, user: MediaUser) -> list[Engagement]:
+        """Read what one user watched — fully for the owner, from the history otherwise.
+
+        The stored credential is the owner's account token, and a Plex server serves the
+        view state of whoever asked. So the owner's own progress is read straight from
+        the library, while every other account is reconstructed from the server's
+        history, which the owner may filter by account but which records completed
+        viewings only (see the module docstring and ADR 0012).
+        """
+        token, client_id = self._connection.secret, self._connection.device_id
+        try:
+            owner = as_media_user(await self._plex_tv.account(token, client_id), admin=True)
+        except RateLimitedError:
+            raise problems.plex_tv_unreachable() from None
+        try:
+            async with self._session(token=token) as session:
+                keys = await self._section_keys(session)
+                library = [row for key in keys for row in await self._section_rows(session, key)]
+                if user.id == owner.id:
+                    return owner_engagement(library, self._clock.now())
+                history = await self._history(session, user.id)
+        except RemoteCallError as failure:
+            raise self._unreachable("engagement", failure) from None
+        return WatchHistory(history).engagements(library, self._clock.now())
+
+    async def _section_keys(self, session: HttpSession) -> list[str]:
+        response = await session.request("GET", _SECTIONS_PATH)
+        container = self._container(read_mapping(_expect_ok(response)))
+        directories = container.get("Directory")
+        if not isinstance(directories, list):
+            return []
+        keys: list[str] = []
+        for value in cast("list[object]", directories):
+            entry = as_object(value)
+            key = as_text(entry.get("key")) if entry is not None else None
+            kind = as_text(entry.get("type")) if entry is not None else None
+            if key is not None and kind in ("movie", "show"):
+                keys.append(key)
+        return keys
+
+    async def _section_rows(
+        self, session: HttpSession, section_key: str
+    ) -> list[Mapping[str, Any]]:
+        return await self._paged(
+            session, f"{_SECTIONS_PATH}/{section_key}/all", {"includeGuids": "1"}, MAX_PAGES
+        )
+
+    async def _history(self, session: HttpSession, account_id: str) -> list[Mapping[str, Any]]:
+        return await self._paged(
+            session,
+            _HISTORY_PATH,
+            {"accountID": account_id, "sort": "viewedAt:desc"},
+            max(HISTORY_LIMIT // PAGE_SIZE, 1),
+        )
+
+    async def _paged(
+        self, session: HttpSession, path: str, params: Mapping[str, str], max_pages: int
+    ) -> list[Mapping[str, Any]]:
+        """Read a ``MediaContainer`` listing page by page, through Plex's own container range.
+
+        Plex answers an out-of-range start with an empty container rather than an error,
+        so a short page — or the page cap — ends the loop.
+        """
+        collected: list[Mapping[str, Any]] = []
+        for page in range(max_pages):
+            response = await session.request(
+                "GET",
+                path,
+                params=dict(params)
+                | {
+                    "X-Plex-Container-Start": str(page * PAGE_SIZE),
+                    "X-Plex-Container-Size": str(PAGE_SIZE),
+                },
+            )
+            container = self._container(read_mapping(_expect_ok(response)))
+            rows = container.get("Metadata")
+            if not isinstance(rows, list):
+                return collected
+            found = [row for value in cast("list[object]", rows) if (row := as_object(value))]
+            collected.extend(found)
+            if len(found) < PAGE_SIZE:
+                return collected
+        logger.warning("stopped reading a Plex listing at the page cap", extra={"path": path})
+        return collected
+
+    def deep_link(self, item: LibraryItem) -> str | None:
+        """Return the app.plex.tv URL for an item, once the server's identifier is known.
+
+        Plex addresses an item by server **and** metadata key, so the link cannot be
+        built before ``identify`` has run; ``library_ids`` always runs it first, which is
+        what every caller of this does.
+        """
+        if self._machine_id is None:
+            return None
+        key = quote(f"/library/metadata/{item.item_id}", safe="")
+        return _APP_URL.format(machine_id=self._machine_id, key=key)
 
     # --- failures -------------------------------------------------------------------
 

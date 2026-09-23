@@ -7,6 +7,9 @@ from tindarr.core.errors import ProblemError
 from tindarr.ports.media_server import (
     ConnectionCheck,
     ConnectorHealth,
+    Engagement,
+    LibraryIndex,
+    LibraryItem,
     MediaServerConnection,
     MediaServerKind,
     MediaUser,
@@ -78,6 +81,9 @@ class FakeMediaServer:
     quick_connect_on: bool = True
     #: What ``identify`` claims to be; defaults to ``kind``.
     identifies_as: MediaServerKind | None = None
+    #: What the household owns, and what each user did with it (step 3).
+    library: list[LibraryItem] = field(default_factory=list[LibraryItem])
+    engagements: dict[str, list[Engagement]] = field(default_factory=dict[str, list[Engagement]])
     calls: list[str] = field(default_factory=list[str])
 
     async def identify(self) -> ServerIdentity:
@@ -124,6 +130,20 @@ class FakeMediaServer:
         """Return every known user."""
         self.calls.append("list_users")
         return list(self.users.values())
+
+    async def library_ids(self) -> LibraryIndex:
+        """Return whatever the test put in the library."""
+        self.calls.append("library_ids")
+        return LibraryIndex(self.library)
+
+    async def engagement(self, user: MediaUser) -> list[Engagement]:
+        """Return the engagements the test set for this user."""
+        self.calls.append(f"engagement:{user.id}")
+        return list(self.engagements.get(user.id, []))
+
+    def deep_link(self, item: LibraryItem) -> str | None:
+        """Return a link of the shape the real adapters build."""
+        return f"https://media.test/item/{item.item_id}"
 
 
 class FakeMediaServers:
