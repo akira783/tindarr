@@ -173,9 +173,8 @@ class HybridStrategy:
                 extra={"reason": failure.code, "batch": context.batch_index},
             )
             return _from_pool(pool, size, [], context.excluded)
-        return _from_pool(
-            pool, size, _one_per_series(_kept(selection.value, pool, context)), context.excluded
-        )
+        chosen = _within_budget(_one_per_series(_kept(selection.value, pool, context)), pool, size)
+        return _from_pool(pool, size, chosen, context.excluded)
 
     async def _card(
         self, title: Title, pick: PickKind, reason: str | None, context: StrategyContext
@@ -251,6 +250,52 @@ def _one_per_series(
     return kept
 
 
+class _FameBudget:
+    """How many cards of one batch may come from the most-rated quarter of the pool.
+
+    The measurement that asked for this is in ``docs/evaluation.md``: given the pool,
+    the model's picks sat above their own pool's vote-count median in eight batches of
+    nine, while both floors sat below theirs. The vote count is how many people ever had
+    an opinion about a title, which is the closest thing TMDb carries to "they have
+    probably already seen it" — and ADR 0013's whole complaint is that 47 % of the
+    fork's cards were titles the user already knew.
+
+    It is spent here, on the batch, rather than filtered out of the pool. A candidate
+    the novelty band admits is one this user could legitimately be shown; removing it
+    from the pool would remove it from *every* batch of the run, and the earlier attempt
+    at that — a fame cut on the popularity axis — cost recall and moved nothing.
+    """
+
+    __slots__ = ("_left", "_threshold")
+
+    def __init__(self, pool: CandidatePool, size: int) -> None:
+        self._threshold = pool.famous_votes
+        self._left = pool.famous(size)
+
+    def spend(self, title: Title) -> bool:
+        """Whether ``title`` fits the budget, charging it when it does."""
+        if title.vote_count <= self._threshold:
+            return True
+        if self._left <= 0:
+            return False
+        self._left -= 1
+        return True
+
+
+def _within_budget(
+    chosen: Sequence[tuple[Title, PickKind, str | None]], pool: CandidatePool, size: int
+) -> list[tuple[Title, PickKind, str | None]]:
+    """Keep the model's order, dropping the picks past the batch's fame budget.
+
+    Asking is not a mechanism — the franchise rule learned that the expensive way — so
+    the prompt states the budget *and* the answer is held to it. What is dropped is
+    replaced from the pool, so the batch is the same size and the model has spent its
+    own choices on blockbusters rather than bought extra cards with them.
+    """
+    budget = _FameBudget(pool, size)
+    return [entry for entry in chosen if budget.spend(entry[0])]
+
+
 #: Shorter than this, a prefix is a word like "The" and groups nothing meaningful.
 _SERIES_PREFIX: Final = 4
 
@@ -283,21 +328,34 @@ def _from_pool(
     ``excluded`` is re-applied here as well as to the model's answer. It is the same
     belt-and-braces check, on the path that is *easiest* to forget: the fallback runs
     when the model failed, which is the moment nobody is watching. So is the one-per-
-    series rule: a fill that put the sequel back would undo it silently.
+    series rule: a fill that put the sequel back would undo it silently. So is the fame
+    budget: a fill that put the blockbuster back would undo that one too.
+
+    The budget is spent on the second pass and not on a card that would leave the deck
+    short. A rule of our own that empties a batch is worse than the fame it was written
+    against, and ``fill_rate`` grades exactly that.
     """
     filled = list(chosen)
     taken = {title.ref for title, _, _ in filled}
     series = {name for title, _, _ in filled if (name := series_of(title.title)) is not None}
-    for title in pool.titles:
-        if len(filled) >= size:
-            break
-        name = series_of(title.title)
-        if title.ref in taken or title.ref in excluded or (name is not None and name in series):
-            continue
-        taken.add(title.ref)
-        if name is not None:
-            series.add(name)
-        filled.append((title, pool.origin.get(title.ref, "safe"), None))
+    budget = _FameBudget(pool, size)
+    for title, _, _ in filled:
+        budget.spend(title)
+    for famous in (False, True):
+        for title in pool.titles:
+            if len(filled) >= size:
+                break
+            name = series_of(title.title)
+            if title.ref in taken or title.ref in excluded:
+                continue
+            if name is not None and name in series:
+                continue
+            if not famous and not budget.spend(title):
+                continue
+            taken.add(title.ref)
+            if name is not None:
+                series.add(name)
+            filled.append((title, pool.origin.get(title.ref, "safe"), None))
     return filled[:size]
 
 
@@ -319,6 +377,7 @@ def batch_prompt(
             _evidence(context),
             _picking(context, size, calibrating=calibrating),
             _candidates(pool),
+            _fame_budget(pool, size),
             _rules(context, size),
         )
         if part
@@ -502,7 +561,35 @@ def _candidates(pool: CandidatePool) -> str:
     lines = "\n".join(_candidate_line(title, pool.genre_names(title)) for title in pool.titles)
     return (
         "CANDIDATES — the only titles you may choose, one per line as "
-        f'"id | title (type, year) [genres] rating/votes":\n{lines}'
+        f'"id | title (type, year) [genres] rating/number of people who rated it":\n{lines}'
+    )
+
+
+def _fame_budget(pool: CandidatePool, size: int) -> str:
+    """Say what the vote count means and how much of the batch may spend it.
+
+    The budget was a silent pool filter before this, which is the shape of defect the
+    harness caught: every candidate had already passed the adaptive popularity floor, so
+    the floor could never be read off a card, and the one number on the line that *does*
+    track "they have already seen this" — the vote count — was printed with no
+    explanation at all. The model duly ranked by it.
+
+    The threshold is the pool's own median rather than a constant, so it means the same
+    thing whatever TMDb answered today, and the sentence is only written when there is a
+    budget to state: at the comfort end, and on a calibration batch, famous is the point.
+    """
+    allowed = pool.famous(size)
+    if allowed >= size or not pool.titles:
+        return ""
+    return (
+        "HOW FAMOUS A CANDIDATE IS. The number after the slash is how many people have "
+        'ever rated that title on TMDb. It is the best signal here for "this user has '
+        'probably already seen it": nearly half the cards the previous engine served '
+        "this user were titles they already knew, and they were the most-rated ones.\n"
+        f"A quarter of the candidates above are rated by more than {pool.famous_votes} "
+        f"people. At most {allowed} of your {size} cards may come from that quarter; the "
+        "rest must be less-rated titles. Cards past that limit are dropped and filled from the "
+        "list, so a deck of blockbusters costs you your own choices, not extra cards."
     )
 
 

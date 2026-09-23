@@ -33,6 +33,17 @@ seen it". Whether the ceiling earns its place is a question for the harness, not
 this docstring: both halves of the band are constants named below, and
 ``docs/evaluation.md`` carries the numbers they produced.
 
+**And the floor turned out not to be the lever.** It is applied to the pool, so every
+candidate has already passed it — the harness reports ``above_floor`` at 100 % for every
+strategy on both vote sets, which means no strategy can ever be measured against it.
+What the popularity profile did find is that the hybrid's picks sit *above their own
+pool's vote-count median* in eight batches of nine, while both floors sit below theirs:
+the drift is in the ranking, in vote counts, and at the top of the distribution rather
+than the bottom. ``Band.famous_share`` is the budget that answers it, spent by the
+strategy against ``CandidatePool.median_votes`` rather than filtered out here — a
+candidate the band admits is a candidate somebody may legitimately be shown, and taking
+it out of the pool would take it away from every batch instead of from this one.
+
 Nothing here reads a clock, a database or a random source. Two calls with the same
 context produce the same pool, which is what lets a replay be compared with another.
 """
@@ -102,6 +113,18 @@ class Band:
     #: How much of the pool comes from "people who liked this also liked" rather than
     #: from discovery. The comfort end of the dial leans on what is already proven.
     seeded_share: float
+    #: How much of one **batch** may be drawn from the most-rated quarter of the pool.
+    #:
+    #: ADR 0013's floor is a floor on ``popularity`` and it is applied to the pool, so
+    #: every card has already passed it and no strategy can be measured against it: the
+    #: harness reports ``above_floor`` at 100 % for all six committed runs. The fault the
+    #: ADR is about sits on the other axis and at the other end — the already-seen cards
+    #: were the *most-voted* titles, and the hybrid's picks were above their own pool's
+    #: vote-count median in eight batches of nine. This is the budget that stops that,
+    #: on the axis the measurement found, and it adapts with the novelty setting the way
+    #: the ADR asks the floor to. ``1.0`` is "no budget", which is what the comfort end
+    #: and every calibration batch want.
+    famous_share: float = 1.0
 
 
 #: The three levels the fork shipped, with numbers attached for the first time. The fork
@@ -114,6 +137,7 @@ NOVELTY_BANDS: Final[Mapping[Novelty, Band]] = {
         max_votes=None,
         pages=(1, 2),
         seeded_share=0.7,
+        famous_share=1.0,
     ),
     "balanced": Band(
         popularity_floor=2.0,
@@ -121,6 +145,7 @@ NOVELTY_BANDS: Final[Mapping[Novelty, Band]] = {
         max_votes=None,
         pages=(1, 2, 3),
         seeded_share=0.5,
+        famous_share=0.2,
     ),
     "bold": Band(
         popularity_floor=0.0,
@@ -128,6 +153,7 @@ NOVELTY_BANDS: Final[Mapping[Novelty, Band]] = {
         max_votes=4000,
         pages=(2, 3, 4),
         seeded_share=0.35,
+        famous_share=0.1,
     ),
 }
 
@@ -175,6 +201,30 @@ class CandidatePool:
     def seeded(self) -> int:
         """How many candidates came from a title the user liked."""
         return sum(1 for kind in self.origin.values() if kind == "safe")
+
+    @property
+    def famous_votes(self) -> int:
+        """The vote count that marks off the most-rated quarter of this pool.
+
+        The threshold the fame budget is spent against, and the one the prompt quotes.
+        It is a property of the **pool** rather than a constant, because what "famous"
+        means depends on what TMDb answered for this band on this day: a number written
+        into the code would be a budget that tightens and loosens on its own.
+
+        The upper quartile rather than the median, because the fault is at the tail and
+        not in the middle. The titles the author had already seen were rated by 12 000 to
+        33 000 people; the ones they liked and had not seen, by around 5 000. A budget
+        spent against the median pushes the whole deck down and takes the second group
+        with it, which is what the first attempt measured: fewer already-seen cards, and
+        the confirmable likes gone with them.
+        """
+        ordered = sorted(title.vote_count for title in self.titles)
+        return ordered[int(0.75 * (len(ordered) - 1) + 0.5)] if ordered else 0
+
+    def famous(self, size: int) -> int:
+        """How many of ``size`` cards may come from the most-rated quarter of the pool."""
+        share = self.band.famous_share if self.band is not None else 1.0
+        return size if share >= 1.0 else round(size * share)
 
 
 class PoolSource(Protocol):

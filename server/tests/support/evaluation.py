@@ -29,7 +29,7 @@ from tindarr.ports.metadata import (
     Trailer,
 )
 from tindarr.ports.titles import MediaKind, TitleRef
-from tindarr.swipe.retrieval import CandidatePool
+from tindarr.swipe.retrieval import Band, CandidatePool
 from tindarr.swipe.strategy import Candidate, StrategyContext
 
 
@@ -179,6 +179,9 @@ class FixedPool:
     titles: Sequence[Title] = field(default_factory=tuple[Title, ...])
     #: Which candidates count as "came from something they liked".
     seeded: frozenset[TitleRef] = field(default_factory=frozenset[TitleRef])
+    #: The novelty band, for a test about the fame budget. ``None`` is "no budget",
+    #: which is what a test about anything else wants.
+    band: Band | None = None
     calls: list[bool] = field(default_factory=list[bool])
 
     async def pool(self, context: StrategyContext) -> CandidatePool:
@@ -191,6 +194,7 @@ class FixedPool:
             origin={
                 title.ref: ("safe" if title.ref in self.seeded else "explore") for title in kept
             },
+            band=self.band,
         )
 
 

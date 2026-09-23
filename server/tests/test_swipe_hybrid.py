@@ -23,7 +23,7 @@ from tindarr.swipe.hybrid import (
     batch_prompt,
     series_of,
 )
-from tindarr.swipe.retrieval import CandidatePool
+from tindarr.swipe.retrieval import NOVELTY_BANDS, CandidatePool
 from tindarr.swipe.strategy import CALIBRATION_TARGET, StrategyContext
 
 pytestmark = pytest.mark.anyio
@@ -393,3 +393,98 @@ def test_a_title_without_a_series_prefix_groups_with_nothing() -> None:
     assert series_of("Heat") is None
     # Too short to mean anything: grouping every "The: …" together would be worse.
     assert series_of("The: Thing") is None
+
+
+# --- the fame budget ------------------------------------------------------------------
+
+
+def budgeted(pool: list[Title], llm: ScriptedLlm) -> HybridStrategy:
+    """The strategy over a pool that says which band built it, so the budget applies."""
+    source = FixedPool(pool, band=NOVELTY_BANDS["balanced"])
+    return HybridStrategy(source, InMemoryMetadata(pool), llm)
+
+
+def crowd(tmdb_id: int, votes: int) -> Title:
+    """One candidate, described by the only number the fame budget reads."""
+    return Title(
+        ref=TitleRef("movie", tmdb_id), title=f"T{tmdb_id}", vote_count=votes, popularity=10.0
+    )
+
+
+#: Eight quiet titles and four blockbusters: the upper quartile is the four.
+CROWDED = [crowd(index, 100 * index) for index in range(1, 9)] + [
+    crowd(index, 20_000 + index) for index in (9, 10, 11, 12)
+]
+
+
+def test_the_pool_says_where_its_famous_quarter_starts() -> None:
+    """The threshold is the pool's own, so it means the same thing whatever TMDb sent."""
+    pool = CandidatePool(titles=tuple(CROWDED), band=NOVELTY_BANDS["balanced"])
+    assert pool.famous_votes == 20_009
+    # Two of ten at `balanced`, everything at `familiar`, and no band means no budget.
+    assert pool.famous(10) == 2
+    assert CandidatePool(titles=tuple(CROWDED), band=NOVELTY_BANDS["familiar"]).famous(10) == 10
+    assert CandidatePool(titles=tuple(CROWDED)).famous(10) == 10
+
+
+async def test_a_deck_of_blockbusters_costs_the_model_its_own_choices() -> None:
+    """Asking is not a mechanism, which the franchise rule already learned once."""
+    llm = ScriptedLlm(answers=[answer(*((index, "safe") for index in (9, 10, 11, 12, 1)))])
+
+    cards = await budgeted(CROWDED, llm).propose(warmed(), 5)
+
+    # A batch of five at `balanced` may spend one card above the quartile. 9 sits on the
+    # threshold and is free, 10 spends the budget, 11 and 12 are dropped, and the rest of
+    # the batch is filled from the quiet end of the pool with no rationale on it.
+    assert [card.ref.tmdb_id for card in cards] == [9, 10, 1, 2, 3]
+    assert [card.reason is None for card in cards] == [False, False, False, True, True]
+
+
+async def test_the_budget_never_leaves_a_batch_short() -> None:
+    """A rule of ours that empties a deck is worse than the fame it was written against."""
+    saga = [
+        Title(ref=TitleRef("movie", index), title=f"Saga One: Part {index}", vote_count=100)
+        for index in (1, 2)
+    ]
+    pool = [*saga, crowd(9, 20_000), crowd(10, 20_001)]
+    # `bold` allows nothing at all above the quartile in a batch of three, and the
+    # series rule takes one of the two quiet titles, so the deck can only be filled by
+    # spending past the budget.
+    source = FixedPool(pool, band=NOVELTY_BANDS["bold"])
+    llm = ScriptedLlm(answers=[answer((1, "safe"))])
+
+    cards = await HybridStrategy(source, InMemoryMetadata(pool), llm).propose(warmed(), 3)
+
+    assert [card.ref.tmdb_id for card in cards] == [1, 9, 10]
+
+
+async def test_a_calibration_batch_spends_no_budget() -> None:
+    """It is trying to find out what somebody has already watched; famous is the point."""
+    llm = ScriptedLlm(answers=[answer(*((index, "calibration") for index in (9, 10, 11, 12)))])
+    source = FixedPool(CROWDED, band=NOVELTY_BANDS["familiar"])
+
+    cards = await HybridStrategy(source, InMemoryMetadata(CROWDED), llm).propose(
+        StrategyContext(user_id="u1"), 4
+    )
+
+    assert [card.ref.tmdb_id for card in cards] == [9, 10, 11, 12]
+
+
+def test_the_prompt_states_the_budget_it_will_be_held_to() -> None:
+    """The floor was a silent pool filter, and the model duly ranked by the one number
+    on the line that nobody had explained to it."""
+    pool = CandidatePool(titles=tuple(CROWDED), band=NOVELTY_BANDS["balanced"])
+
+    text = batch_prompt(warmed(), pool, 10, calibrating=False)
+
+    assert "rated by more than 20009 people" in text
+    assert "At most 2 of your 10 cards" in text
+    assert "number of people who rated it" in text
+
+
+def test_the_prompt_says_nothing_about_fame_where_there_is_no_budget() -> None:
+    """A rule stated and not enforced is the shape of defect this whole change is about."""
+    comfort = CandidatePool(titles=tuple(CROWDED), band=NOVELTY_BANDS["familiar"])
+
+    assert "At most" not in batch_prompt(warmed(), comfort, 10, calibrating=False)
+    assert "At most" not in batch_prompt(warmed(), CandidatePool(), 10, calibrating=False)

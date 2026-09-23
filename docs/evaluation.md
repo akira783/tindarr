@@ -217,8 +217,8 @@ Every rate is printed with its denominator, and the gate reads the denominators 
 - **A vote cast later is used as the opinion at this point.** Tastes move. Over a few
   months of votes this is a small lie; over years it would not be.
 - **The rates rest on tens of cards, not thousands, and since lot 4b on fewer.** With a
-  TMDb pool, coverage is 13–22 % on `synthetic-99` — whose "TMDb" is its own invented
-  catalogue — and 2–8 % on `akira-99`, where the pool really is TMDb and the fixture has
+  TMDb pool, coverage is 16–23 % on `synthetic-99` — whose "TMDb" is its own invented
+  catalogue — and 2–10 % on `akira-99`, where the pool really is TMDb and the fixture has
   an opinion on 99 titles out of it. The report says so in its notes, marks the
   affected rows, and the gate stops comparing them. That is the trade lot 4b made
   deliberately: a strategy measured on a realistic pool, with fewer numbers that mean
@@ -487,74 +487,88 @@ The diff shows every number that moved. Commit it with the change that moved the
 in the message why the new numbers are the right ones. A baseline bumped in its own commit,
 with no explanation, is a gate that has been switched off.
 
-## What lot 4b measured
+## What is measured today
 
 Six committed runs: three strategies on two vote sets, all replayed from the cassettes,
 so every number below reproduces exactly. Read the `pool-free` rows first; the rest are
 marked `?` in the report wherever fewer than twelve cards went into them, and the gate
 does not compare those.
 
-**`synthetic-99`** (coverage 14–23 %, so the rates still mean something — the hybrid's
-thirteen scored cards are barely over the twelve-card comparability threshold, so two
-confirmable cards fewer and half this table stops being compared):
+**`synthetic-99`** (coverage 16–23 %, so the rates still mean something):
 
 | | `popular` | `random` | **`hybrid`** |
 |---|---|---|---|
 | `liked_recall` | 4.3 % | **17.4 %** | 13.0 % |
 | `liked_recall_top` | 0.0 % | 0.0 % | 0.0 % |
-| `seen_per_batch` | 2.00 | **1.00** | 1.11 |
-| `disliked_per_batch` | 0.22 | 0.11 | **0.00** |
-| `already_seen_rate` | 85.7 % | **64.3 %** | 76.9 % |
-| `like_rate` | 4.8 % | **28.6 %** | 23.1 % |
+| `seen_per_batch` | 2.00 | **1.00** | 1.22 |
+| `disliked_per_batch` | 0.22 | **0.11** | **0.11** |
+| `already_seen_rate` | 85.7 % | **64.3 %** | 73.3 % |
+| `like_rate` | 4.8 % | **28.6 %** | 20.0 % |
 | `skip_rate` | 4.5 % | 6.7 % | **0.0 %** |
-| `genre_diversity` | 0.89 | 0.88 | **1.07** |
+| `genre_diversity` | 0.89 | 0.88 | **0.97** |
 | `franchise_repeat_rate` | 33.3 % | 44.4 % | **0.0 %** |
-| `fill_rate` / `usable_per_batch` | 100 % / 10.0 | 100 % / 10.0 | 100 % / 10.0 |
-| `tmdb_calls_per_batch` | **19.4** | **19.4** | **19.4** |
-| `llm_tokens_per_card` | **0** | **0** | 294 |
+| `fill_rate` / `usable_per_batch` | 100 % / 10.0 | 100 % / 10.0 | 98.9 % / 9.89 |
+| `popularity_median` (pool) | 79.4 (52.4) | 58.7 (56.0) | 61.5 (55.1) |
+| `vote_count_median` (pool) | 3 890 (4 498) | 4 005 (4 498) | **3 496** (4 829) |
+| `tmdb_calls_per_batch` | **19.4** | **19.4** | 19.3 |
+| `llm_tokens_per_card` | **0** | **0** | 305 |
 
-**`akira-99`** (coverage 2–9 %: the compared rows are the six `pool-free` ones — the
+**`akira-99`** (coverage 2–10 %: the compared rows are the six `pool-free` ones — the
 four below plus `complete_rate` and `usable_per_batch`, 100 % and 10.0 for all three —
-and nothing else):
+plus the `pool` rows, which need no vote at all):
 
 | | `popular` | `random` | **`hybrid`** |
 |---|---|---|---|
-| `liked_recall` | 0.0 % (0/30) | **6.7 %** (2/30) | 3.3 % (1/30) |
+| `liked_recall` | 0.0 % (0/30) | **6.7 %** (2/30) | **6.7 %** (2/30) |
 | `liked_recall_top` | 0.0 % | 0.0 % | 0.0 % |
 | `fill_rate` | 100 % | 100 % | 100 % |
 | `tmdb_calls_per_batch` | **17.2** | **17.2** | **17.2** |
+| `popularity_median` (pool) | 183.5 (51.1) | 48.6 (51.1) | **19.3** (51.1) |
+| `vote_count_median` (pool) | 2 153 (2 799) | 1 911 (2 388) | 2 030 (2 388) |
+| `above_floor` | 100 % | 100 % | 100 % |
 | *not compared* `seen_per_batch` | **0.22** | 0.33 | 0.67 |
 | *not compared* `disliked_per_batch` | **0.00** | **0.00** | 0.11 |
-| *not compared* `already_seen_rate` | 100 % | **60.0 %** | 75.0 % |
-| *not compared* `coverage` | 2.2 % | 5.6 % | 8.9 % |
+| *not compared* `already_seen_rate` | 100 % | **60.0 %** | 66.7 % |
+| *not compared* `new_like_rate` | n/a | **100 %** | 66.7 % |
+| *not compared* `coverage` | 2.2 % | 5.6 % | 10.0 % |
 
-**The generated set.** The hybrid clears `popular` whole — better on recall, on both
-avoidance counts, on the like rate, on diversity, on franchise repeats, on skips — and
-loses to `random` on recall (13.0 % against 17.4 %, one liked title), on the
-already-seen rate and on the like rate. It costs one model call and 294 tokens a card
-that neither floor costs, and the same TMDb calls, because all three share the pool.
-Neither floor is dominated, which is why the gate asks for *one* whole floor.
+**The generated set.** The hybrid clears `popular` whole and loses to `random` on recall
+(13.0 % against 17.4 %, one liked title), on the already-seen count and on the like rate.
+It costs one model call and 305 tokens a card that neither floor costs, and the same TMDb
+calls, because all three share the pool. Neither floor is dominated, which is why the
+gate asks for *one* whole floor. Its `fill_rate` is 98.9 % rather than 100 %: the last
+batch of the third user has ten candidates left in the whole invented catalogue and two
+of them are the same series, so it ships nine cards.
 
-**The author's real votes settle nothing, and the hybrid is not the best of the three
-there.** It finds one liked title where `random` finds two and `popular` finds none, and
-it is worse than both floors on the avoidance counts: 0.67 already-seen cards a batch
-against 0.22 and 0.33, and 0.11 turned down against 0.00. It clears `popular` whole and
-that is how it passes.
+**The author's real votes still settle nothing, and that has not changed.** The hybrid
+now matches `random` on recall (two liked titles each, `popular` finds none) and is still
+worse than both floors on the avoidance counts: 0.67 already-seen cards a batch against
+0.22 and 0.33. Three of those six cards are the **calibration** batch — the first batch
+of the run, which every strategy draws from the `familiar` band on purpose, because a
+calibration batch is trying to find out what somebody has already watched. The harness
+counts them as faults anyway, and so they are, for a household; they are not evidence
+about the ranking.
 
-Those avoidance rows are printed and not compared, because with two, five and eight
+Those avoidance rows are printed and not compared, because with two, five and nine
 confirmable cards the three runs did not measure the same thing: the hybrid trips over
 more faults partly because it puts four times as many recognisable titles in front of
-the fixture. That is an explanation, not a defence — the number a household would feel
-is the one the harness cannot see here.
+the fixture. That is an explanation, not a defence.
 
-**The already-seen number ADR 0013 is about is not answered.** The fork served 4.7
-already-seen cards a batch; the hybrid serves 1.11 on the generated set and 0.67 on the
-real one — and on that real set a strategy that knows nothing about taste served 0.22.
-The fork's figure was measured against a person answering; these are measured against a
-fixture that can recognise 99 titles, and neither the fork's number nor the floors' is
-comparable with them. What would settle it is a deck in front of a person (step 5) or a
-second, larger vote set — which is also what would give `akira-99`'s floor comparison
-more than the four rows it has today.
+**What the fame budget moved, and what it did not.** Against the same code without it,
+over three fresh recordings each: `seen_per_batch` 0.78 → 0.56–0.67, `liked_recall`
+6.7/6.7/3.3 % → 6.7 % three times, and the median vote count of the cards proposed from
+30 % *above* the pool's to 15 % *below* it. `disliked_per_batch` did not move: it is one
+card in ninety on this vote set, and both floors sit at 0.00. The profile rows are the
+reliable half of that comparison — they rest on all ninety cards — and the fault counts
+rest on the handful the fixture recognises.
+
+**The already-seen number ADR 0013 is about is still not answered.** The fork served 4.7
+already-seen cards a batch; the hybrid serves 1.22 on the generated set and 0.67 on the
+real one, of which 0.33 is the calibration batch — and on that real set a strategy that
+knows nothing about taste served 0.22. The fork's figure was measured against a person
+answering; these are measured against a fixture that can recognise 99 titles. What would
+settle it is a deck in front of a person — `tindarr eval session` is that, and it is the
+only thing here that can — or a second, larger vote set.
 
 ## The strategy port
 
@@ -597,7 +611,8 @@ questions.
   count — and answers with ids, a rationale per card and a pick kind. An id it was not
   offered is dropped; a short answer is topped up from the pool; a model that fails
   costs the sentences and not the batch. The prompt is the fork's, minus its "never
-  propose" list: the pool has already made it unnecessary.
+  propose" list — the pool has already made it unnecessary — plus the fame budget, which
+  is the one instruction the fork never had and the only one the code holds it to.
 
 Adding one means writing the class, registering it in `STRATEGIES`
 (`server/src/tindarr/main/evaluation.py`) with what a live run of it would cost, and
@@ -625,19 +640,64 @@ its top end, at `bold`, is meant to push back on ADR 0013's 47 %. The discovery 
 the rest: page one of "most popular" *is* the wall of blockbusters, and reaching past it
 is most of what novelty means.
 
-| Novelty | Popularity floor | Vote window | Discovery pages | From their likes |
-|---|---|---|---|---|
-| `familiar` | 5 | 600+ | 1–2 | 70 % |
-| `balanced` | 2 | 150+ | 1–3 | 50 % |
-| `bold` | 0 | 40–4000 | 2–4 | 35 % |
+| Novelty | Popularity floor | Vote window | Discovery pages | From their likes | Fame budget |
+|---|---|---|---|---|---|
+| `familiar` | 5 | 600+ | 1–2 | 70 % | — |
+| `balanced` | 2 | 150+ | 1–3 | 50 % | 2 cards in 10 |
+| `bold` | 0 | 40–4000 | 2–4 | 35 % | 1 card in 10 |
 
-**One idea the harness refused.** A *fame cut* — dropping the most popular quarter of
-the retrieved pool at `balanced` and nearly half at `bold` — was written, measured and
-removed. It is not in ADR 0013, it was this lot's own idea, and on both vote sets it
-cost recall without moving the already-seen count by more than a card, which is inside
-the noise at these coverages. An unmeasured mechanism in a recommender is a mechanism
-nobody can remove later, so it went. The numbers that refused it are in the commit that
-removed it.
+**The fame budget** is the one part of the band that is *not* a pool filter. It is how
+many cards of a batch may come from the most-rated quarter of the pool, where the
+threshold is that pool's own upper quartile of TMDb vote counts rather than a number
+written into the code. The strategy spends it against its own answer, and the prompt
+states it. Why it exists, and why it is not a filter, is the section below.
+
+**One idea the harness refused, and the one it then asked for.** A *fame cut* —
+dropping the most **popular** quarter of the retrieved pool at `balanced` and nearly half
+at `bold` — was written, measured and removed. It cost recall without moving the
+already-seen count by more than a card. The numbers that refused it are in the commit
+that removed it, and they were right about that mechanism: it cut the wrong axis, at the
+wrong stage.
+
+The popularity profile says which axis. On the author's votes the hybrid's cards are the
+*least* popular of the three strategies (median 29.5 against `random`'s 48.6 and
+`popular`'s 183.5) and the only ones **more rated than their own pool** — 3 619 votes
+against the pool's 2 247, and above the pool's median in eight batches of nine, while
+both floors sit below theirs. The model is not chasing what is trending this week. It is
+chasing what everybody has already seen, which is a different number and the one ADR
+0013's 47 % is made of.
+
+So the mechanism is a **budget on the batch**, not a cut in the pool, and it is spent in
+vote counts:
+
+- **It is not a filter.** A candidate the band admits is one this household could
+  legitimately be shown; taking it out of the pool takes it out of *every* batch of the
+  run, which is what the fame cut did and what cost it recall. The budget takes it out
+  of *this* batch.
+- **The prompt states it, and the answer is held to it.** The candidate line always
+  carried a vote count and nothing ever said what it meant — the model duly ranked by
+  it. The prompt now names the pool's own threshold and the budget; `_within_budget`
+  then drops the picks past it and fills from the pool, because the franchise rule
+  already established that asking is not a mechanism. A model that spends its batch on
+  blockbusters loses its own choices, not extra cards.
+- **A calibration batch spends nothing.** It reads the `familiar` band, whose budget is
+  "no budget", because a calibration batch is trying to find out what somebody has
+  already watched and famous is the point.
+
+Measured against the previous prompt over three fresh recordings each, on `akira-99`
+(the fix, then the same code without it):
+
+| | `seen_per_batch` | `liked_recall` | median votes / pool |
+|---|---|---|---|
+| with the budget | 0.56, 0.67, 0.67 | 6.7 %, 6.7 %, 6.7 % | ~1 960–2 170 / ~2 400 |
+| without it | 0.78, 0.78, 0.78 | 6.7 %, 6.7 %, 3.3 % | ~2 840–2 930 / ~2 200 |
+
+A first attempt spent the budget against the pool's **median** instead of its upper
+quartile, and it is worth recording because it failed in the informative direction:
+`seen_per_batch` fell the same way and `liked_recall` collapsed to 0–3.3 %. Pushing the
+whole deck down takes the confirmable likes with it — they are rated by around 5 000
+people, and the already-seen titles by 11 000 — so the budget has to bite at the tail and
+not in the middle.
 
 **`bold`'s ceiling of 4 000 votes is not measured**, and that is worth saying next to the
 paragraph above it. Neither vote set isolates it: the author's is `balanced`, which has no
