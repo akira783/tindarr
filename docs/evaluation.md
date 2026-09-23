@@ -4,20 +4,23 @@
 without numbers. This is how the numbers are produced: the harness replays votes that
 already exist against a candidate strategy, offline, and prints a table.
 
-It exists so that the fork's approach — the model invents titles, TMDb resolves them —
-and the hybrid one — TMDb retrieves, the model picks — can be compared **before** either
-is wired into the product.
-
 ```bash
 cd server
 uv run tindarr eval run                      # the author's 99 votes, the "popular" floor
-uv run tindarr eval run --strategy random
+uv run tindarr eval run --strategy hybrid    # the engine of ADR 0013
 uv run tindarr eval run --check              # what CI does: fail when the numbers slid
 uv run tindarr eval run --fixtures fixtures/eval/synthetic-99 --check   # the other set
 ```
 
-Two vote sets are committed and both are gated in CI. Every table says which one it was
-measured on, on its second line; a number quoted without that line means nothing.
+Two vote sets are committed and both are gated in CI, for all three strategies. Every
+table says which set it was measured on, on its second line; a number quoted without
+that line means nothing.
+
+It exists so that the fork's approach — the model invents titles, TMDb resolves them —
+and the hybrid one — TMDb retrieves, the model picks — can be compared **before** either
+is wired into the product. Since lot 4b all three strategies draw from the same
+TMDb-retrieved pool, so the comparison is between the *choices* they make and not
+between the shortlists they were handed.
 
 ## What it measures
 
@@ -149,19 +152,41 @@ Every rate is printed with its denominator, and the gate reads the denominators 
   title the recorded engine never showed cannot be scored, and the user's history does
   not change in response to what the candidate proposed. This compares strategies against
   one fixed history; it does not simulate a person.
+- **Recall is therefore biased towards strategies that resemble the engine that produced
+  the votes.** The fork proposed famous titles, so the only titles the fixture can
+  confirm a strategy "found" are famous ones — and a strategy deliberately reaching past
+  the famous end, which is what ADR 0013 asks for, is penalised for doing so. It is the
+  sharpest form of the point above, and it is the reason a high recall on `akira-99` is
+  not on its own evidence of a better deck.
+- **A model is not deterministic, and at these coverages one card is worth points.**
+  `akira-99` confirms six to nine of ninety proposed cards, so one title found or missed
+  moves `liked_recall` by 3.3 points — more than the gate's tolerance. The committed
+  numbers are exact, because the replay reads a recorded answer; what they are not is
+  *repeatable under a new recording*. Two configurations that differ by one or two cards
+  on this vote set have not been told apart.
 - **A vote cast later is used as the opinion at this point.** Tastes move. Over a few
   months of votes this is a small lie; over years it would not be.
-- **The rates rest on tens of cards, not thousands.** Coverage is around 20 % on
-  `synthetic-99`, whose catalogue is larger than its vote history; the report says so in
-  its own notes whenever coverage is under half. On `akira-99` it is 100 %, which is not
-  a better fixture but a narrower one — see the next point.
-- **The candidate pool is narrower than life.** `dataset.pool` is the fixture's own
-  catalogue, and on a vote set built from real votes that catalogue holds exactly the
-  titles somebody voted on. A strategy drawing from it is picking from a shortlist of
-  scoreable titles, which flatters coverage and flatters the floors: on `akira-99`,
-  `popular` scores *fewer* already-seen cards than the engine that produced the votes,
-  because its pool is 99 titles rather than all of TMDb. That is an artefact, not a
-  discovery. Lot 4b's retrieval layer is what fixes it: the pool should come from TMDb.
+- **The rates rest on tens of cards, not thousands, and since lot 4b on fewer.** With a
+  TMDb pool, coverage is around 20 % on `synthetic-99` — whose "TMDb" is its own invented
+  catalogue — and around 2 % on `akira-99`, where the pool really is TMDb and the fixture
+  has an opinion on 99 titles out of it. The report says so in its notes, marks the
+  affected rows, and the gate stops comparing them. That is the trade lot 4b made
+  deliberately: a strategy measured on a realistic pool, with fewer numbers that mean
+  anything, rather than a strategy measured on a shortlist of titles somebody already
+  voted on.
+- **The avoidance counts are a floor, not the truth.** `seen_per_batch` counts the cards
+  the user *declared* they had already watched. With an open pool most proposed titles
+  were never put in front of them, so a title they have seen and never voted on is
+  counted as nothing. Every card it does count is a real fault, and no strategy can make
+  the number look better by proposing more — but "zero already-seen cards" means "none
+  that this fixture can prove", which on `akira-99` is a much weaker claim than it
+  sounds. `liked_recall` has no such asymmetry: its denominator enumerates every liked
+  title the replay withheld, so it is exact.
+- **The fixture cannot describe what it never voted on.** `catalogue_coverage` falls
+  with coverage, and the two diversity metrics fall with it, because genres and
+  franchises are read from the fixture's catalogue and never from what a strategy said
+  about its own picks. On `akira-99` they are computed over the two or three proposed
+  cards the fixture happens to know, and the basis column says so.
 - **A fixture's taste profile is static.** In production it is rewritten every ten votes,
   so it only ever knows the past; a fixture carries one profile for the whole history. In
   a *generated* fixture it would name the very genres the later votes were drawn from —
@@ -204,7 +229,9 @@ the same four files:
 
 - `votes.json` — the vote set: a catalogue of titles and one vote history per user;
 - `tmdb.json` — a **cassette**, the TMDb answers an offline run replays;
-- `baseline-popular.json`, `baseline-random.json` — the numbers CI holds a run to.
+- `llm.json` — the same for the model answers a strategy that calls one replays;
+- `baseline-popular.json`, `baseline-random.json`, `baseline-hybrid.json` — the numbers
+  CI holds a run to.
 
 `--fixtures` picks one, and both are gated in CI against their own committed baselines.
 A baseline records the vote set it was measured on, so the gate refuses to hold a run of
@@ -294,8 +321,9 @@ stand-in — talks through the recorded cassette, and a request the cassette doe
 raises `CassetteMissError` instead of falling through to the internet. An offline run
 cannot quietly become a paid one.
 
-`--live` on a run, and `eval record` on a whole vote set, are the only ways out, and both
-say what they are about to do first:
+`--live` (the real TMDb), `--live-llm` (the real AI provider) and `eval record` are the
+only ways out. They are separate taps, so a model strategy can be re-recorded without
+touching TMDb, and all of them say what they are about to do first:
 
 ```
 A live run reaches real services. This one would call:
@@ -304,12 +332,35 @@ A live run reaches real services. This one would call:
   AI provider none: this strategy calls no model, so nothing is billed.
 ```
 
-It then waits for an answer at the terminal, or for `--yes`. Both read the TMDb key from
-`TINDARR_EVAL_TMDB_API_KEY` — never from the instance's database. On a run, `--record
-<path>` writes what came back as a new cassette; `eval record` writes the whole
-catalogue's answers straight into the fixture directory. The credential is stripped
-before a request becomes a cassette key, so a recording is safe to keep and survives a
-key rotation.
+It then waits for an answer at the terminal, or for `--yes`. The TMDb key comes from
+`TINDARR_EVAL_TMDB_API_KEY` — never from the instance's database. The model endpoint
+comes from `TINDARR_EVAL_LLM_BASE_URL` (`TINDARR_EVAL_LLM_MODEL`,
+`TINDARR_EVAL_LLM_API_KEY`), and it is always the **OpenAI-compatible** kind: the
+harness is a development command, and a default that reaches a named vendor is a default
+that bills somebody by accident. The plan prints the address before anything is sent.
+
+`--record <dir>` **merges** what came back into that directory's cassettes — one live run
+per strategy, each adding the pages and the details it asked for, so a second run does
+not throw away the first one's answers. Delete the file to record from nothing.
+
+The credential is stripped before a request becomes a cassette key, so a recording is
+safe to keep and survives a key rotation. A model recording goes one step further: the
+endpoint's own address is rewritten to `http://recorded.invalid/v1` before the file is
+written, because an OpenAI-compatible endpoint is somebody's own machine and its host
+name has no business in a public repository — and a cassette keyed on it would replay
+for nobody else.
+
+```bash
+cd server
+TINDARR_EVAL_TMDB_API_KEY=… TINDARR_EVAL_LLM_BASE_URL=http://…/v1 \
+  uv run tindarr eval run --fixtures fixtures/eval/akira-99 --strategy hybrid \
+  --live --live-llm --record fixtures/eval/akira-99
+```
+
+**A model is not deterministic.** Two live runs of the same batch produce different
+cards, so the committed numbers are the numbers of *the run that was recorded*, and the
+cassette is what makes them reproducible. Re-recording a model strategy is therefore a
+re-measurement, not a refresh: the baseline moves with it, and the commit has to say so.
 
 ## The CI gate
 
@@ -327,11 +378,24 @@ The check fails the build when:
 - a graded metric is **missing** from the baseline, which means nobody has measured it
   yet rather than that everything is fine;
 - `batches`, `usable` or `scored` falls by more than 2 %;
-- the strategy is **worse than the best of the reference floors** (`popular` and
-  `random`) on any graded metric **whose basis both runs support**. The floors
-  themselves are exempt: they are the yardstick, and each is worse than the other
-  somewhere. Every comparison the gate declines is printed with the result, under
-  `floor comparisons not made`.
+- the strategy fails to clear **one whole reference floor** (`popular` or `random`) —
+  that is, there is no floor it is no worse than on every graded metric whose basis both
+  runs support. The floors themselves are exempt: they are the yardstick, and each is
+  worse than the other somewhere. Every comparison the gate declines is printed with the
+  result, under `floor comparisons not made`.
+
+  It is **one floor whole**, not the best value of each metric across the floors. The
+  composite of two floors is a strategy that does not exist and that neither floor
+  clears: `popular` is better at likes, `random` at not repeating what somebody has
+  already seen, and holding a candidate to both at once is holding it to a bar the
+  yardstick itself fails. What the gate means to ask is "is this better than doing
+  something stupid?", and beating a whole reference strategy is that question.
+
+- **What a strategy spends is exempt from the floor**, and only from the floor. A floor
+  that calls no model reports zero model calls; requiring a strategy that calls one to
+  be "no worse than the floors" on that row would be requiring it not to exist. Cost is
+  gated by the strategy's own baseline — a quarter of a model call, fifty tokens a card,
+  one TMDb call a batch — and printed by the live plan before a run spends anything.
 
 The last two rules are the ones that matter. The cheapest way to improve every rate is to
 propose fewer cards — three confident picks instead of ten score beautifully — so the
@@ -367,6 +431,55 @@ The diff shows every number that moved. Commit it with the change that moved the
 in the message why the new numbers are the right ones. A baseline bumped in its own commit,
 with no explanation, is a gate that has been switched off.
 
+## What lot 4b measured
+
+Six committed runs: three strategies on two vote sets, all replayed from the cassettes,
+so every number below reproduces exactly. Read the `pool-free` rows first; the rest are
+marked `?` in the report wherever fewer than twelve cards went into them, and the gate
+does not compare those.
+
+**`synthetic-99`** (coverage 13–22 %, so the rates still mean something):
+
+| | `popular` | `random` | **`hybrid`** |
+|---|---|---|---|
+| `liked_recall` | 8.7 % | **21.7 %** | 17.4 % |
+| `liked_recall_top` | 0.0 % | **4.3 %** | **4.3 %** |
+| `seen_per_batch` | 1.67 | 0.89 | **0.78** |
+| `disliked_per_batch` | 0.22 | **0.11** | **0.11** |
+| `fill_rate` | 96.7 % | 96.7 % | **100 %** |
+| `already_seen_rate` | 78.9 % | **57.1 %** | 58.3 % |
+| `like_rate` | 10.5 % | **35.7 %** | 33.3 % |
+| `genre_diversity` | 0.91 | 0.88 | **1.02** |
+| `franchise_repeat_rate` | 33.3 % | 44.4 % | **22.2 %** |
+| `tmdb_calls_per_batch` | **18.1** | **18.1** | 19.8 |
+| `llm_tokens_per_card` | **0** | **0** | 299 |
+
+**`akira-99`** (coverage 2–8 %: only the four `pool-free` rows are compared):
+
+| | `popular` | `random` | **`hybrid`** |
+|---|---|---|---|
+| `liked_recall` | **6.7 %** (2/30) | 0.0 % (0/30) | 3.3 % (1/30) |
+| `liked_recall_top` | 0.0 % | 0.0 % | **3.3 %** |
+| `seen_per_batch` | 0.00 | 0.22 | 0.56 |
+| `fill_rate` | 100 % | 100 % | 100 % |
+| `tmdb_calls_per_batch` | **16.9** | **16.9** | 17.3 |
+
+**What that says, and what it does not.** On the generated set the hybrid beats
+`popular` on every graded metric and loses to `random` on recall and the like rate by
+about one card. It clears `popular` whole, which is what the gate asks. On the author's
+real votes nothing is settled: seven of its ninety cards carry a vote, so `liked_recall`
+moves 3.3 points per title found, `seen_per_batch` counts only faults the fixture can
+confirm, and the strategy that scores best on recall there is the one that behaves most
+like the engine that produced the votes. Its one clear win on that set is
+`liked_recall_top`: the single liked title it found, it put in the first three cards.
+
+**The already-seen number ADR 0013 is about is not answered yet.** The fork served 4.7
+already-seen cards a batch; the hybrid serves 0.78 on the generated set and 0.56 on the
+real one — but the fork's figure was measured against a person answering, and these are
+measured against a fixture that can only recognise 99 titles. They are not the same
+measurement and should not be quoted as one. What would make them comparable is a deck
+in front of a person (step 5) or a second, larger vote set.
+
 ## The strategy port
 
 A strategy is anything with a name and one method
@@ -394,14 +507,72 @@ after that moment leaked in.
 strategy is built once per user, so no cache carries one person's answers into another's
 batch.
 
-Two implementations ship today, both floors rather than candidates:
+Three implementations ship, and **all three draw from the same candidate pool**
+(`tindarr.swipe.retrieval`). That matters: while the floors drew from the fixture's own
+catalogue and a candidate drew from TMDb, "is the model better than picking the most
+popular thing?" was being asked of two strategies that had been handed different
+questions.
 
-- `popular` — the most popular unvoted title. Knows nothing about taste, everything about
-  fame, and duly scores 85 % already-seen on `synthetic-99`: the defect ADR 0013 is about,
-  in one line of code. On `akira-99` it scores 39 %, for the reason under "what it cannot
-  measure": its pool there is the 99 titles the author voted on, not all of TMDb.
+- `popular` — the most popular candidate in the pool. Knows nothing about taste,
+  everything about fame: the defect ADR 0013 is about, in one line of code.
 - `random` — a seeded draw from the same pool. Nothing should ever score below it.
+- `hybrid` — the engine of ADR 0013 (`tindarr.swipe.hybrid`): the model is handed the
+  pool — one line per candidate, with its id, title, year, **genres**, rating and vote
+  count — and answers with ids, a rationale per card and a pick kind. An id it was not
+  offered is dropped; a short answer is topped up from the pool; a model that fails
+  costs the sentences and not the batch. The prompt is the fork's, minus its "never
+  propose" list: the pool has already made it unnecessary.
 
 Adding one means writing the class, registering it in `STRATEGIES`
 (`server/src/tindarr/main/evaluation.py`) with what a live run of it would cost, and
 committing its baseline.
+
+## The candidate pool
+
+`tindarr.swipe.retrieval` builds it, per user, from two TMDb endpoints:
+
+- **`/{kind}/{id}/recommendations`** for each of the user's six most recent likes,
+  twelve deep — "people who liked this went on to watch";
+- **`/discover/{kind}`**, pages chosen by the novelty band, with the band's vote-count
+  window and the household's excluded genres pushed down to TMDb.
+
+The two are interleaved in the proportion the novelty level asks for, so a batch taken
+off the front of the pool has the safe/explore mix the fork used to impose by reshuffling
+the model's answer afterwards.
+
+**The novelty band.** ADR 0013 asks for an adaptive popularity floor: the bolder the
+setting, the lower the popularity a candidate may have. It is here, together with a
+**vote-count window** — how many people ever had an opinion about a title, which is a
+far steadier number than TMDb's rolling `popularity` and a better proxy for "they have
+probably already seen it". Its bottom end keeps listings and home videos out of a deck;
+its top end, at `bold`, is what pushes back on ADR 0013's 47 %. The discovery pages do
+the rest: page one of "most popular" *is* the wall of blockbusters, and reaching past it
+is most of what novelty means.
+
+| Novelty | Popularity floor | Vote window | Discovery pages | From their likes |
+|---|---|---|---|---|
+| `familiar` | 5 | 600+ | 1–2 | 70 % |
+| `balanced` | 2 | 150+ | 1–3 | 50 % |
+| `bold` | 0 | 40–4000 | 2–4 | 35 % |
+
+**One idea the harness refused.** A *fame cut* — dropping the most popular quarter of
+the retrieved pool at `balanced` and nearly half at `bold` — was written, measured and
+removed. It is not in ADR 0013, it was this lot's own idea, and on both vote sets it
+cost recall without moving the already-seen count by more than a card, which is inside
+the noise at these coverages. An unmeasured mechanism in a recommender is a mechanism
+nobody can remove later, so it went. The numbers that refused it are in the commit that
+removed it.
+
+A calibration batch reverses all of it: it is trying to find out what somebody has
+*already* watched, so it reads the familiar band, sorted by vote count.
+
+**Every exclusion is applied to the pool**, never to the model's answer: voted on,
+already served, owned, wrong media type, adult, before `min_year`, an excluded original
+language, an excluded genre. Filtering the answer instead would mean paying for cards
+that are then thrown away, and it would rest on a model honouring a "never propose" list
+— which is what the fork did, and what its numbers measure. The strategies re-apply the
+check on the way out anyway, on both paths, because the day it can fail is the day a
+retrieval bug puts a title somebody already voted on in front of them.
+
+A TMDb call the pool needs and does not get — a deleted id, a page that times out — is
+logged and skipped. The pool is smaller; the batch still ships.

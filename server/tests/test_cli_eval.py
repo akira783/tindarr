@@ -7,7 +7,6 @@ review, and a harness whose inputs cannot be reviewed proves nothing.
 
 import json
 import sqlite3
-from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -19,13 +18,13 @@ from tindarr.main.evaluation import (
     STRATEGIES,
     SYNTHETIC_FIXTURES,
     EvalPaths,
+    Parts,
     StrategySpec,
     build_cassette,
     catalog_service,
     live_plan,
+    popular_baseline,
 )
-from tindarr.ports.metadata import Metadata, Title
-from tindarr.swipe.baselines import PopularBaseline
 from tindarr.swipe.evaluation import Baseline, ReplayOptions, load_dataset
 from tindarr.swipe.evaluation.synthetic import build_synthetic_dataset
 from tindarr.swipe.strategy import Candidate, StrategyContext
@@ -139,7 +138,9 @@ def test_the_authors_cassette_covers_every_title_the_catalogue_holds(author: Eva
         answer = cassette.find(key)
         assert answer is not None, key
         assert answer.status == 200
-    assert len(cassette) == len(dataset.catalog)
+    # More than the catalogue since lot 4b: the discovery and recommendation pages the
+    # pool is retrieved from, and the details of the titles they returned.
+    assert len(cassette) > len(dataset.catalog)
 
 
 def test_the_authors_cassette_carries_no_credential(author: EvalPaths) -> None:
@@ -162,7 +163,7 @@ def test_a_worse_run_fails_the_build(tmp_path: Path, capsys: pytest.CaptureFixtu
 
     printed = capsys.readouterr().out
     assert code == 1
-    assert "already_seen_rate: 0.2 -> 0.85" in printed
+    assert "already_seen_rate: 0.2 -> 0.789474" in printed
     assert "--update-baseline" in printed
 
 
@@ -218,7 +219,7 @@ def test_the_replay_options_reach_the_run(capsys: pytest.CaptureFixture[str]) ->
 
 def test_an_unknown_strategy_is_refused() -> None:
     with pytest.raises(SystemExit):
-        main(["eval", "run", "--strategy", "hybrid"])
+        main(["eval", "run", "--strategy", "clairvoyant"])
 
 
 def test_a_missing_vote_set_is_reported(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -269,13 +270,18 @@ def test_a_live_run_says_what_it_would_call_before_it_calls_it(
     assert "nothing is billed" in printed
 
 
-def test_a_strategy_that_would_call_a_model_says_how_many_times() -> None:
-    spec = StrategySpec("hybrid", PopularBaseline, llm_calls_per_batch=2)
+def test_a_strategy_that_would_call_a_model_says_how_many_times(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TINDARR_EVAL_LLM_BASE_URL", "http://somewhere.example/v1")
+    spec = StrategySpec("candidate", popular_baseline, needs_llm=True, llm_calls_per_batch=2)
     dataset = build_synthetic_dataset(SYNTHETIC_SEED)
-    plan = live_plan(spec, dataset, ReplayOptions())
+    plan = live_plan(spec, dataset, ReplayOptions(), live=False, live_llm=True)
 
     assert "AI provider up to 18 generations" in plan
-    assert "billed by whichever provider" in plan
+    # Where it goes, so nobody discovers afterwards which endpoint was billed.
+    assert "http://somewhere.example/v1" in plan
+    assert "TMDb        none" in plan
 
 
 # --- regenerating the fixture ---------------------------------------------------------
@@ -473,9 +479,11 @@ def test_a_database_that_is_not_there_is_refused(
 def test_the_fixture_service_answers_404_for_a_title_it_does_not_have() -> None:
     dataset = build_synthetic_dataset(SYNTHETIC_SEED)
     cassette = build_cassette(dataset)
-    # The recording covers exactly the catalogue; anything else is a miss, which is what
-    # stops a strategy inventing a title and the harness quietly serving it one.
-    assert len(cassette) == len(dataset.catalog)
+    # Details and recommendations for every title, plus the discovery pages: more than
+    # the catalogue, and still exactly what the fixture can be asked. Anything else is a
+    # miss, which is what stops a strategy inventing a title and the harness quietly
+    # serving it one.
+    assert len(cassette) > len(dataset.catalog)
     assert cassette.find("GET https://api.themoviedb.org/3/movie/1?language=en") is None
 
 
@@ -501,16 +509,16 @@ def test_a_live_run_records_what_came_back(
             "--live",
             "--yes",
             "--record",
-            str(recorded),
+            str(tmp_path),
         ]
     )
 
     assert code == 0
     assert "A live run reaches real services" in capsys.readouterr().out
     replayed = Cassette.load(recorded)
-    # 90 cards were proposed, but the three users share the famous ones: a cassette
-    # holds one answer per address, not one per call.
-    assert len(replayed) == 44
+    # Far fewer answers than calls: the three users share the famous cards, and the
+    # discovery pages are read once per user and then cached for the rest of their run.
+    assert 0 < len(replayed) < 160
     assert "a-real-looking-key" not in recorded.read_text(encoding="utf-8")
 
 
@@ -539,7 +547,9 @@ def test_recording_a_vote_set_writes_a_cassette_a_later_run_replays(
     assert "A live recording reaches real services" in printed
     assert f"{len(dataset.catalog)} titles" in printed
     recorded = Cassette.load(target / "tmdb.json")
-    assert len(recorded) == len(dataset.catalog)
+    # Details and recommendations per title, plus the discovery pages: the whole surface
+    # the retrieval layer can ask this vote set for.
+    assert len(recorded) > len(dataset.catalog)
     assert "a-real-looking-key" not in (target / "tmdb.json").read_text(encoding="utf-8")
     # And the directory now runs offline, which is the only thing the file is for.
     assert main(["eval", "run", "--fixtures", str(target)]) == 0
@@ -563,7 +573,11 @@ def test_a_recording_without_a_key_opens_no_connection_pool(
 
 def test_a_run_with_no_batches_at_all_still_prints() -> None:
     plan = live_plan(
-        STRATEGIES["popular"], build_synthetic_dataset(SYNTHETIC_SEED), ReplayOptions(warm_up=500)
+        STRATEGIES["popular"],
+        build_synthetic_dataset(SYNTHETIC_SEED),
+        ReplayOptions(warm_up=500),
+        live=True,
+        live_llm=False,
     )
     assert "up to 0 requests" in plan
 
@@ -585,26 +599,28 @@ def test_a_new_strategy_is_held_to_the_committed_floors(
     class Sloppy:
         """Serves the household's own library, and never reads a title's details."""
 
-        name = "hybrid"
+        name = "candidate"
 
-        def __init__(self, pool: Sequence[Title], metadata: Metadata) -> None:
-            self._pool = pool
+        def __init__(self, parts: Parts) -> None:
+            self._parts = parts
 
         async def propose(self, context: StrategyContext, size: int) -> list[Candidate]:
             owned = sorted(context.library.refs)
-            rest = [title.ref for title in self._pool if title.ref not in context.excluded]
+            found = await self._parts.retrieval.pool(context)
+            rest = [title.ref for title in found.titles if title.ref not in context.excluded]
             return [Candidate(ref=ref) for ref in (owned + rest)[:size]]
 
-    monkeypatch.setitem(STRATEGIES, "hybrid", StrategySpec("hybrid", Sloppy))
-    main(["eval", "run", "--fixtures", str(tmp_path), "--strategy", "hybrid", "--update-baseline"])
+    monkeypatch.setitem(STRATEGIES, "candidate", StrategySpec("candidate", Sloppy))
+    fixtures = ["--fixtures", str(tmp_path), "--strategy", "candidate"]
+    main(["eval", "run", *fixtures, "--update-baseline"])
     capsys.readouterr()
 
-    code = main(["eval", "run", "--fixtures", str(tmp_path), "--strategy", "hybrid", "--check"])
+    code = main(["eval", "run", *fixtures, "--check"])
 
     printed = capsys.readouterr().out
     assert code == 1
     # Its own baseline is happy — it wrote it. The floors are not.
-    assert "floor.complete_rate" in printed
+    assert "floor:popular.complete_rate" in printed or "floor:random.complete_rate" in printed
     assert "worse than" in printed
 
 

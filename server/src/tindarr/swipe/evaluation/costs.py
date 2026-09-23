@@ -19,14 +19,23 @@ nothing in one process can stop code that is determined — but it turns "zero t
 from a silent win into a failed run.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from pydantic import BaseModel
 
 from tindarr.ports.connectors import ConnectionCheck
 from tindarr.ports.llm import Generation, LlmCapabilities, LlmProvider, LlmProviderKind, Prompt
-from tindarr.ports.metadata import Metadata, Provider, SearchQuery, Title, TitleDetails, Trailer
+from tindarr.ports.metadata import (
+    DiscoverQuery,
+    Metadata,
+    Provider,
+    SearchQuery,
+    Title,
+    TitleDetails,
+    TitleFilters,
+    Trailer,
+)
 from tindarr.ports.titles import TitleRef
 
 __all__ = ["BatchCost", "CostMeter", "CountingLlmProvider", "CountingMetadata"]
@@ -203,6 +212,31 @@ class CountingMetadata:
         """Match, counted once for the operation; its own searches count too."""
         self._count("match")
         return await self._inner.match(query)
+
+    async def discover(self, query: DiscoverQuery) -> list[Title]:
+        """Read one discovery page, counted. A page is one request, whatever it holds."""
+        self._count("discover")
+        return await self._inner.discover(query)
+
+    async def related(self, ref: TitleRef, language: str, page: int = 1) -> list[Title]:
+        """Read one recommendations page, counted."""
+        self._count("related")
+        return await self._inner.related(ref, language, page)
+
+    async def excluded_genre_ids(self, filters: TitleFilters) -> frozenset[int]:
+        """Resolve the excluded genres, counted once however many pages it reads.
+
+        The adapter caches TMDb's genre list for its own lifetime, so this is charged
+        once per run in practice and never per card. Counting the operation rather than
+        the requests underneath it slightly under-reports; it is two calls, once.
+        """
+        self._count("excluded_genre_ids")
+        return await self._inner.excluded_genre_ids(filters)
+
+    async def genres(self) -> Mapping[int, str]:
+        """Read TMDb's genre list, counted once however many pages it really reads."""
+        self._count("genres")
+        return await self._inner.genres()
 
     async def details(self, ref: TitleRef, language: str) -> TitleDetails:
         """Read a title, counted."""

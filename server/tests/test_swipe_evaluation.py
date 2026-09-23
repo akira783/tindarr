@@ -9,7 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.support.evaluation import InMemoryMetadata, RecordedEngine, ScriptedStrategy
+from tests.support.evaluation import (
+    FixedPool,
+    InMemoryMetadata,
+    RecordedEngine,
+    ScriptedStrategy,
+)
 from tindarr.ports.titles import TitleRef
 from tindarr.swipe.baselines import PopularBaseline
 from tindarr.swipe.evaluation import (
@@ -291,7 +296,9 @@ async def test_two_runs_of_the_same_strategy_produce_the_same_document() -> None
     async def once() -> str:
         meter = CostMeter()
         metadata = CountingMetadata(InMemoryMetadata(pool), meter)
-        report = await evaluate(dataset, lambda: PopularBaseline(pool, metadata), "popular", meter)
+        report = await evaluate(
+            dataset, lambda: PopularBaseline(FixedPool(pool), metadata), "popular", meter
+        )
         return report.to_json()
 
     assert await once() == await once()
@@ -373,7 +380,9 @@ async def test_the_table_names_every_metric_and_the_cost_it_charged() -> None:
     pool = dataset.pool
     meter = CostMeter()
     metadata = CountingMetadata(InMemoryMetadata(pool), meter)
-    report = await evaluate(dataset, lambda: PopularBaseline(pool, metadata), "popular", meter)
+    report = await evaluate(
+        dataset, lambda: PopularBaseline(FixedPool(pool), metadata), "popular", meter
+    )
 
     table = report.table()
 
@@ -697,7 +706,7 @@ def weak_report(scored: int, catalogued: int = 90, recall: float = 1.0) -> Evalu
         source="",
         strategy="candidate",
         options=ReplayOptions(),
-        counts=Counts(batches=9, usable=90, scored=scored, catalogued=catalogued),
+        counts=Counts(batches=9, usable=90, scored=scored, catalogued=catalogued, new_votes=scored),
         metrics=metrics,
         notes=(),
     )
@@ -719,7 +728,7 @@ def test_the_floor_is_not_applied_to_a_metric_neither_run_can_support() -> None:
         strategy="popular",
         options=ReplayOptions().as_dict(),
         metrics={"already_seen_rate": 0.1, "liked_recall": 0.9},
-        counts={"scored": 60, "catalogued": 90},
+        counts={"scored": 60, "catalogued": 90, "new_votes": 40},
         tolerances={},
     )
     report = weak_report(scored=3, recall=0.1)
@@ -728,7 +737,7 @@ def test_the_floor_is_not_applied_to_a_metric_neither_run_can_support() -> None:
     skipped = " ".join(uncomparable([floor], report))
 
     # The rate would have failed the floor by a mile; it is not compared at all.
-    assert "floor.already_seen_rate" not in names
+    assert "floor:popular.already_seen_rate" not in names
     assert "already_seen_rate: not compared" in skipped
     # What still carries the gate is the pool-free half.
-    assert "floor.liked_recall" in names
+    assert "floor:popular.liked_recall" in names

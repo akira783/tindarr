@@ -28,7 +28,8 @@ from tindarr.swipe.evaluation.replay import BatchOutcome, CardStatus, ReplayOpti
 
 __all__ = [
     "BASIS",
-    "COUNT_OF_BASIS",
+    "BASIS_COUNT",
+    "BASIS_COUNTS",
     "DIRECTIONS",
     "MEANINGFUL_BASIS",
     "Counts",
@@ -48,7 +49,15 @@ type Kind = Literal["measured", "estimated"]
 #: divides by the proposed cards this fixture happens to have an opinion on, and
 #: ``catalogue`` by the proposed cards it can describe — both collapse the moment a
 #: strategy retrieves from the whole of TMDb instead of from the fixture's own titles.
-type Basis = Literal["pool-free", "votes", "catalogue"]
+#:
+#: ``bound`` is the awkward one, and it is named rather than hidden. A count of faults —
+#: cards the user had already watched, cards they turned down — can only count the ones
+#: the fixture was asked about, so it is a **lower bound**: every fault it reports is
+#: real, and the ones it misses are invisible. That makes it honest to print and unsafe
+#: to compare between two runs of different depth, because a strategy proposing nothing
+#: the fixture recognises reports no faults *and* no recall. It is compared under the
+#: same condition as a rate, and read next to ``liked_recall``, never alone.
+type Basis = Literal["pool-free", "bound", "votes", "catalogue"]
 
 #: Read this as the harness's opinion, stated once.
 #:
@@ -99,6 +108,11 @@ DIRECTIONS: Final[Mapping[str, Direction]] = {
 #: an opinion on — which scores zero recall. Neither can be gamed without the other
 #: saying so, and ``fill_rate`` and ``usable_per_batch`` stop a strategy shrinking the
 #: batch to make the counts small.
+#:
+#: Only ``liked_recall`` and ``liked_recall_top`` are fully ``pool-free``, and the
+#: reason is worth keeping in view: their denominator is every liked title the replay
+#: withheld, which the fixture knows in full. The avoidance counts have no such
+#: guarantee in their numerator, so they are marked ``bound``.
 BASIS: Final[Mapping[str, Basis]] = {
     "fill_rate": "pool-free",
     "usable_per_batch": "pool-free",
@@ -106,8 +120,8 @@ BASIS: Final[Mapping[str, Basis]] = {
     "waste_rate": "pool-free",
     "liked_recall": "pool-free",
     "liked_recall_top": "pool-free",
-    "seen_per_batch": "pool-free",
-    "disliked_per_batch": "pool-free",
+    "seen_per_batch": "bound",
+    "disliked_per_batch": "bound",
     "coverage": "pool-free",
     "catalogue_coverage": "pool-free",
     "already_seen_rate": "votes",
@@ -139,11 +153,24 @@ MEANINGFUL_BASIS: Final = 12
 #: front, so recall in the first three cards is a different claim from recall anywhere.
 TOP_RANKS: Final = 3
 
-#: Which count each basis divides by, and which a baseline therefore has to carry.
-COUNT_OF_BASIS: Final[Mapping[Basis, str]] = {
-    "votes": "scored",
-    "catalogue": "catalogued",
+#: Which count each metric that needs one actually divides by, named so a baseline can
+#: carry it. Not one count per *basis*: ``new_like_rate`` divides by the cards that were
+#: new to the user, which on an open pool is a handful when ``scored`` is a dozen, and a
+#: metric held to somebody else's denominator is a metric nobody is checking.
+BASIS_COUNT: Final[Mapping[str, str]] = {
+    "seen_per_batch": "scored",
+    "disliked_per_batch": "scored",
+    "already_seen_rate": "scored",
+    "like_rate": "scored",
+    "agreement": "scored",
+    "skip_rate": "scored",
+    "new_like_rate": "new_votes",
+    "genre_diversity": "catalogued",
+    "franchise_repeat_rate": "catalogued",
 }
+#: The counts a baseline records so a later run can ask whether comparing is worth it.
+#: Never gated: they say what a number is worth, they are not themselves a score.
+BASIS_COUNTS: Final[tuple[str, ...]] = ("catalogued", "new_votes")
 
 
 def comparable(metric: str, counts: Mapping[str, int]) -> bool:
@@ -153,7 +180,7 @@ def comparable(metric: str, counts: Mapping[str, int]) -> bool:
     a run whose coverage collapsed — which is what an open candidate pool does — keeps
     printing them and stops being graded on them.
     """
-    needed = COUNT_OF_BASIS.get(BASIS.get(metric, "pool-free"))
+    needed = BASIS_COUNT.get(metric)
     return needed is None or counts.get(needed, 0) >= MEANINGFUL_BASIS
 
 
@@ -234,6 +261,8 @@ class Counts:
     liked_available: int = 0
     #: Of those, the ones found in the first ``TOP_RANKS`` cards of a batch.
     likes_in_top: int = 0
+    #: Scored cards that were new to the user: the denominator of ``new_like_rate``.
+    new_votes: int = 0
     catalogued: int = 0
     tmdb_calls: int = 0
     llm_calls: int = 0
@@ -261,7 +290,11 @@ class EvaluationReport:
     @property
     def basis_counts(self) -> Mapping[str, int]:
         """The denominators the basis column depends on, as the gate reads them."""
-        return {"scored": self.counts.scored, "catalogued": self.counts.catalogued}
+        return {
+            "scored": self.counts.scored,
+            "catalogued": self.counts.catalogued,
+            "new_votes": self.counts.new_votes,
+        }
 
     @property
     def weak(self) -> frozenset[str]:
@@ -375,6 +408,7 @@ def _counts(batches: Sequence[BatchOutcome]) -> Counts:
         seen_disliked=seen_disliked,
         liked_available=sum(available.values()),
         likes_in_top=likes_in_top,
+        new_votes=likes + dislikes,
         catalogued=catalogued,
         complete=complete,
         tmdb_calls=spent.metadata_calls,
@@ -462,7 +496,11 @@ def _notes(counts: Counts, metrics: Mapping[str, float | None]) -> tuple[str, ..
         )
     if not counts.catalogued:
         notes.append("The vote set carries no catalogue, so the diversity metrics are unavailable.")
-    basis = {"scored": counts.scored, "catalogued": counts.catalogued}
+    basis = {
+        "scored": counts.scored,
+        "catalogued": counts.catalogued,
+        "new_votes": counts.new_votes,
+    }
     weak = sorted(key for key in DIRECTIONS if not comparable(key, basis))
     if weak:
         notes.append(

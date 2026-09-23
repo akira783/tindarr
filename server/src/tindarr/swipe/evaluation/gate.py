@@ -28,7 +28,10 @@ Four things make the gate hard to walk past:
 - **A new strategy does not write its own floor.** Its first baseline would otherwise be
   whatever it happened to score, so a strategy worse than doing nothing clever could
   certify itself. ``check_floor`` holds any strategy that is not one of the reference
-  floors to the best of their committed numbers.
+  floors to the committed numbers of **one** of them, whole: it has to be no worse than
+  at least one floor on every graded metric that run supports. Not the best value of
+  each metric across the floors — that composite is a strategy that does not exist, and
+  neither floor clears it either.
 
 **The tolerances come from the code, not from the baseline file.** They are written into
 the file so a reader can see them, and ignored when checking: a gate whose thresholds
@@ -47,8 +50,8 @@ from pathlib import Path
 from typing import Any, Final, cast
 
 from tindarr.swipe.evaluation.metrics import (
-    BASIS,
-    COUNT_OF_BASIS,
+    BASIS_COUNT,
+    BASIS_COUNTS,
     DIRECTIONS,
     MEANINGFUL_BASIS,
     EvaluationReport,
@@ -56,6 +59,7 @@ from tindarr.swipe.evaluation.metrics import (
 )
 
 __all__ = [
+    "FLOOR_EXEMPT",
     "FLOOR_STRATEGIES",
     "GATED_COUNTS",
     "RECORDED_COUNTS",
@@ -103,7 +107,23 @@ GATED_COUNTS: Final[tuple[str, ...]] = ("batches", "usable", "scored")
 COUNT_TOLERANCE: Final = 0.02
 #: Written into a baseline as well, and never gated: they are what says whether a
 #: comparison against this floor is worth making at all (``comparable``).
-RECORDED_COUNTS: Final[tuple[str, ...]] = ("catalogued",)
+RECORDED_COUNTS: Final[tuple[str, ...]] = BASIS_COUNTS
+
+#: What a strategy **spends**, as opposed to what it achieves.
+#:
+#: Exempt from the floor comparison, and from that comparison only. A floor that calls
+#: no model reports zero model calls and zero tokens, so holding any strategy that calls
+#: one to "no worse than the floors" would be asking it not to exist — the gate would
+#: refuse the engine ADR 0013 decided on, on the grounds that it does what the ADR says
+#: to do. Cost is guarded where it can be: by the strategy's **own** committed baseline,
+#: to a quarter of a model call and fifty tokens a card, and by the live plan that
+#: prints what a run would spend before it spends it. The first number is still a number
+#: somebody has to write into a file and defend in a diff.
+FLOOR_EXEMPT: Final[tuple[str, ...]] = (
+    "tmdb_calls_per_batch",
+    "llm_calls_per_batch",
+    "llm_tokens_per_card",
+)
 
 
 class BaselineError(ValueError):
@@ -254,32 +274,54 @@ def _optional_number(key: str, value: object) -> float | None:
 
 
 def check_floor(floors: Sequence[Baseline], report: EvaluationReport) -> Sequence[Regression]:
-    """Hold a strategy to the best of the reference floors, on the graded metrics.
+    """Hold a strategy to the reference floors: it has to clear **one of them whole**.
 
     Without this the gate is only a per-strategy regression test, and the first baseline
     a new strategy writes is whatever it happened to score — so a strategy worse than
     "show the most popular thing you have not voted on" could pass for ever. The floors
     themselves are exempt: they are what everything else is measured against.
 
+    **One floor, not the best of all of them.** The first version of this took the best
+    value of every metric across the floors, and that bar is unbeatable by construction:
+    the floors exist precisely because each is worse than the other somewhere, so the
+    composite is a strategy that does not exist and that neither floor clears. What the
+    gate means to ask — "is this better than doing something stupid?" — is answered by
+    requiring the candidate to be no worse than **at least one** floor on every graded
+    metric it supports. When none is cleared, the failure reported is against the floor
+    it came closest to, so the output names one comparison rather than a mixture.
+
     Only the floors measured on the same vote set, with the same replay options, count.
     """
     if report.strategy in FLOOR_STRATEGIES:
         return []
     usable = _usable(floors, report)
+    against = [(floor, _against(floor, report)) for floor in usable]
+    if any(not found for _, found in against):
+        return []
+    return min(against, key=lambda entry: (len(entry[1]), entry[0].strategy))[1]
+
+
+def _against(floor: Baseline, report: EvaluationReport) -> list[Regression]:
+    """Every graded metric on which ``report`` is worse than this one floor."""
     found: list[Regression] = []
     for metric in sorted(DIRECTIONS):
-        if DIRECTIONS[metric] == "flat" or not comparable(metric, report.basis_counts):
+        if DIRECTIONS[metric] == "flat" or metric in FLOOR_EXEMPT:
             continue
-        # Only the floors whose own run supports this metric. Holding a rate measured on
-        # five scored cards to the same rate measured on sixty is not a comparison, and
-        # the pool-free metrics are there precisely so that something still is.
-        supported = [floor for floor in usable if comparable(metric, floor.counts)]
-        best = _best(metric, supported)
-        if best is None:
+        # A rate measured on five scored cards is not comparable with the same rate
+        # measured on sixty, on either side; the pool-free metrics are there precisely
+        # so that something still is.
+        if not comparable(metric, report.basis_counts) or not comparable(metric, floor.counts):
             continue
-        slid = _slid(metric, best, report.metrics.get(metric))
+        was = floor.metrics.get(metric)
+        if was is None:
+            continue
+        slid = _slid(metric, was, report.metrics.get(metric))
         if slid is not None:
-            found.append(Regression(f"floor.{metric}", slid.baseline, slid.current, slid.tolerance))
+            found.append(
+                Regression(
+                    f"floor:{floor.strategy}.{metric}", slid.baseline, slid.current, slid.tolerance
+                )
+            )
     return found
 
 
@@ -296,18 +338,23 @@ def uncomparable(floors: Sequence[Baseline], report: EvaluationReport) -> Sequen
     for metric in sorted(DIRECTIONS):
         if DIRECTIONS[metric] == "flat":
             continue
+        if metric in FLOOR_EXEMPT:
+            lines.append(f"{metric}: not compared, a cost is its own baseline's business")
+            continue
         if not comparable(metric, report.basis_counts):
+            denominator = BASIS_COUNT[metric]
             lines.append(
                 f"{metric}: not compared, this run put fewer than {MEANINGFUL_BASIS} cards "
-                f"behind it ({COUNT_OF_BASIS[BASIS[metric]]} "
-                f"{report.basis_counts[COUNT_OF_BASIS[BASIS[metric]]]})"
+                f"behind it ({denominator} {report.basis_counts[denominator]})"
             )
             continue
-        supported = [floor for floor in usable if comparable(metric, floor.counts)]
+        supported = [
+            floor
+            for floor in usable
+            if comparable(metric, floor.counts) and floor.metrics.get(metric) is not None
+        ]
         if not supported:
             lines.append(f"{metric}: not compared, no floor's run supports it")
-        elif _best(metric, supported) is None:
-            lines.append(f"{metric}: not compared, no floor measured it")
     return lines
 
 
@@ -324,14 +371,6 @@ def _usable(floors: Sequence[Baseline], report: EvaluationReport) -> Sequence[Ba
             f"run the {' and '.join(FLOOR_STRATEGIES)} baselines first"
         )
     return found
-
-
-def _best(metric: str, floors: Sequence[Baseline]) -> float | None:
-    """Return the most demanding floor value for ``metric``, or ``None`` when none has one."""
-    values = [value for floor in floors if (value := floor.metrics.get(metric)) is not None]
-    if not values:
-        return None
-    return max(values) if DIRECTIONS[metric] == "higher" else min(values)
 
 
 def check(baseline: Baseline, report: EvaluationReport) -> Sequence[Regression]:

@@ -102,6 +102,10 @@ class Metadata(Protocol):          # TMDb
     async def test(self) -> ConnectionCheck
     async def search(self, query: SearchQuery) -> list[Title]
     async def match(self, query: SearchQuery) -> Title | None        # search, then pick one
+    # Step 4.2: the two calls the candidate pool is built from.
+    async def discover(self, query: DiscoverQuery) -> list[Title]    # filtered, one page
+    async def related(self, ref: TitleRef, language: str, page: int = 1) -> list[Title]
+    async def excluded_genre_ids(self, filters: TitleFilters) -> frozenset[int]
     async def details(self, ref: TitleRef, language: str) -> TitleDetails
     async def watch_providers(self, ref: TitleRef, region: str) -> list[Provider]
     async def trailer(self, ref: TitleRef, language: str) -> Trailer | None
@@ -134,19 +138,26 @@ package and its contract tests. The domain does not change
 
 ### Swipe engine
 
-This is the feature's logic as it exists in the SuggestArr fork, already tested in real
-use:
+The fork's logic, with its middle turned around by
+[ADR 0013](adr/0013-recommendation-engine.md): TMDb retrieves, the model chooses.
 
 1. **Signals.** Engagement from the media server (watched, abandoned, in progress,
    "mostly watched" for a series at 60 % of its episodes or more), the library, past votes and the taste profile.
    Media server play counts are never used as a rewatch signal: debrid setups inflate
    them.
-2. **Batch prompt.** Mode (`calibration` until 15 votes, then `normal`), novelty
-   (`familiar` / `balanced` / `bold`), optional mood. The prompt also lists the
-   library and the cards already shown, so the model avoids them in the first place.
-3. **Resolution.** Every suggestion is matched on TMDb, then filtered (already voted,
-   owned, already shown, content filters). The batch is balanced between safe and
-   explore picks.
+2. **Retrieval** (`tindarr.swipe.retrieval`). TMDb builds the candidate pool: what it
+   recommends to somebody who liked this user's recent likes, plus filtered discovery
+   under the **novelty band** — an adaptive popularity floor that drops as the setting
+   goes from `familiar` to `bold`, with a fame ceiling in vote counts at the bold end.
+   **Every exclusion is applied here**, before the model sees anything: voted on,
+   already served, owned, wrong media type, outside the household's content filters.
+3. **Batch prompt** (`tindarr.swipe.hybrid`). Mode (`calibration` until 15 votes, then
+   `normal`), novelty, optional mood, the taste profile, what they actually watched and
+   the recent votes — the fork's prompt, minus its "never propose" list, which the pool
+   has already made unnecessary. The model answers with **TMDb ids from the pool**, a
+   rationale and a pick kind, validated against a schema; an id that was not offered is
+   dropped, and there is nothing left to search for. A model that fails costs the
+   sentences, not the batch: the pool is served in its own order.
 4. **Enrichment.** Translation into the user's language, streaming providers for the
    region, ratings (OMDb), trailer.
 5. **Profile.** Rewritten in the background every N votes, as short "Loves / Avoids /

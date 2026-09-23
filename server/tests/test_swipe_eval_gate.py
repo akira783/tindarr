@@ -69,7 +69,9 @@ def report(**overrides: object) -> EvaluationReport:
         "source": "",
         "strategy": "popular",
         "options": ReplayOptions(),
-        "counts": Counts(batches=10, usable=90, scored=60, catalogued=90, complete=90),
+        "counts": Counts(
+            batches=10, usable=90, scored=60, catalogued=90, new_votes=40, complete=90
+        ),
         "metrics": metrics,
         "notes": (),
     }
@@ -243,15 +245,27 @@ def floors() -> list[Baseline]:
     return [popular, random_floor]
 
 
-def test_a_new_strategy_is_held_to_the_best_of_the_floors() -> None:
+def test_a_new_strategy_has_to_clear_one_whole_floor() -> None:
     candidate = report(strategy="hybrid", metrics=dict(report().metrics) | {"like_rate": 0.30})
     slipped = check_floor(floors(), candidate)
 
-    # The bar is per metric, and it is whichever floor did better on it: already-seen
-    # 0.40 (popular's, the lower of the two), like rate 0.35 (popular's), new-like 0.66
-    # (random's). The candidate matches the first and misses the other two.
-    assert [row.metric for row in slipped] == ["floor.like_rate", "floor.new_like_rate"]
+    # It clears neither: 'popular' wants a like rate of 0.35 and 'random' a new-like
+    # rate of 0.66. The failure named is the closest one, and it names its floor.
+    assert [row.metric for row in slipped] == ["floor:popular.like_rate"]
     assert "0.35 -> 0.3" in str(slipped[0])
+
+
+def test_the_bar_is_one_floor_whole_and_not_the_best_of_each_metric() -> None:
+    """The composite of two floors is a strategy that does not exist.
+
+    'popular' is better on the like rate, 'random' on the new-like rate. A candidate
+    that matches 'popular' everywhere has beaten a reference strategy, which is what the
+    gate means to ask; holding it to 'random''s new-like rate as well would hold it to a
+    bar neither floor clears — including, in a later run, the floors themselves.
+    """
+    candidate = report(strategy="hybrid")
+
+    assert check_floor(floors(), candidate) == []
 
 
 def test_a_strategy_that_beats_both_floors_passes() -> None:

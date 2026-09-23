@@ -6,11 +6,20 @@ the most popular unseen title, or picking at random, would have scored on the sa
 votes. They are also the proof that the port of ``tindarr.swipe.strategy`` can be
 implemented at all without a database, a clock or an HTTP framework.
 
-Both read their candidates from a pool handed to them at construction. Building that
-pool from TMDb — similarity, discovery, the adaptive popularity floor — is the retrieval
-layer of roadmap step 4.2 and is not here. Both then read each pick's details through
-the ``Metadata`` port, which is what a card needs anyway and what makes the harness's
-TMDb call counter say something real.
+Both draw from the **same candidate pool as everything else** (``tindarr.swipe.retrieval``
+since lot 4b): titles TMDb recommends to somebody who liked what this user liked, plus
+filtered discovery under the novelty band. That is the point of a floor. While the
+baselines drew from the fixture's own catalogue — which on a vote set built from real
+votes holds exactly the 99 titles somebody voted on — they were picking from a shortlist
+of scoreable titles, and "is the model better than picking the most popular thing?" was
+being asked of two strategies that had been handed different questions.
+
+Both then read each pick's details through the ``Metadata`` port, which is what a card
+needs anyway and what makes the harness's TMDb call counter say something real.
+
+Neither trusts the pool to be clean, although it is: ``eligible`` re-applies the
+exclusions on the way out. A floor that would happily serve a title the retrieval layer
+should have dropped is a floor that cannot catch a retrieval bug.
 """
 
 import random
@@ -18,6 +27,7 @@ from collections.abc import Sequence
 
 from tindarr.ports.metadata import Metadata, Title, TitleFilters
 from tindarr.ports.titles import MediaKind
+from tindarr.swipe.retrieval import PoolSource
 from tindarr.swipe.strategy import Candidate, StrategyContext
 
 __all__ = ["PopularBaseline", "RandomBaseline", "eligible"]
@@ -71,13 +81,13 @@ class PopularBaseline:
 
     name = "popular"
 
-    def __init__(self, pool: Sequence[Title], metadata: Metadata) -> None:
-        self._pool = tuple(pool)
+    def __init__(self, retrieval: PoolSource, metadata: Metadata) -> None:
+        self._retrieval = retrieval
         self._metadata = metadata
 
     async def propose(self, context: StrategyContext, size: int) -> Sequence[Candidate]:
         """Return the ``size`` most popular eligible titles, most popular first."""
-        candidates = eligible(self._pool, context)
+        candidates = eligible((await self._retrieval.pool(context)).titles, context)
         # Negated popularity first, then the ref: ties must not depend on sort stability
         # across a pool that was built in a different order.
         candidates.sort(key=lambda title: (-title.popularity, title.ref))
@@ -97,13 +107,13 @@ class RandomBaseline:
 
     name = "random"
 
-    def __init__(self, pool: Sequence[Title], metadata: Metadata) -> None:
-        self._pool = tuple(pool)
+    def __init__(self, retrieval: PoolSource, metadata: Metadata) -> None:
+        self._retrieval = retrieval
         self._metadata = metadata
 
     async def propose(self, context: StrategyContext, size: int) -> Sequence[Candidate]:
         """Return up to ``size`` eligible titles, drawn from the context's own seed."""
-        candidates = eligible(self._pool, context)
+        candidates = eligible((await self._retrieval.pool(context)).titles, context)
         # Not a security decision: the seed is fixed by the caller precisely so that two
         # runs of this baseline produce the same batch.
         draw = random.Random(context.seed)  # noqa: S311

@@ -50,6 +50,8 @@ from tindarr.adapters.http import (
 from tindarr.ports import problems
 from tindarr.ports.connectors import ConnectionCheck, ConnectorHealth
 from tindarr.ports.metadata import (
+    DiscoverOrder,
+    DiscoverQuery,
     OfferKind,
     Provider,
     SearchQuery,
@@ -58,7 +60,7 @@ from tindarr.ports.metadata import (
     TitleFilters,
     Trailer,
 )
-from tindarr.ports.titles import MediaKind, TitleRef
+from tindarr.ports.titles import MediaKind, TitleRef, as_media_kind
 
 #: TMDb's own v3 base. It is not configurable: there is one TMDb.
 TMDB_BASE_URL: Final = "https://api.themoviedb.org/3"
@@ -92,6 +94,29 @@ _JWT_PARTS: Final = 3
 _YEAR_DIGITS: Final = 4
 #: TMDb's own "sort me last" value for a provider with no priority.
 _LAST_PRIORITY: Final = 999
+#: Our four sort words, in TMDb's own spelling. The date field differs between films and
+#: series, which is exactly why the port does not let a caller write the value itself.
+_ORDERS: Final[Mapping[MediaKind, Mapping[DiscoverOrder, str]]] = {
+    "movie": {
+        "popularity": "popularity.desc",
+        "rating": "vote_average.desc",
+        "newest": "primary_release_date.desc",
+        "votes": "vote_count.desc",
+    },
+    "tv": {
+        "popularity": "popularity.desc",
+        "rating": "vote_average.desc",
+        "newest": "first_air_date.desc",
+        "votes": "vote_count.desc",
+    },
+}
+#: The date parameter of each kind, for the era window.
+_DATE_PARAM: Final[Mapping[MediaKind, str]] = {
+    "movie": "primary_release_date",
+    "tv": "first_air_date",
+}
+#: TMDb answers twenty results a page and refuses a page past this.
+MAX_DISCOVER_PAGE: Final = 500
 
 logger = logging.getLogger(__name__)
 
@@ -207,8 +232,10 @@ class TmdbMetadata:
     def __init__(self, api_key: str, transport: httpx2.AsyncBaseTransport | None = None) -> None:
         self._api_key = api_key
         self._transport = transport
-        #: ``normalised genre name -> TMDb id``, read once per adapter instance.
-        self._genres: dict[str, int] | None = None
+        #: ``TMDb id -> the name TMDb gave it``, read once per adapter instance. Both
+        #: directions come off it: the content filters resolve names to ids, and a
+        #: candidate line resolves the ids a listing returns back into words.
+        self._genres: dict[int, str] | None = None
 
     # --- plumbing -------------------------------------------------------------------
 
@@ -312,6 +339,50 @@ class TmdbMetadata:
             params["year" if query.kind == "movie" else "first_air_date_year"] = str(query.year)
         payload = await self._get(session, f"/search/{query.kind}", params)
         return [found for row in _rows(payload) if (found := title_of(row, query.kind)) is not None]
+
+    # --- discovery ------------------------------------------------------------------
+
+    async def discover(self, query: DiscoverQuery) -> list[Title]:
+        """Return one filtered page of ``/discover``, in the order that was asked for.
+
+        Everything the retrieval layer of ADR 0013 can push down to TMDb is pushed down
+        here: the fame band, the rating floor, the era, the genres, the language. What
+        comes back is already the pool, minus the exclusions only Tindarr knows about.
+        """
+        try:
+            async with self._session() as session:
+                payload = await self._get(
+                    session, f"/discover/{query.kind}", _discover_params(query)
+                )
+        except RemoteCallError as failure:
+            raise self._unreachable("discover", failure) from None
+        return [found for row in _rows(payload) if (found := title_of(row, query.kind)) is not None]
+
+    async def related(self, ref: TitleRef, language: str, page: int = 1) -> list[Title]:
+        """Return what TMDb recommends to somebody who liked ``ref``.
+
+        ``/recommendations`` rather than ``/similar``: the first is built from what
+        people actually watch together and the second from shared keywords and genres,
+        and the difference is visible in a deck. An unknown id answers ``404``, which
+        the session turns into "unreachable"; the caller treats a seed that says nothing
+        as a seed that said nothing (``tindarr.swipe.retrieval``).
+        """
+        try:
+            async with self._session() as session:
+                payload = await self._get(
+                    session,
+                    f"/{ref.kind}/{ref.tmdb_id}/recommendations",
+                    {"language": language, "page": str(max(1, page))},
+                )
+        except RemoteCallError as failure:
+            raise self._unreachable("related", failure) from None
+        # A recommendations page can hold the other kind; TMDb marks it, and a row
+        # without a usable name is dropped like anywhere else.
+        return [
+            found
+            for row in _rows(payload)
+            if (found := title_of(row, _row_kind(row, ref.kind))) is not None
+        ]
 
     async def match(self, query: SearchQuery) -> Title | None:
         """Return the one title a suggestion means, filtered, or ``None``."""
@@ -444,10 +515,15 @@ class TmdbMetadata:
             found.add(genre_id)
         return frozenset(found)
 
-    async def _genre_map(self) -> Mapping[str, int]:
+    async def genres(self) -> Mapping[int, str]:
+        """Return TMDb's own genre list, ``id -> name``, read once per adapter.
+
+        Two calls — films and series have separate lists that overlap — and then never
+        again for the life of the adapter. The list changes about once a decade.
+        """
         if self._genres is not None:
             return self._genres
-        found: dict[str, int] = {}
+        found: dict[int, str] = {}
         try:
             async with self._session() as session:
                 for kind in ("movie", "tv"):
@@ -455,11 +531,54 @@ class TmdbMetadata:
                     for row in _rows(payload, "genres"):
                         name, genre_id = as_text(row.get("name")), _int(row.get("id"))
                         if name is not None and genre_id is not None:
-                            found.setdefault(normalize_title(name), genre_id)
+                            found.setdefault(genre_id, name)
         except RemoteCallError as failure:
             raise self._unreachable("genres", failure) from None
         self._genres = found
         return found
+
+    async def _genre_map(self) -> Mapping[str, int]:
+        """Return the same list by normalised name, to resolve what an administrator typed."""
+        by_id = await self.genres()
+        found: dict[str, int] = {}
+        for genre_id, name in by_id.items():
+            found.setdefault(normalize_title(name), genre_id)
+        return found
+
+
+def _row_kind(row: Mapping[str, Any], fallback: MediaKind) -> MediaKind:
+    """Read TMDb's own ``media_type`` from a mixed listing, or fall back."""
+    found = as_text(row.get("media_type"))
+    kind = as_media_kind(found) if found is not None else None
+    return kind if kind is not None else fallback
+
+
+def _discover_params(query: DiscoverQuery) -> dict[str, str]:
+    """Turn a ``DiscoverQuery`` into TMDb's own parameter names."""
+    date = _DATE_PARAM[query.kind]
+    params: dict[str, str] = {
+        "language": query.language,
+        "page": str(min(max(1, query.page), MAX_DISCOVER_PAGE)),
+        "sort_by": _ORDERS[query.kind][query.order],
+        "include_adult": "true" if query.include_adult else "false",
+    }
+    optional: Mapping[str, object] = {
+        "vote_count.gte": query.min_votes,
+        "vote_count.lte": query.max_votes,
+        "vote_average.gte": query.min_rating,
+        f"{date}.gte": f"{query.from_year}-01-01" if query.from_year else None,
+        f"{date}.lte": f"{query.to_year}-12-31" if query.to_year else None,
+        "with_genres": ",".join(str(genre) for genre in sorted(query.with_genres)) or None,
+        "without_genres": ",".join(str(genre) for genre in sorted(query.without_genres)) or None,
+        "with_original_language": query.original_language,
+        "with_origin_country": query.origin_country,
+    }
+    params.update(
+        (name, f"{value:g}" if isinstance(value, float) else str(value))
+        for name, value in optional.items()
+        if value is not None
+    )
+    return params
 
 
 def _score(candidate: Title, wanted: str, year: int | None) -> _Score:

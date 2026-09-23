@@ -212,21 +212,34 @@ a run costs nothing, and a committed baseline per strategy that `server.yml` fai
 The committed fixture is **generated**, not a real person's votes; `tindarr eval import`
 builds a private one from a real database into a path the repository ignores.
 
-**4.2 Retrieval.**
+**4.2 Retrieval.** ✅ done — `server/src/tindarr/swipe/retrieval.py`,
+[the reference](evaluation.md#the-candidate-pool).
 
-- Candidate pool from TMDb: titles similar to the user's likes, discovery filtered by
-  genre, era, country, rating, original language, and an **adaptive popularity floor**
-  driven by the novelty setting.
+- Candidate pool from TMDb: `/{kind}/{id}/recommendations` for the user's recent likes,
+  plus `/discover/{kind}` filtered by genre, era, rating and original language, under an
+  **adaptive popularity floor** driven by the novelty setting — and a fame ceiling in
+  vote counts at the bold end, which is the half of the band that attacks ADR 0013's
+  47 %.
 - Exclusions applied to the pool, not after the model: voted titles, the library, cards
-  already served, content filters.
+  already served, content filters, the wrong media type.
 - The model receives the pool and returns an ordered selection with a rationale per card;
-  its output is validated, and a title it did not get from the pool is dropped.
+  its output is validated against a schema, and a title it did not get from the pool is
+  dropped.
+- The harness measures it offline through recorded TMDb and model answers, and **all
+  three strategies now draw from this pool**, so the floors answer the same question the
+  candidate does.
 
 **4.3 What carries over from the fork** (behaviour and tests): batches, calibration,
 novelty levels, mood, safe/explore balancing, enrichment (translation, providers,
 ratings, trailer), the taste profile (bullets, user edits kept), likes (`like` votes
 only), stats, reset. Plus the `skip` vote (60-day cool-down, ignored by the profile, the
 prompt and the stats).
+
+The batch prompt, calibration, novelty, mood, the safe/explore split and the JSON repair
+with its single validation retry are done (`server/src/tindarr/swipe/hybrid.py`; the
+repair and the retry live in the provider adapters since step 3). What is left for 4.5
+and beyond: enrichment, the taste profile's own prompt and refresh, likes, stats, reset
+and the skip cool-down — all of which need stored batches and votes.
 
 **4.4 Knowing what the user has already seen.**
 

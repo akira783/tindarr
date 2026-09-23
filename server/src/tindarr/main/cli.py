@@ -101,8 +101,19 @@ def _add_eval(harness: argparse.ArgumentParser) -> None:
     gate.add_argument(
         "--update-baseline", action="store_true", help="rewrite the committed numbers"
     )
-    run.add_argument("--live", action="store_true", help="call the real services (says what first)")
-    run.add_argument("--record", type=Path, help="write a live run's answers to a cassette")
+    run.add_argument("--live", action="store_true", help="call the real TMDb (says what first)")
+    run.add_argument(
+        "--live-llm",
+        action="store_true",
+        dest="live_llm",
+        help="call the real AI provider (says where and what first)",
+    )
+    run.add_argument(
+        "--record",
+        type=Path,
+        metavar="DIR",
+        help="merge a live run's answers into the cassettes of this fixture directory",
+    )
     run.add_argument("--yes", action="store_true", help="answer the live-run question (scripts)")
 
     fixtures = actions.add_parser("fixtures", help="regenerate the generated vote set")
@@ -228,6 +239,7 @@ def _eval_run(args: argparse.Namespace, out: "TextIO") -> int:
             args.strategy,
             options,
             live=args.live,
+            live_llm=args.live_llm,
             confirmed=args.yes,
             record=args.record,
             out=out,

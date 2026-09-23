@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from tests.support.evaluation import InMemoryMetadata, title
+from tests.support.evaluation import FixedPool, InMemoryMetadata, title
 from tindarr.ports.media_server import LibraryIndex, LibraryItem
 from tindarr.ports.metadata import TitleFilters
 from tindarr.ports.titles import TitleRef
@@ -97,7 +97,7 @@ def test_both_media_kinds_are_kept_when_none_is_asked_for() -> None:
 async def test_the_popular_baseline_ranks_by_popularity_and_reads_details() -> None:
     pool = [title(1, "Low", popularity=1.0), title(2, "High", popularity=9.0)]
     metadata = InMemoryMetadata(pool)
-    strategy: Strategy = PopularBaseline(pool, metadata)
+    strategy: Strategy = PopularBaseline(FixedPool(pool), metadata)
     assert strategy.name == "popular"
 
     cards = await strategy.propose(StrategyContext(user_id="u1", language="fr"), 5)
@@ -112,7 +112,7 @@ async def test_the_popular_baseline_ranks_by_popularity_and_reads_details() -> N
 
 async def test_the_popular_baseline_returns_no_more_than_it_was_asked_for() -> None:
     pool = [title(index, f"T{index}", popularity=float(index)) for index in range(1, 10)]
-    cards = await PopularBaseline(pool, InMemoryMetadata(pool)).propose(
+    cards = await PopularBaseline(FixedPool(pool), InMemoryMetadata(pool)).propose(
         StrategyContext(user_id="u1"), 3
     )
     assert [card.ref.tmdb_id for card in cards] == [9, 8, 7]
@@ -120,10 +120,10 @@ async def test_the_popular_baseline_returns_no_more_than_it_was_asked_for() -> N
 
 async def test_equal_popularity_does_not_depend_on_the_pool_order() -> None:
     pool = [title(index, f"T{index}", popularity=5.0) for index in (3, 1, 2)]
-    first = await PopularBaseline(pool, InMemoryMetadata(pool)).propose(
+    first = await PopularBaseline(FixedPool(pool), InMemoryMetadata(pool)).propose(
         StrategyContext(user_id="u1"), 3
     )
-    second = await PopularBaseline(list(reversed(pool)), InMemoryMetadata(pool)).propose(
+    second = await PopularBaseline(FixedPool(list(reversed(pool))), InMemoryMetadata(pool)).propose(
         StrategyContext(user_id="u1"), 3
     )
     assert [card.ref for card in first] == [card.ref for card in second]
@@ -131,9 +131,9 @@ async def test_equal_popularity_does_not_depend_on_the_pool_order() -> None:
 
 async def test_the_random_baseline_is_a_function_of_its_seed() -> None:
     pool = [title(index, f"T{index}") for index in range(1, 20)]
-    strategy = RandomBaseline(pool, InMemoryMetadata(pool))
+    strategy = RandomBaseline(FixedPool(pool), InMemoryMetadata(pool))
     same = await strategy.propose(StrategyContext(user_id="u1", seed=7), 5)
-    again = await RandomBaseline(pool, InMemoryMetadata(pool)).propose(
+    again = await RandomBaseline(FixedPool(pool), InMemoryMetadata(pool)).propose(
         StrategyContext(user_id="u1", seed=7), 5
     )
     other = await strategy.propose(StrategyContext(user_id="u1", seed=8), 5)
@@ -146,5 +146,5 @@ async def test_the_random_baseline_is_a_function_of_its_seed() -> None:
 async def test_a_baseline_proposes_nothing_when_the_pool_is_exhausted() -> None:
     pool = [title(1, "Only")]
     context = StrategyContext(user_id="u1", history=(vote(1, "like"),))
-    assert await PopularBaseline(pool, InMemoryMetadata(pool)).propose(context, 5) == []
-    assert await RandomBaseline(pool, InMemoryMetadata(pool)).propose(context, 5) == []
+    assert await PopularBaseline(FixedPool(pool), InMemoryMetadata(pool)).propose(context, 5) == []
+    assert await RandomBaseline(FixedPool(pool), InMemoryMetadata(pool)).propose(context, 5) == []

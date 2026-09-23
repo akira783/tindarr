@@ -13,7 +13,7 @@ and a trailer is a YouTube key, never a link the adapter built
 (the security model, section 6).
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
@@ -137,6 +137,44 @@ class TitleFilters:
         )
 
 
+#: How a discovery page is ordered. Our own four words, not TMDb's parameter values:
+#: films and series spell the date sort differently, and a sort order that travels into
+#: a URL is not something a caller should be able to type freely.
+type DiscoverOrder = Literal["popularity", "rating", "newest", "votes"]
+
+
+@dataclass(frozen=True, slots=True)
+class DiscoverQuery:
+    """One page of "find me titles like this", as ADR 0013's retrieval layer asks for it.
+
+    Every field is a filter TMDb applies **before** answering, which is the whole point:
+    a pool the model never sees the wrong half of costs nothing to build and cannot be
+    un-filtered by a model that ignores an instruction.
+    """
+
+    kind: MediaKind
+    language: str = "en"
+    #: TMDb pages hold twenty results; page three of "most popular" is already well past
+    #: the blockbusters, which is how the novelty setting reaches the long tail.
+    page: int = 1
+    order: DiscoverOrder = "popularity"
+    #: The fame band. ``vote_count`` rather than ``popularity`` because popularity is a
+    #: rolling measure of this week's activity and vote count is how many people ever
+    #: had an opinion — which is what "the user has probably already seen it" means.
+    min_votes: int | None = None
+    max_votes: int | None = None
+    min_rating: float | None = None
+    from_year: int | None = None
+    to_year: int | None = None
+    with_genres: tuple[int, ...] = ()
+    without_genres: tuple[int, ...] = ()
+    #: ISO 639-1. A pool of one language is a deck of one language.
+    original_language: str | None = None
+    #: ISO 3166-1, TMDb's ``with_origin_country``.
+    origin_country: str | None = None
+    include_adult: bool = False
+
+
 @dataclass(frozen=True, slots=True)
 class SearchQuery:
     """What the engine knows about a suggestion before it has been matched."""
@@ -162,6 +200,22 @@ class Metadata(Protocol):
 
     async def search(self, query: SearchQuery) -> list[Title]:
         """Return the candidates for a suggestion, best match first."""
+        ...
+
+    async def discover(self, query: DiscoverQuery) -> list[Title]:
+        """Return one filtered page of titles, in the order the query asked for."""
+        ...
+
+    async def related(self, ref: TitleRef, language: str, page: int = 1) -> list[Title]:
+        """Return the titles TMDb recommends to somebody who liked ``ref``."""
+        ...
+
+    async def excluded_genre_ids(self, filters: TitleFilters) -> frozenset[int]:
+        """Resolve the household's excluded genre names to the ids a filter compares."""
+        ...
+
+    async def genres(self) -> Mapping[int, str]:
+        """Return TMDb's genre list as ``id -> name``, so a listing can be read."""
         ...
 
     async def match(self, query: SearchQuery) -> Title | None:

@@ -109,10 +109,12 @@ jobs:
         run: |
           uv run tindarr eval run --fixtures fixtures/eval/akira-99 --strategy popular --check
           uv run tindarr eval run --fixtures fixtures/eval/akira-99 --strategy random --check
+          uv run tindarr eval run --fixtures fixtures/eval/akira-99 --strategy hybrid --check
       - name: Replay the generated votes (synthetic-99) against their baselines
         run: |
           uv run tindarr eval run --fixtures fixtures/eval/synthetic-99 --strategy popular --check
           uv run tindarr eval run --fixtures fixtures/eval/synthetic-99 --strategy random --check
+          uv run tindarr eval run --fixtures fixtures/eval/synthetic-99 --strategy hybrid --check
 
   audit:
     name: Dependency audit
