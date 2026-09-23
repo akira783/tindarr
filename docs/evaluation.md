@@ -465,8 +465,9 @@ does not compare those.
 | `tmdb_calls_per_batch` | **16.9** | **16.9** | 17.3 |
 
 **What that says, and what it does not.** On the generated set the hybrid beats
-`popular` on every graded metric and loses to `random` on recall and the like rate by
-about one card. It clears `popular` whole, which is what the gate asks. On the author's
+`popular` on every graded metric except what it spends — a model call and about two more
+TMDb requests a batch — and loses to `random` on recall and the like rate by about one
+card. It clears `popular` whole, which is what the gate asks. On the author's
 real votes nothing is settled: seven of its ninety cards carry a vote, so `liked_recall`
 moves 3.3 points per title found, `seen_per_batch` counts only faults the fixture can
 confirm, and the strategy that scores best on recall there is the one that behaves most
