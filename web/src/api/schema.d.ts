@@ -923,7 +923,11 @@ export interface paths {
         /**
          * Configure a connector
          * @description Tested before saving. Omitted secret fields keep their stored value, unless
-         *     the URL changes (`code` = `secret_required`). Fields locked by an
+         *     the address changes (`code` = `secret_required`); for `llm` the provider
+         *     counts as part of the address, and for `requests` so does `verify_tls`,
+         *     since turning it off would otherwise replay the stored key over a
+         *     connection nobody checks. TMDb and OMDb have one host each, written into
+         *     Tindarr, so their key has no address to be moved to and is always reused. Fields locked by an
          *     environment variable cannot be given another value (`code` =
          *     `setting_locked`).
          *
@@ -943,11 +947,11 @@ export interface paths {
         put: operations["saveConnector"];
         post?: never;
         /**
-         * Remove an optional connector (omdb, requests)
+         * Remove an optional connector (tmdb, omdb, requests, llm)
          * @description Only the optional connectors can be removed. `media_server` is not one of
          *     them: a Tindarr without a media server signs nobody in, so it is repointed
-         *     with `PUT` instead (`409` `media_server_required`). In step 2 the optional
-         *     connectors do not exist yet and answer `404`.
+         *     with `PUT` instead (`409` `media_server_required`). Removing a connector
+         *     that was never configured succeeds and changes nothing.
          */
         delete: operations["deleteConnector"];
         options?: never;
@@ -1783,14 +1787,13 @@ export interface components {
             /** Format: uri */
             url: string;
             api_key?: string;
-            /** @default true */
-            verify_tls: boolean;
+            /** @description Verify the backend's TLS certificate. Omitted means "keep what is stored", and true for a new connector; turning it off also means sending `api_key` again. */
+            verify_tls?: boolean;
             /**
-             * @description Seasons requested for a series.
-             * @default all
+             * @description Seasons requested for a series. Omitted means "keep what is stored", and `all` for a new connector.
              * @enum {string}
              */
-            tv_seasons: "all" | "first";
+            tv_seasons?: "all" | "first";
         };
         ApiKeyInput: {
             /**
@@ -3824,7 +3827,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description `not_found`: a connector kind not implemented yet (step 2: every kind but `media_server`). */
+            /** @description `not_found`: no such connector kind. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -3884,7 +3887,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["AdminForbidden"];
-            /** @description `not_found`: a connector kind not implemented yet (step 2: every kind but `media_server`). */
+            /** @description `not_found`: no such connector kind. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -3939,7 +3942,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description `not_found`: a connector kind not implemented yet (step 2: every kind but `media_server`). */
+            /** @description `not_found`: no such connector kind. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -4005,6 +4008,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            429: components["responses"]["RateLimited"];
             502: components["responses"]["Problem"];
         };
     };

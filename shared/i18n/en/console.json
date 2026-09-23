@@ -6,7 +6,8 @@
     "connectPhone": "Connect a phone",
     "sessions": "My sessions",
     "signedInAs": "Signed in as {{name}}",
-    "admin": "Administrator"
+    "admin": "Administrator",
+    "connectors": "Connectors"
   },
   "notFound": {
     "title": "Page not found",
@@ -95,8 +96,84 @@
       "label": "Public address",
       "suggestion": "Use this browser's address ({{origin}})",
       "checking": "Asking that address whether it reaches this server…",
-        "skip": "Set it later",
+      "skip": "Set it later",
       "done": "Setup finished."
+    }
+  },
+  "connectors": {
+    "title": "Connectors",
+    "intro": "The services Tindarr talks to. Each one is tested before it is saved, and a key is never sent to an address it was not stored for.",
+    "save": "Save",
+    "test": "Test the connection",
+    "remove": "Remove",
+    "saved": "Connector saved.",
+    "locked": "Set by an environment variable.",
+    "url": "Address",
+    "apiKey": "API key",
+    "verifyTls": "Verify the TLS certificate",
+    "verifyTlsHint": "Turning this off also means sending the API key again.",
+    "secret": {
+      "unset": "No key stored yet.",
+      "set": "A key is stored. Leave the field empty to keep it.",
+      "setEnding": "A key ending in {{last4}} is stored. Leave the field empty to keep it."
+    },
+    "health": {
+      "ok": "Works.",
+      "unauthorized": "The service refused the key.",
+      "unreachable": "The service did not answer.",
+      "unexpected_response": "Something answered, but not as expected.",
+      "unsupported_version": "That address answers as another product, or as a version Tindarr does not support.",
+      "not_configured": "Not configured.",
+      "unknown": "Configured. Press “Test the connection” to check it."
+    },
+    "mediaServer": {
+      "title": "Media server",
+      "help": "Changed in the setup wizard: repointing it decides who can sign in, so it needs an administrator of the media server who has just re-authenticated.",
+      "provider": "Product"
+    },
+    "tmdb": {
+      "title": "TMDb",
+      "help": "Where every suggestion is matched, and where posters, genres and streaming providers come from. Required for the swipe deck."
+    },
+    "omdb": {
+      "title": "OMDb",
+      "help": "Optional: adds the IMDb, Rotten Tomatoes and Metacritic ratings to a card. Without it the cards simply have no such badges."
+    },
+    "requests": {
+      "title": "Requests (Seerr)",
+      "help": "Seerr, Jellyseerr or Overseerr. A liked title is requested as the person who liked it, with their own permissions and quotas.",
+      "urlHint": "The address of the service itself, without /api.",
+      "seasons": "Seasons requested for a series",
+      "seasonsHint": "What a request asks for when somebody likes a series.",
+      "seasonsAll": "Every season",
+      "seasonsFirst": "The first season only"
+    },
+    "llm": {
+      "title": "AI provider",
+      "help": "Picks the titles. Nothing it writes is used as anything but text: titles are looked up on TMDb, and the rest is displayed as it is.",
+      "provider": "Provider",
+      "providers": {
+        "openai": "OpenAI",
+        "anthropic": "Anthropic",
+        "gemini": "Google Gemini",
+        "mistral": "Mistral",
+        "openai_compatible": "OpenAI-compatible endpoint",
+        "ollama": "Ollama (local)"
+      },
+      "baseUrl": "Address",
+      "baseUrlHint": "For example http://localhost:11434 for Ollama.",
+      "model": "Model",
+      "modelHint": "Type a model id, or load the provider's list below.",
+      "listModels": "Load the provider's models",
+      "pickModel": "Models this provider offers",
+      "pickModelHint": "Picking one fills the field above.",
+      "typeOne": "Type one instead",
+      "reasoningEffort": "Reasoning effort",
+      "reasoningEffortHint": "Only some models accept it; it is dropped when the provider refuses it.",
+      "effortDefault": "The provider's default",
+      "effortLow": "Low",
+      "effortMedium": "Medium",
+      "effortHigh": "High"
     }
   },
   "settings": {
@@ -105,7 +182,7 @@
     "name": "Server name",
     "publicUrl": "Public address",
     "publicUrlHint": "Origin the phones reach this server at, used in pairing QR codes. It is checked before it is saved.",
-      "publicUrlChecking": "Asking that address whether it reaches this server…",
+    "publicUrlChecking": "Asking that address whether it reaches this server…",
     "passwordSignIn": "Password sign-in",
     "passwordSignInOption": {
       "enabled": "Allowed",
@@ -139,7 +216,10 @@
       "limit": "Daily limit",
       "actions": "Actions"
     },
-    "role": { "admin": "Administrator", "user": "User" },
+    "role": {
+      "admin": "Administrator",
+      "user": "User"
+    },
     "mediaServerAdmin": "Administrator on the media server",
     "promoted": "Promoted in Tindarr",
     "status": {
@@ -190,7 +270,10 @@
     "empty": "No other session.",
     "current": "This browser",
     "unnamed": "Unnamed device",
-    "kind": { "web": "Console", "mobile": "App" },
+    "kind": {
+      "web": "Console",
+      "mobile": "App"
+    },
     "created": "Signed in {{date}}",
     "lastSeen": "Last seen {{date}}",
     "revokeConfirm": "Sign {{device}} out?",

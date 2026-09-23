@@ -125,3 +125,25 @@ export function pairing(overrides: Partial<Schemas["Pairing"]> = {}): Schemas["P
     ...overrides,
   };
 }
+
+export function connector(
+  kind: Schemas["ConnectorKind"],
+  overrides: Partial<Schemas["Connector"]> = {},
+): Schemas["Connector"] {
+  return {
+    kind,
+    configured: false,
+    secret: { set: false },
+    locked_fields: [],
+    status: { health: "not_configured" },
+    ...overrides,
+  };
+}
+
+/** Every kind, as `GET /admin/connectors` returns them, with nothing configured. */
+export function connectors(
+  overrides: Partial<Record<Schemas["ConnectorKind"], Partial<Schemas["Connector"]>>> = {},
+): Schemas["Connector"][] {
+  const kinds: Schemas["ConnectorKind"][] = ["media_server", "requests", "tmdb", "omdb", "llm"];
+  return kinds.map((kind) => connector(kind, overrides[kind] ?? {}));
+}

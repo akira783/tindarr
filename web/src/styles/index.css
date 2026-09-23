@@ -182,6 +182,22 @@ select:disabled {
   gap: 0.35rem;
 }
 
+.summary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0 0 var(--space);
+}
+
+.summary dt {
+  color: var(--muted);
+}
+
+.summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .hint {
   color: var(--muted);
   font-size: 0.9rem;

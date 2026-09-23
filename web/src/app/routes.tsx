@@ -5,6 +5,7 @@ import { Link, Route, Routes } from "react-router";
 import { HomeRedirect, RequireAdmin, RequireWebSession } from "../auth/guards";
 import { Layout } from "../components/Layout";
 import { SessionsPage } from "../features/account/SessionsPage";
+import { ConnectorsPage } from "../features/connectors/ConnectorsPage";
 import { ConnectPhonePage } from "../features/pairing/ConnectPhonePage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { SetupPage } from "../features/setup/SetupPage";
@@ -32,6 +33,7 @@ export function AppRoutes(): ReactNode {
           <Route index element={<HomeRedirect />} />
           <Route element={<RequireAdmin />}>
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/connectors" element={<ConnectorsPage />} />
             <Route path="/users" element={<UsersPage />} />
           </Route>
           <Route path="/connect-phone" element={<ConnectPhonePage />} />

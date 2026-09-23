@@ -3072,12 +3072,13 @@ components:
         connector: { type: string, const: requests }
         url: { type: string, format: uri, maxLength: 512 }
         api_key: { type: string, maxLength: 512 }
-        verify_tls: { type: boolean, default: true }
+        verify_tls:
+          type: boolean
+          description: Verify the backend's TLS certificate. Omitted means "keep what is stored", and true for a new connector; turning it off also means sending `api_key` again.
         tv_seasons:
           type: string
           enum: [all, first]
-          default: all
-          description: Seasons requested for a series.
+          description: Seasons requested for a series. Omitted means "keep what is stored", and `all` for a new connector.
 
     ApiKeyInput:
       type: object

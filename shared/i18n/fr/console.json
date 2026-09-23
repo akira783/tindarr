@@ -6,7 +6,8 @@
     "connectPhone": "Connecter un téléphone",
     "sessions": "Mes sessions",
     "signedInAs": "Connecté en tant que {{name}}",
-    "admin": "Administrateur"
+    "admin": "Administrateur",
+    "connectors": "Connecteurs"
   },
   "notFound": {
     "title": "Page introuvable",
@@ -95,8 +96,84 @@
       "label": "Adresse publique",
       "suggestion": "Utiliser l'adresse de ce navigateur ({{origin}})",
       "checking": "Vérification : cette adresse joint-elle ce serveur ?",
-        "skip": "Plus tard",
+      "skip": "Plus tard",
       "done": "Installation terminée."
+    }
+  },
+  "connectors": {
+    "title": "Connecteurs",
+    "intro": "Les services auxquels Tindarr parle. Chacun est testé avant d'être enregistré, et une clé n'est jamais envoyée à une adresse pour laquelle elle n'a pas été enregistrée.",
+    "save": "Enregistrer",
+    "test": "Tester la connexion",
+    "remove": "Supprimer",
+    "saved": "Connecteur enregistré.",
+    "locked": "Défini par une variable d'environnement.",
+    "url": "Adresse",
+    "apiKey": "Clé d'API",
+    "verifyTls": "Vérifier le certificat TLS",
+    "verifyTlsHint": "Désactiver cette option oblige à renvoyer la clé d'API.",
+    "secret": {
+      "unset": "Aucune clé enregistrée.",
+      "set": "Une clé est enregistrée. Laissez le champ vide pour la conserver.",
+      "setEnding": "Une clé se terminant par {{last4}} est enregistrée. Laissez le champ vide pour la conserver."
+    },
+    "health": {
+      "ok": "Fonctionne.",
+      "unauthorized": "Le service a refusé la clé.",
+      "unreachable": "Le service n'a pas répondu.",
+      "unexpected_response": "Quelque chose a répondu, mais pas ce qui était attendu.",
+      "unsupported_version": "Cette adresse répond comme un autre produit, ou comme une version que Tindarr ne prend pas en charge.",
+      "not_configured": "Non configuré.",
+      "unknown": "Configuré. Appuyez sur « Tester la connexion » pour le vérifier."
+    },
+    "mediaServer": {
+      "title": "Serveur multimédia",
+      "help": "Se modifie dans l'assistant d'installation : le repointer décide qui peut se connecter, il faut donc un administrateur du serveur multimédia qui vient de se réauthentifier.",
+      "provider": "Produit"
+    },
+    "tmdb": {
+      "title": "TMDb",
+      "help": "Où chaque suggestion est retrouvée, et d'où viennent les affiches, les genres et les plateformes. Indispensable au deck."
+    },
+    "omdb": {
+      "title": "OMDb",
+      "help": "Facultatif : ajoute les notes IMDb, Rotten Tomatoes et Metacritic aux cartes. Sans lui, les cartes n'ont simplement pas ces badges."
+    },
+    "requests": {
+      "title": "Demandes (Seerr)",
+      "help": "Seerr, Jellyseerr ou Overseerr. Un titre aimé est demandé au nom de la personne qui l'a aimé, avec ses propres droits et quotas.",
+      "urlHint": "L'adresse du service lui-même, sans /api.",
+      "seasons": "Saisons demandées pour une série",
+      "seasonsHint": "Ce que demande une requête quand quelqu'un aime une série.",
+      "seasonsAll": "Toutes les saisons",
+      "seasonsFirst": "La première saison seulement"
+    },
+    "llm": {
+      "title": "Fournisseur d'IA",
+      "help": "Choisit les titres. Rien de ce qu'il écrit n'est utilisé autrement que comme du texte : les titres sont retrouvés sur TMDb, le reste est affiché tel quel.",
+      "provider": "Fournisseur",
+      "providers": {
+        "openai": "OpenAI",
+        "anthropic": "Anthropic",
+        "gemini": "Google Gemini",
+        "mistral": "Mistral",
+        "openai_compatible": "Point d'accès compatible OpenAI",
+        "ollama": "Ollama (local)"
+      },
+      "baseUrl": "Adresse",
+      "baseUrlHint": "Par exemple http://localhost:11434 pour Ollama.",
+      "model": "Modèle",
+      "modelHint": "Saisissez un identifiant de modèle, ou chargez la liste du fournisseur ci-dessous.",
+      "listModels": "Charger les modèles du fournisseur",
+      "pickModel": "Modèles proposés par ce fournisseur",
+      "pickModelHint": "En choisir un remplit le champ ci-dessus.",
+      "typeOne": "Saisir un identifiant à la place",
+      "reasoningEffort": "Effort de raisonnement",
+      "reasoningEffortHint": "Seuls certains modèles l'acceptent ; il est abandonné si le fournisseur le refuse.",
+      "effortDefault": "Valeur par défaut du fournisseur",
+      "effortLow": "Faible",
+      "effortMedium": "Moyen",
+      "effortHigh": "Élevé"
     }
   },
   "settings": {
@@ -105,7 +182,7 @@
     "name": "Nom du serveur",
     "publicUrl": "Adresse publique",
     "publicUrlHint": "Origine par laquelle les téléphones joignent ce serveur, utilisée dans les QR codes d'appairage. Elle est vérifiée avant d'être enregistrée.",
-      "publicUrlChecking": "Vérification : cette adresse joint-elle ce serveur ?",
+    "publicUrlChecking": "Vérification : cette adresse joint-elle ce serveur ?",
     "passwordSignIn": "Connexion par mot de passe",
     "passwordSignInOption": {
       "enabled": "Autorisée",
@@ -139,7 +216,10 @@
       "limit": "Limite quotidienne",
       "actions": "Actions"
     },
-    "role": { "admin": "Administrateur", "user": "Utilisateur" },
+    "role": {
+      "admin": "Administrateur",
+      "user": "Utilisateur"
+    },
     "mediaServerAdmin": "Administrateur sur le serveur multimédia",
     "promoted": "Promu dans Tindarr",
     "status": {
@@ -190,7 +270,10 @@
     "empty": "Aucune autre session.",
     "current": "Ce navigateur",
     "unnamed": "Appareil sans nom",
-    "kind": { "web": "Console", "mobile": "Application" },
+    "kind": {
+      "web": "Console",
+      "mobile": "Application"
+    },
     "created": "Connecté le {{date}}",
     "lastSeen": "Vu le {{date}}",
     "revokeConfirm": "Déconnecter {{device}} ?",

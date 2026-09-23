@@ -79,6 +79,9 @@ export function Layout(): ReactNode {
                   <NavLink to="/settings">{t("nav.settings")}</NavLink>
                 </li>
                 <li>
+                  <NavLink to="/connectors">{t("nav.connectors")}</NavLink>
+                </li>
+                <li>
                   <NavLink to="/users">{t("nav.users")}</NavLink>
                 </li>
               </>

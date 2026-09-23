@@ -20,6 +20,13 @@ export type MediaServerKind = Schemas["MediaServerKind"];
 export type MediaServerConfigInput = Schemas["MediaServerConfigInput"];
 export type ConnectorStatus = Schemas["ConnectorStatus"];
 export type ConnectorHealth = Schemas["ConnectorHealth"];
+export type Connector = Schemas["Connector"];
+export type ConnectorKind = Schemas["ConnectorKind"];
+export type ConnectorInput = Schemas["ConnectorInput"];
+export type ApiKeyInput = Schemas["ApiKeyInput"];
+export type RequestsInput = Schemas["RequestsInput"];
+export type LlmSettingsInput = Schemas["LlmSettingsInput"];
+export type LlmProviderKind = Schemas["LlmProviderKind"];
 export type ReauthInput = Schemas["ReauthInput"];
 export type Role = Schemas["Role"];
 
@@ -131,6 +138,34 @@ export function getSettings(): Promise<ServerSettings> {
 
 export function updateSettings(body: ServerSettingsPatch): Promise<ServerSettings> {
   return unwrap(api.PATCH("/api/v1/admin/settings", { body }));
+}
+
+export function listConnectors(): Promise<Connector[]> {
+  return unwrap(api.GET("/api/v1/admin/connectors")).then((result) => result.connectors);
+}
+
+export function saveConnector(kind: ConnectorKind, body: ConnectorInput): Promise<Connector> {
+  return unwrap(api.PUT("/api/v1/admin/connectors/{kind}", { params: { path: { kind } }, body }));
+}
+
+export function testConnector(
+  kind: ConnectorKind,
+  body: ConnectorInput,
+): Promise<ConnectorStatus> {
+  return unwrap(
+    api.POST("/api/v1/admin/connectors/{kind}/test", { params: { path: { kind } }, body }),
+  );
+}
+
+export function deleteConnector(kind: ConnectorKind): Promise<void> {
+  return unwrap(
+    api.DELETE("/api/v1/admin/connectors/{kind}", { params: { path: { kind } } }),
+  ).then(() => undefined);
+}
+
+/** Model ids the provider itself offers, so none is ever hard-coded in the console. */
+export function listLlmModels(body: LlmSettingsInput): Promise<string[]> {
+  return unwrap(api.POST("/api/v1/admin/llm/models", { body })).then((result) => result.models);
 }
 
 export function listUsers(): Promise<AdminUser[]> {
