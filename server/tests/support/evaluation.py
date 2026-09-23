@@ -5,7 +5,7 @@ which is what a strategy under test needs; the harness's own tests drive the **r
 TMDb adapter over a recorded cassette instead, so both halves of the chain are covered.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 from tindarr.ports.connectors import ConnectionCheck
@@ -17,6 +17,7 @@ from tindarr.ports.metadata import (
     Trailer,
 )
 from tindarr.ports.titles import MediaKind, TitleRef
+from tindarr.swipe.strategy import Candidate, StrategyContext
 
 
 def title(  # noqa: PLR0913 - a title is a bag of fields; naming them beats a builder
@@ -78,3 +79,45 @@ class InMemoryMetadata:
     async def region_providers(self, region: str) -> list[Provider]:
         self.calls.append(f"region:{region}")
         return []
+
+
+@dataclass
+class ScriptedStrategy:
+    """Proposes exactly what it was told to, batch by batch, and records what it saw.
+
+    The workhorse of the replay tests: it makes the scoring rules easy to state (this
+    card is a duplicate, that one is owned) and it keeps every ``StrategyContext`` it
+    was handed, which is how the tests check that no vote from the future ever reached
+    one.
+    """
+
+    batches: Sequence[Sequence[TitleRef]] = field(default_factory=tuple[tuple[TitleRef, ...], ...])
+    name: str = "scripted"
+    seen: list[StrategyContext] = field(default_factory=list[StrategyContext])
+
+    async def propose(self, context: StrategyContext, size: int) -> Sequence[Candidate]:
+        self.seen.append(context)
+        index = context.batch_index
+        refs = self.batches[index] if index < len(self.batches) else ()
+        return [Candidate(ref=ref) for ref in refs]
+
+
+@dataclass
+class RecordedEngine:
+    """The engine that produced the votes, replayed: it proposes them in their own order.
+
+    A scoring oracle, and **only** a test double: it is handed the whole vote history,
+    including the part the replay is withholding, which no real strategy may see. That
+    is the point. Feeding the recorded cards back through the harness must reproduce the
+    numbers the recording was measured at — 47 % already seen, 63 % liked among the new
+    (ADR 0013) — and anything else means the replay is mis-scoring.
+    """
+
+    votes: Mapping[str, Sequence[TitleRef]]
+    name: str = "recorded"
+
+    async def propose(self, context: StrategyContext, size: int) -> Sequence[Candidate]:
+        order = self.votes.get(context.user_id, ())
+        excluded = context.excluded
+        upcoming = [ref for ref in order if ref not in excluded]
+        return [Candidate(ref=ref) for ref in upcoming[:size]]
