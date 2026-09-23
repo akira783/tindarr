@@ -21,7 +21,11 @@ cookie flags, CSRF) uses this context and never reads the raw headers again.
 
 - `TINDARR_TRUSTED_PROXIES` is a comma-separated list of IPs or CIDRs (bootstrap
   configuration, empty by default). It is the existing `trusted_proxies` setting of
-  `ServerConfig`.
+  `ServerConfig`. **List the proxy's own address, not the network it sits on.**
+  Everything in that list may claim any client address — `127.0.0.1` included, which
+  is both private and loopback — and any scheme, which is what `remote_access_denied`,
+  `password_sign_in: lan_only` and `https_required` are decided on. A range such as
+  `172.16.0.0/12` hands that to every container on every Docker bridge.
 - **Peer not trusted** (or the list is empty): the client IP is the TCP peer address.
   `X-Forwarded-For`, `X-Forwarded-Proto`, `Forwarded` and `X-Request-ID` are ignored.
   When such a header arrives from a peer in a private range, the server logs one

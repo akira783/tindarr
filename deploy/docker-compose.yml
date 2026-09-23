@@ -28,8 +28,13 @@ services:
       # Reach the server by a domain name? Set TINDARR_PUBLIC_URL (or
       # TINDARR_ALLOWED_HOSTS), otherwise the Host header is refused.
       # TINDARR_PUBLIC_URL: https://tindarr.example.com
-      # Honour X-Forwarded-For/-Proto only from your reverse proxy (IPs or CIDRs).
-      # TINDARR_TRUSTED_PROXIES: 172.16.0.0/12
+      # Honour X-Forwarded-For/-Proto only from your reverse proxy. Name its one
+      # address, never a range: a trusted hop may claim any client address (including
+      # 127.0.0.1, which looks local and private) and any scheme (https), so a range
+      # such as 172.16.0.0/12 trusts every container on every Docker bridge network.
+      # `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+      # <proxy>` prints the address to put here.
+      # TINDARR_TRUSTED_PROXIES: 172.18.0.2/32
       # TINDARR_SECRET_KEY_FILE: /run/secrets/tindarr_secret_key
     # secrets:
     #   - tindarr_secret_key

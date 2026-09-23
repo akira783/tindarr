@@ -31,7 +31,8 @@ The exact rules and numbers for this section are in
   proxy's private address. `X-Forwarded-For` and `X-Forwarded-Proto` are honoured only
   from `TINDARR_TRUSTED_PROXIES`, and the client IP is the rightmost untrusted hop, so a
   client cannot pick its own address to escape rate limits, look "private" or fake
-  HTTPS. Without that setting behind a proxy, all clients share the proxy's address:
+  HTTPS. That setting names the proxy's own address: anything listed there can claim
+  to be any client on any scheme, so a whole Docker bridge range must not be. Without that setting behind a proxy, all clients share the proxy's address:
   limits get stricter, never looser, and the server logs a hint. "Private network" is
   decided on the resolved client IP, from IP ranges only.
 - **DNS rebinding.** A web page on an attacker's domain that resolves to the server's
