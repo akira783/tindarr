@@ -147,26 +147,48 @@ target runs in CI only, on a dispatch, because it needs a real plex.tv account.
   token. Pull requests from forks never get these secrets. The same workflow lints the
   workflows (`actionlint`) and the CI shell scripts (`shellcheck`).
 
-## Step 3: adapters
+## Step 3: adapters ✅ done, except one live check and one decision
 
-- TMDb, OMDb.
-- Media servers: engagement, library, deep links (Jellyfin, Emby, Plex).
-- **Decision: Plex tokens.** Step 2 stores the owner's account-wide token. Per-user
-  watch progress needs each user's server token (`shared_servers` for friends, Home
-  user switching for Home users). Choose between keeping the account-wide token (it can
-  do anything on the owner's plex.tv account, but gives the user sync and the per-user
-  tokens) and storing only server-scoped tokens (a leak only reaches that server, but
-  the user sync and per-user progress need another source). Record it in an ADR.
+- TMDb (search with the year retry, details with the English fallback, watch providers
+  by region, trailers, the content filters) and OMDb (IMDb, Rotten Tomatoes,
+  Metacritic), behind the `Metadata` and `RatingsSource` ports.
+- Media servers: `library_ids`, `engagement` and `deep_link` for Jellyfin, Emby and
+  Plex. Engagement keeps the fork's measured rules — 60 % of a series' episodes is
+  "watched", 90 % of a film's runtime is too, and a play count is never a signal.
+  Listings are paged, which the fork does not do.
+- **Decision: Plex tokens — [ADR 0012](adr/0012-plex-tokens.md), *proposed*, waiting on
+  the owner.** The adapter was written on what the stored account token can already do:
+  the owner's own progress in full, everybody else's reconstructed from the server's
+  history, which records completed viewings and no offsets. The ADR lays out keeping the
+  account token (per-user progress and the user sync, but a leak reaches a whole plex.tv
+  account) against a server-scoped one (a leak reaches one server, but the user sync
+  needs another source), and recommends the first with three conditions. Nothing is
+  implemented either way until the owner decides.
 - Request backend: Seerr v3.x (Jellyseerr as legacy, Overseerr for Plex only),
   requests on behalf of the matching user (`X-API-User`), users matched by listing them
   without `X-API-User`, ids normalised.
 - AI providers: OpenAI, Anthropic, Gemini, Mistral, OpenAI-compatible, Ollama, each
-  with a model list and error mapping.
-- Console: connector pages with connection tests, AI provider and model picker.
+  with a model list, structured output, one validation retry and the five error codes.
+- Admin: `PUT`/`DELETE /admin/connectors/{kind}` and `.../test` for the four optional
+  connectors, `POST /admin/llm/models`. A stored secret is only reused for the same
+  address, where "the same address" counts the AI provider and the request backend's
+  `verify_tls` as part of it.
+- Console: a connectors page with a card per connector, connection tests, and an AI
+  provider with a model picker fed by the provider itself.
 
-**Check:** contract tests per adapter (recorded responses), plus one live run per AI
-provider with a small schema. Every connector can be configured and tested from the
-console.
+**Check.** (a) is done; (b) needs the owner's own API keys and is not run here.
+
+- **(a) Contract tests per adapter (pytest, no network).** Fake TMDb, OMDb, Seerr,
+  OpenAI, Anthropic, Gemini and Ollama services on `httpx.MockTransport`, with the
+  **real** SDKs and adapters driven against them, covering the failure paths a service
+  one does not control produces: `401`, `429`, `5xx`, malformed JSON, a body that is not
+  JSON at all, and answers of an unexpected shape. Every connector can be configured and
+  tested from the console, and the console's own tests drive that page.
+- **(b) One live run per AI provider with a small schema.** Not run: it needs the
+  owner's OpenAI, Anthropic, Gemini and Mistral keys and it costs money on each. What it
+  would prove that the contract tests cannot: that each provider really honours the
+  schema that was sent, and that the parameter ladder lands on a rung the real endpoint
+  accepts. Ollama can be checked locally with no key.
 
 ## Step 4: swipe engine
 
