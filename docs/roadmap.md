@@ -195,13 +195,22 @@ target runs in CI only, on a dispatch, because it needs a real plex.tv account.
 Shaped by [ADR 0013](adr/0013-recommendation-engine.md): TMDb retrieves the candidates,
 the model picks and explains, and nothing ships without the harness saying it is better.
 
-**4.1 Evaluation harness (first, before the engine).**
+**4.1 Evaluation harness (first, before the engine).** ✅ done —
+[the reference](evaluation.md).
 
 - Replay a set of real votes against any candidate strategy, offline, without paying for
   a generation: cards produced per batch, share of already-seen titles, agreement with the
   votes that were cast, diversity within a batch.
 - A fixture set of votes that can live in the repository (anonymised), plus the ability to
   point the harness at a real instance's database.
+
+What shipped: the `Strategy` port (`propose(context, size)`, where the context is the
+whole input and holds only the votes cast before the batch), two baselines to measure
+against, the replay and its metrics, `tindarr eval run / fixtures / import`, a committed
+generated vote set carrying the distribution ADR 0013 measured, recorded TMDb answers so
+a run costs nothing, and a committed baseline per strategy that `server.yml` fails on.
+The committed fixture is **generated**, not a real person's votes; `tindarr eval import`
+builds a private one from a real database into a path the repository ignores.
 
 **4.2 Retrieval.**
 
@@ -240,7 +249,7 @@ and the `subscribed` flag on card providers. Console: AI usage page, and the imp
 
 **Check.**
 
-- The harness runs in CI on the fixture votes and prints its metrics; a strategy change
+- ✅ The harness runs in CI on the fixture votes and prints its metrics; a strategy change
   that makes them worse fails the build.
 - The ported tests pass.
 - A real batch is generated end to end through the API with each AI provider family, and

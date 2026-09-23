@@ -78,6 +78,7 @@ Found a hole? Report it privately through GitHub security advisories rather than
 - [Architecture](docs/architecture.md) — layers, ports and adapters, storage, jobs
 - [Security model](docs/security.md) — assets, adversaries, mitigations
 - [Authentication, sessions and setup](docs/auth.md) — the reference the code follows
+- [Evaluation harness](docs/evaluation.md) — how a recommendation strategy is measured before it ships
 - [Roadmap](docs/roadmap.md) — what is done, what is next, and how each step is checked
 - [Architecture decision records](docs/adr/) — every significant choice, with the alternatives
 - [HTTP API contract (OpenAPI 3.1)](api/openapi.yaml) — written first, enforced in CI
