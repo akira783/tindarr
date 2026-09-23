@@ -170,18 +170,65 @@ console.
 
 ## Step 4: swipe engine
 
-- Port of the fork's engine and its tests: batches, calibration, novelty, mood,
-  balancing, enrichment, translation, profile, likes (`like` votes only), stats,
-  reset.
-- `skip` vote (60-day cool-down, ignored by the profile, the prompt and the stats).
-- Region's streaming providers (TMDb, cached), users' streaming services, the
-  `subscribed` flag on card providers.
-- Stored batches and cards, persisted jobs, warm-up, per-user daily cap and
-  concurrency.
-- Console: AI usage page.
+Shaped by [ADR 0013](adr/0013-recommendation-engine.md): TMDb retrieves the candidates,
+the model picks and explains, and nothing ships without the harness saying it is better.
 
-**Check:** the ported tests pass. A real batch is generated end to end through the API
-with each AI provider family. `/status` stays under 50 ms during a generation.
+**4.1 Evaluation harness (first, before the engine).**
+
+- Replay a set of real votes against any candidate strategy, offline, without paying for
+  a generation: cards produced per batch, share of already-seen titles, agreement with the
+  votes that were cast, diversity within a batch.
+- A fixture set of votes that can live in the repository (anonymised), plus the ability to
+  point the harness at a real instance's database.
+
+**4.2 Retrieval.**
+
+- Candidate pool from TMDb: titles similar to the user's likes, discovery filtered by
+  genre, era, country, rating, original language, and an **adaptive popularity floor**
+  driven by the novelty setting.
+- Exclusions applied to the pool, not after the model: voted titles, the library, cards
+  already served, content filters.
+- The model receives the pool and returns an ordered selection with a rationale per card;
+  its output is validated, and a title it did not get from the pool is dropped.
+
+**4.3 What carries over from the fork** (behaviour and tests): batches, calibration,
+novelty levels, mood, safe/explore balancing, enrichment (translation, providers,
+ratings, trailer), the taste profile (bullets, user edits kept), likes (`like` votes
+only), stats, reset. Plus the `skip` vote (60-day cool-down, ignored by the profile, the
+prompt and the stats).
+
+**4.4 Knowing what the user has already seen.**
+
+- The calibration grid: a wall of famous posters to tick, which conveys years of watching
+  in minutes.
+- File imports as **taste** sources, not filters ([ADR 0013](adr/0013-recommendation-engine.md)
+  measured them at 6 % of the already-seen problem): Netflix viewing history, IMDb ratings,
+  Letterboxd exports. Parsing splits on `": "` but never on a French `" : "`, retries on the
+  left-hand side, treats `&` as `et`, ranks by similarity × popularity, and **abstains into
+  a review queue rather than guessing** — `results[0]` is the root cause of the false
+  matches in every comparable project.
+- Episodes watched per series, counted against the total on TMDb, give "finished / in
+  progress / sampled and dropped" for everything watched outside the media server.
+- A title already in the user's request queue is **shown as such on the card**, not
+  filtered out.
+
+**4.5 Serving it.** Stored batches and cards, persisted jobs, warm-up, per-user daily cap
+and concurrency, the region's streaming providers (TMDb, cached), the user's own services
+and the `subscribed` flag on card providers. Console: AI usage page, and the import screen.
+
+**Check.**
+
+- The harness runs in CI on the fixture votes and prints its metrics; a strategy change
+  that makes them worse fails the build.
+- The ported tests pass.
+- A real batch is generated end to end through the API with each AI provider family, and
+  every card in it comes from the retrieved pool.
+- On the fixture votes, the share of already-seen cards is materially below the 47 %
+  measured on the fork.
+- Importing a Netflix history file produces the expected split of finished, in-progress
+  and dropped series, and every uncertain match lands in the review queue rather than in
+  the profile.
+- `/status` stays under 50 ms during a generation.
 
 ## Step 5: packaging and first deployment
 
