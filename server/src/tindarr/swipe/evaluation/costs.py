@@ -10,10 +10,17 @@ measured and a measured run is the same run.
 some OpenAI-compatible endpoints report nothing; rather than print a zero that reads
 like "free", the harness estimates from the prompt's own length and says, in the output,
 how many calls it had to estimate.
+
+**The tally is read, never trusted to stay put.** A strategy is handed the wrapped ports,
+so it is handed a path to the counters; the harness therefore charges each batch the
+*difference* between two snapshots and refuses a run whose totals went backwards
+(``tindarr.swipe.evaluation.replay``). That is tamper evidence rather than a sandbox —
+nothing in one process can stop code that is determined — but it turns "zero the meter"
+from a silent win into a failed run.
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from pydantic import BaseModel
 
@@ -22,27 +29,134 @@ from tindarr.ports.llm import Generation, LlmCapabilities, LlmProvider, LlmProvi
 from tindarr.ports.metadata import Metadata, Provider, SearchQuery, Title, TitleDetails, Trailer
 from tindarr.ports.titles import TitleRef
 
-__all__ = ["CostMeter", "CountingLlmProvider", "CountingMetadata"]
+__all__ = ["BatchCost", "CostMeter", "CountingLlmProvider", "CountingMetadata"]
 
 #: Characters per token, when a provider reports no usage at all. Crude on purpose: it
 #: is labelled as an estimate everywhere it is printed.
 CHARS_PER_TOKEN = 4
 
 
-@dataclass(slots=True)
-class CostMeter:
-    """Everything one evaluation run spent, by port."""
+@dataclass(frozen=True, slots=True)
+class BatchCost:
+    """What one batch spent: the difference between two readings of the meter."""
 
     metadata_calls: int = 0
     llm_calls: int = 0
     llm_input_tokens: int = 0
     llm_output_tokens: int = 0
-    #: Calls whose token counts the provider reported.
-    llm_calls_measured: int = 0
-    #: Calls whose token counts had to be estimated from the prompt's length.
     llm_calls_estimated: int = 0
-    #: One entry per metadata call, in order; the tests read it, the report counts it.
-    metadata_operations: list[str] = field(default_factory=list[str])
+
+    def since(self, earlier: "BatchCost") -> "BatchCost":
+        """Return what was spent between ``earlier`` and this reading.
+
+        Raises ``ValueError`` when a counter fell: counters only go up, so a smaller
+        number means something wrote to the meter, and a cost nobody can stand behind is
+        worse than no cost at all.
+        """
+        spent = BatchCost(
+            metadata_calls=self.metadata_calls - earlier.metadata_calls,
+            llm_calls=self.llm_calls - earlier.llm_calls,
+            llm_input_tokens=self.llm_input_tokens - earlier.llm_input_tokens,
+            llm_output_tokens=self.llm_output_tokens - earlier.llm_output_tokens,
+            llm_calls_estimated=self.llm_calls_estimated - earlier.llm_calls_estimated,
+        )
+        if (
+            min(
+                spent.metadata_calls,
+                spent.llm_calls,
+                spent.llm_input_tokens,
+                spent.llm_output_tokens,
+                spent.llm_calls_estimated,
+            )
+            < 0
+        ):
+            msg = "the cost meter went backwards: something reset it during a batch"
+            raise ValueError(msg)
+        return spent
+
+    def plus(self, other: "BatchCost") -> "BatchCost":
+        """Return the two costs added together."""
+        return BatchCost(
+            metadata_calls=self.metadata_calls + other.metadata_calls,
+            llm_calls=self.llm_calls + other.llm_calls,
+            llm_input_tokens=self.llm_input_tokens + other.llm_input_tokens,
+            llm_output_tokens=self.llm_output_tokens + other.llm_output_tokens,
+            llm_calls_estimated=self.llm_calls_estimated + other.llm_calls_estimated,
+        )
+
+    @property
+    def llm_tokens(self) -> int:
+        """Every token, in and out."""
+        return self.llm_input_tokens + self.llm_output_tokens
+
+
+class CostMeter:
+    """Everything one evaluation run spent, by port.
+
+    The counters are read-only properties over a ledger only this class appends to, so
+    the obvious way to make a strategy look cheap — ``metadata._meter.metadata_calls = 0``
+    — raises instead of working. That is tamper *evidence*, not a sandbox: the harness
+    runs a strategy in its own process and Python has no wall to put between them. What
+    it does is make cheating deliberate rather than convenient, and the numbers that
+    actually protect the gate are the ones a strategy cannot reach at all — whether its
+    cards carry their details, and whether it beats the floors.
+    """
+
+    __slots__ = ("_llm", "_metadata")
+
+    def __init__(self) -> None:
+        self._metadata: list[str] = []
+        self._llm: list[tuple[int, int, bool]] = []
+
+    def __repr__(self) -> str:
+        """Show the counters, for a failing test."""
+        return (
+            f"CostMeter(metadata_calls={self.metadata_calls}, llm_calls={self.llm_calls}, "
+            f"llm_input_tokens={self.llm_input_tokens}, llm_output_tokens={self.llm_output_tokens})"
+        )
+
+    def record_metadata(self, operation: str) -> None:
+        """Charge one metadata call."""
+        self._metadata.append(operation)
+
+    def record_llm(self, input_tokens: int, output_tokens: int, *, estimated: bool) -> None:
+        """Charge one model call and its tokens, saying whether they were guessed."""
+        self._llm.append((input_tokens, output_tokens, estimated))
+
+    @property
+    def metadata_calls(self) -> int:
+        """How many metadata calls the run made."""
+        return len(self._metadata)
+
+    @property
+    def metadata_operations(self) -> tuple[str, ...]:
+        """One entry per metadata call, in order; the tests read it."""
+        return tuple(self._metadata)
+
+    @property
+    def llm_calls(self) -> int:
+        """How many generations the run asked for."""
+        return len(self._llm)
+
+    @property
+    def llm_input_tokens(self) -> int:
+        """Tokens sent."""
+        return sum(row[0] for row in self._llm)
+
+    @property
+    def llm_output_tokens(self) -> int:
+        """Tokens returned."""
+        return sum(row[1] for row in self._llm)
+
+    @property
+    def llm_calls_measured(self) -> int:
+        """Calls whose token counts the provider reported."""
+        return sum(1 for row in self._llm if not row[2])
+
+    @property
+    def llm_calls_estimated(self) -> int:
+        """Calls whose token counts had to be estimated from the prompt's length."""
+        return sum(1 for row in self._llm if row[2])
 
     @property
     def llm_tokens(self) -> int:
@@ -54,6 +168,16 @@ class CostMeter:
         """Whether every LLM call reported its own token counts."""
         return self.llm_calls_estimated == 0
 
+    def snapshot(self) -> BatchCost:
+        """Read the counters, so a caller can charge a batch the difference."""
+        return BatchCost(
+            metadata_calls=self.metadata_calls,
+            llm_calls=self.llm_calls,
+            llm_input_tokens=self.llm_input_tokens,
+            llm_output_tokens=self.llm_output_tokens,
+            llm_calls_estimated=self.llm_calls_estimated,
+        )
+
 
 class CountingMetadata:
     """The ``Metadata`` port, plus a tally. Adds nothing else."""
@@ -63,8 +187,7 @@ class CountingMetadata:
         self._meter = meter
 
     def _count(self, operation: str) -> None:
-        self._meter.metadata_calls += 1
-        self._meter.metadata_operations.append(operation)
+        self._meter.record_metadata(operation)
 
     async def test(self) -> ConnectionCheck:
         """Check the key, counted like any other call."""
@@ -122,17 +245,15 @@ class CountingLlmProvider:
     async def generate[T: BaseModel](self, prompt: Prompt, schema: type[T]) -> Generation[T]:
         """Ask for one object, and record what it cost."""
         generation = await self._inner.generate(prompt, schema)
-        meter = self._meter
-        meter.llm_calls += 1
         usage = generation.usage
         if usage.input_tokens or usage.output_tokens:
-            meter.llm_calls_measured += 1
-            meter.llm_input_tokens += usage.input_tokens
-            meter.llm_output_tokens += usage.output_tokens
+            self._meter.record_llm(usage.input_tokens, usage.output_tokens, estimated=False)
         else:
-            meter.llm_calls_estimated += 1
-            meter.llm_input_tokens += estimate_tokens((prompt.instructions, prompt.message))
-            meter.llm_output_tokens += estimate_tokens((generation.value.model_dump_json(),))
+            self._meter.record_llm(
+                estimate_tokens((prompt.instructions, prompt.message)),
+                estimate_tokens((generation.value.model_dump_json(),)),
+                estimated=True,
+            )
         return generation
 
 

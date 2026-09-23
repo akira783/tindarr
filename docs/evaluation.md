@@ -39,14 +39,15 @@ is not a hit and not a miss. It is counted as the gap in coverage that it is.
 |---|---|---|---|
 | `fill_rate` | higher | measured | cards returned over cards asked for |
 | `usable_per_batch` | higher | measured | cards per batch that could really have been shown |
+| `complete_rate` | higher | measured | usable cards handed back with the details a card is built from |
 | `waste_rate` | lower | measured | proposed cards the strategy had been told to avoid |
 | `coverage` | — | measured | usable cards the fixture has an opinion on |
 | `already_seen_rate` | lower | measured | scored cards the user had already watched (**the fork: 47 %**) |
 | `like_rate` | higher | measured | scored cards the user wanted, and had not seen |
 | `new_like_rate` | higher | measured | likes among the cards new to them (**the fork: 63 %**) |
 | `agreement` | — | measured | scored cards the user liked, already seen or not |
-| `skip_rate` | lower | measured | usable cards the user had no opinion on |
-| `genre_diversity` | higher | measured | distinct genres per catalogued card in a batch |
+| `skip_rate` | lower | measured | judged cards the user had no opinion on |
+| `genre_diversity` | higher | measured | distinct genres per card the batch was asked for |
 | `franchise_repeat_rate` | lower | measured | batches serving the same franchise twice |
 | `tmdb_calls_per_batch` | lower | measured | metadata calls a batch cost |
 | `llm_calls_per_batch` | lower | measured | model calls a batch cost |
@@ -55,7 +56,15 @@ is not a hit and not a miss. It is counted as the gap in coverage that it is.
 Everything is counted against the fixture except one thing, and the table says which:
 token counts are **measured** when the AI provider reports them and **estimated** at four
 characters per token when it does not (Ollama and several OpenAI-compatible endpoints
-report nothing). The report says how many calls it had to estimate.
+report nothing). The column only says "estimated" when a provider really withheld them,
+and the report says how many calls that was.
+
+Two of those metrics exist because of what a strategy could otherwise get away with.
+`complete_rate` is there so that "made no TMDb call" stops being a perfect score on the
+cost axis for cards that cannot be rendered. `skip_rate` divides by the cards the fixture
+has an opinion on rather than by every card that was not waste, so padding a batch with
+titles nobody voted on cannot drive it to zero; `genre_diversity` divides by the cards the
+batch was *asked* for, so three cards cannot out-diversify ten.
 
 **Two metrics are printed and not graded**, and the reason matters. `coverage` falls when
 a strategy reaches past the recorded history, which is not a fault. `agreement` counts
@@ -77,12 +86,17 @@ Every rate is printed with its denominator, and the gate reads the denominators 
 - **Coverage is low on a fixture with a large catalogue**, around 20 % on the committed
   one. The rates rest on tens of cards, not thousands. The report says so in its own
   notes whenever coverage is under half.
-- **The taste profile in a fixture is static, and in a generated one it is the answer.**
-  In production the profile is rewritten every ten votes, so it only ever knows the past.
-  A fixture carries one profile for the whole history; in the generated one it names the
-  genres the later votes were drawn from. A strategy that reads the profile therefore
-  scores better here than it would in life. The private fixtures, whose profiles were
-  written by a real engine from real votes, do not have this problem.
+- **A fixture's taste profile is static.** In production it is rewritten every ten votes,
+  so it only ever knows the past; a fixture carries one profile for the whole history. In
+  a *generated* fixture it would name the very genres the later votes were drawn from —
+  the answer key — so the committed vote set carries none at all and the gate is
+  profile-blind. An imported one keeps its own, written by a real engine from real votes,
+  which carries no such leak.
+- **On an imported vote set, the candidate pool is narrower than life.** `dataset.pool` is
+  the fixture's catalogue, and an imported catalogue holds exactly the titles somebody
+  voted on. A strategy drawing from it is choosing from a shortlist of scoreable titles,
+  which flatters coverage. Lot 4b's retrieval layer is what fixes this: the pool should
+  come from TMDb, not from the fixture.
 - **It says nothing about prose.** Whether a rationale reads well, whether a poster
   loads, whether the deck feels good in the hand: none of that is here.
 - **It cannot prove a strategy is good.** It can show that one is worse than another on
@@ -179,16 +193,34 @@ key rotation.
 
 `server.yml` runs `tindarr eval run --check` for every committed baseline. A baseline
 holds the vote set it was measured on, the strategy, the replay options, the metrics and
-the tolerances. The check fails the build when:
+the tolerances. `--check` asks two questions, because one is not enough: *did this
+strategy get worse than it was?* (its own baseline) and *is it better than doing nothing
+clever?* (the floors).
+
+The check fails the build when:
 
 - a graded metric slides past its tolerance — two points of percentage for a rate, one
   call per batch for TMDb, a quarter of a call for the model;
 - a metric that had a value becomes `n/a`, because its denominator emptied;
-- `batches`, `usable` or `scored` falls by more than 2 %.
+- a graded metric is **missing** from the baseline, which means nobody has measured it
+  yet rather than that everything is fine;
+- `batches`, `usable` or `scored` falls by more than 2 %;
+- the strategy is **worse than the best of the reference floors** (`popular` and
+  `random`) on any graded metric. The floors themselves are exempt: they are the
+  yardstick, and each is worse than the other somewhere.
 
-That last rule is the one that matters. The cheapest way to improve every rate is to
-propose fewer cards: three confident picks instead of ten score beautifully. The
-denominators are gated so that they cannot.
+The last two rules are the ones that matter. The cheapest way to improve every rate is to
+propose fewer cards — three confident picks instead of ten score beautifully — so the
+denominators are gated. And without the floor, the gate would only be a per-strategy
+regression test: the first baseline a new strategy writes is whatever it happened to
+score, so a strategy worse than "show the most popular thing you have not voted on" could
+certify itself and stay green for ever.
+
+**The tolerances come from the code, not from the baseline file.** They are written into
+the file so a reader can see them, and ignored when checking: a gate whose thresholds live
+inside the thing it guards is switched off by a one-token diff that looks like a number.
+A cost that was zero gets no allowance at all, so the first model call a strategy makes is
+a change the build shows you.
 
 The comparison is refused outright — not quietly allowed — when the baseline is about a
 different vote set, a different strategy or different replay options.
@@ -200,8 +232,12 @@ Deliberately, with a reason:
 ```bash
 cd server
 uv run tindarr eval run --strategy popular --update-baseline
+uv run tindarr eval run --strategy popular --check   # the floors still have to be clear
 git diff server/fixtures/eval/baseline-popular.json
 ```
+
+`--update-baseline` and `--check` cannot be given together: a run that writes the numbers
+it is then compared to is a check that cannot fail.
 
 The diff shows every number that moved. Commit it with the change that moved them and say
 in the message why the new numbers are the right ones. A baseline bumped in its own commit,
@@ -215,6 +251,13 @@ A strategy is anything with a name and one method
 ```python
 async def propose(self, context: StrategyContext, size: int) -> Sequence[Candidate]
 ```
+
+The harness measures a strategy; it does not sandbox one. Both run in the same process,
+so code that is determined to lie about what it spent can. What the harness does is make
+that deliberate rather than convenient — the cost counters are read-only, a total that
+goes backwards stops the run, "owned" is scored against a snapshot the strategy is not
+handed, and the numbers that actually guard the gate are ones a strategy cannot reach at
+all: whether its cards carry their details, and whether it beats the floors.
 
 `StrategyContext` is the whole input — taste profile, past votes, library, engagement,
 cards already served, novelty, mood, media type, content filters, language, region, and a

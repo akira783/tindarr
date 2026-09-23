@@ -2310,7 +2310,7 @@
           "kind": "movie"
         }
       ],
-      "taste_profile": "Loves\n- Science Fiction\n- Mystery\n- Drama\nAvoids\n- Romance\n- Horror\nNuances\n- Knows the famous ones already\n- Will try one odd thing per evening",
+      "taste_profile": null,
       "novelty": "balanced",
       "media_kind": null,
       "mood": null
@@ -2579,7 +2579,7 @@
           "kind": "movie"
         }
       ],
-      "taste_profile": "Loves\n- Comedy\n- Animation\n- Adventure\nAvoids\n- Horror\n- Documentary\nNuances\n- Knows the famous ones already\n- Will try one odd thing per evening",
+      "taste_profile": null,
       "novelty": "familiar",
       "media_kind": null,
       "mood": null
@@ -2848,7 +2848,7 @@
           "kind": "movie"
         }
       ],
-      "taste_profile": "Loves\n- Crime\n- Documentary\n- Drama\nAvoids\n- Fantasy\n- Animation\nNuances\n- Knows the famous ones already\n- Will try one odd thing per evening",
+      "taste_profile": null,
       "novelty": "bold",
       "media_kind": null,
       "mood": null

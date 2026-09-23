@@ -86,8 +86,13 @@ def _add_eval(harness: argparse.ArgumentParser) -> None:
     run.add_argument("--max-batches", type=int, default=None, help="stop after this many per user")
     run.add_argument("--seed", type=int, default=1)
     run.add_argument("--json", dest="json_path", type=Path, help="also dump the report here")
-    run.add_argument("--check", action="store_true", help="fail when the numbers regressed")
-    run.add_argument("--update-baseline", action="store_true", help="rewrite the committed numbers")
+    # Never together: rewriting the baseline from this run and then comparing this run
+    # to it is a check that cannot fail.
+    gate = run.add_mutually_exclusive_group()
+    gate.add_argument("--check", action="store_true", help="fail when the numbers regressed")
+    gate.add_argument(
+        "--update-baseline", action="store_true", help="rewrite the committed numbers"
+    )
     run.add_argument("--live", action="store_true", help="call the real services (says what first)")
     run.add_argument("--record", type=Path, help="write a live run's answers to a cassette")
     run.add_argument("--yes", action="store_true", help="answer the live-run question (scripts)")

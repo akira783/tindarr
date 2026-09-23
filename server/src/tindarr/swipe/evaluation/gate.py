@@ -5,7 +5,7 @@ nobody reads, so the harness's numbers on the committed vote set are themselves
 committed, and a run that comes out worse than them by more than a stated margin fails
 the build.
 
-Three things make the gate hard to walk past:
+Four things make the gate hard to walk past:
 
 - **The run has to be the same run.** A baseline records the vote set, the strategy and
   the replay options. Comparing a report walked with a different batch size, or produced
@@ -15,7 +15,17 @@ Three things make the gate hard to walk past:
   ``batches``, ``usable`` and ``scored`` may not fall at all beyond a small margin,
   whatever the rates do.
 - **A metric that disappears is a regression.** A rate that becomes ``n/a`` because its
-  denominator emptied is not an improvement.
+  denominator emptied is not an improvement, and neither is one that is simply missing
+  from the report.
+- **A new strategy does not write its own floor.** Its first baseline would otherwise be
+  whatever it happened to score, so a strategy worse than doing nothing clever could
+  certify itself. ``check_floor`` holds any strategy that is not one of the reference
+  floors to the best of their committed numbers.
+
+**The tolerances come from the code, not from the baseline file.** They are written into
+the file so a reader can see them, and ignored when checking: a gate whose thresholds
+live inside the thing it guards is switched off by a one-token diff that looks like a
+number rather than like a policy.
 
 Updating a baseline is meant to be a deliberate act with a diff: ``tindarr eval baseline
 --write`` regenerates it, the diff shows every number that moved, and the reason belongs
@@ -31,11 +41,13 @@ from typing import Any, Final, cast
 from tindarr.swipe.evaluation.metrics import DIRECTIONS, EvaluationReport
 
 __all__ = [
+    "FLOOR_STRATEGIES",
     "GATED_COUNTS",
     "Baseline",
     "BaselineError",
     "Regression",
     "check",
+    "check_floor",
 ]
 
 #: How far a metric may slide before the build fails. Rates are fractions, so 0.02 is
@@ -49,6 +61,24 @@ DEFAULT_TOLERANCES: Final[Mapping[str, float]] = {
     "llm_calls_per_batch": 0.25,
     "llm_tokens_per_card": 50.0,
 }
+#: The strategies whose committed numbers *are* the floor. They are compared with
+#: themselves and with nothing else; everything else has to clear them.
+FLOOR_STRATEGIES: Final[tuple[str, ...]] = ("popular", "random")
+
+
+def tolerance_of(metric: str, baseline: float) -> float:
+    """How far ``metric`` may slide from ``baseline`` before the build fails.
+
+    A cost that was zero gets no allowance at all. "Up to a quarter of a model call per
+    batch" is a sensible margin around one call and an unlimited licence around none, and
+    the first model call a strategy makes is exactly the change worth seeing.
+    """
+    allowance = DEFAULT_TOLERANCES.get(metric, DEFAULT_TOLERANCE)
+    if baseline == 0.0 and DIRECTIONS.get(metric) == "lower":
+        return 0.0
+    return allowance
+
+
 #: Counts that may not shrink: they are the denominators every rate rests on. The
 #: fraction is of the baseline's own value, so a fixture that grows does not need a
 #: hand-written number here.
@@ -71,6 +101,8 @@ class Regression:
 
     def __str__(self) -> str:
         """Say what slipped, by how much, and what was allowed."""
+        if self.baseline is None:
+            return f"{self.metric}: not in the baseline (re-baseline to measure it)"
         if self.current is None:
             return f"{self.metric}: {_show(self.baseline)} -> n/a (the metric disappeared)"
         return (
@@ -104,7 +136,7 @@ class Baseline:
             metrics=dict(report.metrics),
             counts={name: getattr(report.counts, name) for name in GATED_COUNTS},
             tolerances={
-                key: DEFAULT_TOLERANCES.get(key, DEFAULT_TOLERANCE)
+                key: tolerance_of(key, report.metrics.get(key) or 0.0)
                 for key in sorted(DIRECTIONS)
                 if DIRECTIONS[key] != "flat"
             },
@@ -199,8 +231,51 @@ def _optional_number(key: str, value: object) -> float | None:
     return None if value is None else _number(key, value)
 
 
+def check_floor(floors: Sequence[Baseline], report: EvaluationReport) -> Sequence[Regression]:
+    """Hold a strategy to the best of the reference floors, on the graded metrics.
+
+    Without this the gate is only a per-strategy regression test, and the first baseline
+    a new strategy writes is whatever it happened to score — so a strategy worse than
+    "show the most popular thing you have not voted on" could pass for ever. The floors
+    themselves are exempt: they are what everything else is measured against.
+
+    Only the floors measured on the same vote set, with the same replay options, count.
+    """
+    if report.strategy in FLOOR_STRATEGIES:
+        return []
+    comparable = [
+        floor
+        for floor in floors
+        if floor.dataset == report.dataset and dict(floor.options) == report.options.as_dict()
+    ]
+    if not comparable:
+        raise BaselineError(
+            "no reference floor was measured on this vote set with these options; "
+            f"run the {' and '.join(FLOOR_STRATEGIES)} baselines first"
+        )
+    found: list[Regression] = []
+    for metric in sorted(DIRECTIONS):
+        if DIRECTIONS[metric] == "flat":
+            continue
+        best = _best(metric, comparable)
+        if best is None:
+            continue
+        slid = _slid(metric, best, report.metrics.get(metric))
+        if slid is not None:
+            found.append(Regression(f"floor.{metric}", slid.baseline, slid.current, slid.tolerance))
+    return found
+
+
+def _best(metric: str, floors: Sequence[Baseline]) -> float | None:
+    """Return the most demanding floor value for ``metric``, or ``None`` when none has one."""
+    values = [value for floor in floors if (value := floor.metrics.get(metric)) is not None]
+    if not values:
+        return None
+    return max(values) if DIRECTIONS[metric] == "higher" else min(values)
+
+
 def check(baseline: Baseline, report: EvaluationReport) -> Sequence[Regression]:
-    """Return every number that slid past its tolerance, worst first by metric name.
+    """Return every number that slid past its tolerance, ordered by metric name.
 
     Raises ``BaselineError`` when the two are not about the same run at all: a silent
     comparison of unlike things is the one failure a gate must never produce.
@@ -219,23 +294,39 @@ def check(baseline: Baseline, report: EvaluationReport) -> Sequence[Regression]:
 
 
 def _metric_regressions(baseline: Baseline, report: EvaluationReport) -> list[Regression]:
+    """Compare every graded metric, walking the code's list rather than the file's.
+
+    Walking the file's would mean a metric added later protects nothing until every
+    baseline has been rewritten, and a metric deleted from a baseline protects nothing
+    at all.
+    """
     found: list[Regression] = []
-    for metric in sorted(baseline.metrics):
-        direction = DIRECTIONS.get(metric)
-        if direction is None or direction == "flat":
+    for metric in sorted(DIRECTIONS):
+        if DIRECTIONS[metric] == "flat":
             continue
-        was = baseline.metrics[metric]
-        now = report.metrics.get(metric)
-        if was is None:
+        if metric not in baseline.metrics:
+            # Not "fine": unmeasured. Re-baselining is the deliberate act that fixes it.
+            found.append(Regression(metric, None, report.metrics.get(metric), 0.0))
             continue
-        tolerance = baseline.tolerances.get(metric, DEFAULT_TOLERANCE)
-        if now is None:
-            found.append(Regression(metric, was, None, tolerance))
-        elif (direction == "higher" and now < was - tolerance) or (
-            direction == "lower" and now > was + tolerance
-        ):
-            found.append(Regression(metric, was, now, tolerance))
+        slid = _slid(metric, baseline.metrics[metric], report.metrics.get(metric))
+        if slid is not None:
+            found.append(slid)
     return found
+
+
+def _slid(metric: str, was: float | None, now: float | None) -> Regression | None:
+    if was is None:
+        # It had no denominator when the baseline was taken; there is nothing to slide
+        # from, and a value appearing is an improvement.
+        return None
+    tolerance = tolerance_of(metric, was)
+    if now is None:
+        return Regression(metric, was, None, tolerance)
+    direction = DIRECTIONS[metric]
+    worse = (direction == "higher" and now < was - tolerance) or (
+        direction == "lower" and now > was + tolerance
+    )
+    return Regression(metric, was, now, tolerance) if worse else None
 
 
 def _count_regressions(baseline: Baseline, report: EvaluationReport) -> list[Regression]:

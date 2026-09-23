@@ -14,7 +14,12 @@ small and separately testable:
 network behind an explicit ``--live``); nothing in here knows what HTTP is.
 """
 
-from tindarr.swipe.evaluation.costs import CostMeter, CountingLlmProvider, CountingMetadata
+from tindarr.swipe.evaluation.costs import (
+    BatchCost,
+    CostMeter,
+    CountingLlmProvider,
+    CountingMetadata,
+)
 from tindarr.swipe.evaluation.dataset import (
     CatalogEntry,
     DatasetError,
@@ -23,7 +28,13 @@ from tindarr.swipe.evaluation.dataset import (
     FixtureVote,
     load_dataset,
 )
-from tindarr.swipe.evaluation.gate import Baseline, BaselineError, Regression, check
+from tindarr.swipe.evaluation.gate import (
+    Baseline,
+    BaselineError,
+    Regression,
+    check,
+    check_floor,
+)
 from tindarr.swipe.evaluation.metrics import Counts, EvaluationReport, summarize
 from tindarr.swipe.evaluation.replay import (
     BatchOutcome,
@@ -37,6 +48,7 @@ from tindarr.swipe.strategy import StrategyFactory
 __all__ = [
     "Baseline",
     "BaselineError",
+    "BatchCost",
     "BatchOutcome",
     "CardOutcome",
     "CatalogEntry",
@@ -53,6 +65,7 @@ __all__ = [
     "ReplayError",
     "ReplayOptions",
     "check",
+    "check_floor",
     "evaluate",
     "load_dataset",
     "replay",
@@ -71,7 +84,9 @@ async def evaluate(
 
     The meter is passed in rather than made here: the caller is the one who wrapped the
     ports the strategy will reach, and a meter this function created would count nothing.
+    Each batch is charged the difference between two readings of it, so what the report
+    prints does not depend on the meter still holding the right number at the end.
     """
     settings = options or ReplayOptions()
-    batches = await replay(dataset, factory, settings)
-    return summarize(dataset.name, dataset.source, strategy_name, batches, meter, settings)
+    batches = await replay(dataset, factory, settings, meter)
+    return summarize(dataset.name, dataset.source, strategy_name, batches, settings)

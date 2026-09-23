@@ -36,12 +36,15 @@ from tindarr.swipe.evaluation import (
     DatasetError,
     EvalDataset,
     EvaluationReport,
+    Regression,
     ReplayOptions,
     check,
+    check_floor,
     evaluate,
     load_dataset,
 )
 from tindarr.swipe.evaluation.dataset import CatalogEntry
+from tindarr.swipe.evaluation.gate import FLOOR_STRATEGIES
 from tindarr.swipe.evaluation.importing import ImportSummary, VoteImportError, import_votes
 from tindarr.swipe.evaluation.synthetic import build_synthetic_dataset
 from tindarr.swipe.strategy import Strategy
@@ -251,17 +254,26 @@ def _confirm_live(
 
 
 def compare_to_baseline(paths: EvalPaths, report: EvaluationReport, out: TextIO) -> int:
-    """Hold the report to the committed numbers; return the process's exit code."""
+    """Hold the report to its own baseline **and** to the reference floors.
+
+    Two questions, because one of them is not enough. "Did this strategy get worse than
+    it was?" is answered by its own baseline. "Is it better than doing something stupid?"
+    is answered by the floors — and without it the first baseline a new strategy writes
+    is whatever it scored, which certifies anything.
+    """
     path = paths.baseline(report.strategy)
     try:
         baseline = Baseline.load(path)
-        regressions = check(baseline, report)
+        regressions: list[Regression] = [
+            *check(baseline, report),
+            *check_floor(_floors(paths), report),
+        ]
     except BaselineError as failure:
         raise EvalError(f"{path}: {failure}") from None
     if not regressions:
-        out.write(f"\nno regression against {path}\n")
+        out.write(f"\nno regression against {path}, and no worse than the floors\n")
         return 0
-    out.write(f"\n{len(regressions)} number(s) worse than {path}:\n")
+    out.write(f"\n{len(regressions)} number(s) worse than {path} or than the floors:\n")
     out.writelines(f"  {regression}\n" for regression in regressions)
     out.write(
         "\nIf this is an improvement the numbers do not show, or a deliberate trade, "
@@ -271,11 +283,25 @@ def compare_to_baseline(paths: EvalPaths, report: EvaluationReport, out: TextIO)
     return 1
 
 
+def _floors(paths: EvalPaths) -> list[Baseline]:
+    """Return the committed numbers of the reference strategies, as far as they exist."""
+    floors: list[Baseline] = []
+    for name in FLOOR_STRATEGIES:
+        path = paths.baseline(name)
+        if path.is_file():
+            floors.append(Baseline.load(path))
+    return floors
+
+
 def write_baseline(paths: EvalPaths, report: EvaluationReport, out: TextIO) -> None:
     """Replace the committed numbers for this strategy with the ones just measured."""
     path = paths.baseline(report.strategy)
     Baseline.of(report).write(path)
     out.write(f"\nbaseline written to {path}\n")
+    out.write(
+        "Check it against the floors before committing it: "
+        f"'tindarr eval run --strategy {report.strategy} --check'.\n"
+    )
 
 
 # --- fixtures ------------------------------------------------------------------------

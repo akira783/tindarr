@@ -14,6 +14,13 @@ must come back out with those two numbers, which is how the harness proves it is
 mis-scoring. The tastes, the popularity skew and the "the famous ones are the ones I
 have seen" correlation are modelled on the same measurement.
 
+**No taste profile.** The obvious thing to generate would be the "Loves / Avoids"
+bullets of each synthetic person — and they would name the very genres their later votes
+were drawn from. A strategy reading them would not be reading a profile, it would be
+reading the answer key, and the committed gate would reward it. The fixture therefore
+leaves the profile empty, and the gate is profile-blind. A profile written by a real
+engine from real votes carries no such leak, so an imported vote set keeps its own.
+
 **What a generated fixture cannot do** is surprise anybody. It has the distribution it
 was given, so it says whether the harness computes what it claims to compute; it does
 not say whether a strategy will please a real person. Pointing the harness at a real
@@ -275,7 +282,7 @@ def _user(plan: _UserPlan, catalog: Sequence[CatalogEntry], draw: random.Random)
             for position, (entry, value) in enumerate(picks)
         ),
         library=tuple(OwnedTitle(tmdb_id=entry.tmdb_id, kind=entry.kind) for entry in owned),
-        taste_profile=_profile(plan),
+        taste_profile=None,
         novelty=plan.novelty,
     )
 
@@ -312,14 +319,3 @@ def _pick_of(vote: VoteValue, draw: random.Random) -> PickKind:
     if vote in ("seen_liked", "seen_disliked"):
         return "safe"
     return "explore" if draw.randrange(3) == 0 else "safe"
-
-
-def _profile(plan: _UserPlan) -> str:
-    """Write the three-section bullet profile the fork keeps, from the plan."""
-    loves = "\n".join(f"- {genre}" for genre in plan.loves)
-    avoids = "\n".join(f"- {genre}" for genre in plan.avoids)
-    return (
-        f"Loves\n{loves}\n"
-        f"Avoids\n{avoids}\n"
-        "Nuances\n- Knows the famous ones already\n- Will try one odd thing per evening"
-    )

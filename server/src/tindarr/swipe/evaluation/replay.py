@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from tindarr.ports.titles import TitleRef
+from tindarr.swipe.evaluation.costs import BatchCost, CostMeter
 from tindarr.swipe.evaluation.dataset import CatalogEntry, EvalDataset, EvalUser
 from tindarr.swipe.strategy import Candidate, PickKind, StrategyContext, StrategyFactory
 from tindarr.swipe.votes import Vote
@@ -115,6 +116,10 @@ class CardOutcome:
     ref: TitleRef
     status: CardStatus
     pick: PickKind
+    #: Whether the strategy handed back the title details a card is built from, for the
+    #: title it says they are for. Without this, "no TMDb call" would be a perfect score
+    #: on the cost axis for cards that cannot be rendered.
+    complete: bool = False
 
     @property
     def usable(self) -> bool:
@@ -130,6 +135,8 @@ class BatchOutcome:
     index: int
     requested: int
     cards: tuple[CardOutcome, ...]
+    #: What this batch spent, measured at the ports while it was being proposed.
+    cost: BatchCost
     #: Usable cards the catalogue knows, so diversity is computed on a real denominator.
     known: int
     #: Distinct genres across those cards; ``None`` without a catalogue.
@@ -145,17 +152,30 @@ class BatchOutcome:
 
 
 async def replay(
-    dataset: EvalDataset, factory: StrategyFactory, options: ReplayOptions | None = None
+    dataset: EvalDataset,
+    factory: StrategyFactory,
+    options: ReplayOptions | None = None,
+    meter: CostMeter | None = None,
 ) -> tuple[BatchOutcome, ...]:
     """Walk every user of ``dataset`` past a fresh strategy and return the scored batches.
 
-    A strategy is built per user, so nothing one person's run learned can reach another's.
+    A strategy is built per user. That is a convention, not a sandbox: the candidate pool
+    and the metered ports a caller builds are usually shared, so a strategy *could* carry
+    a conclusion from one person to the next. It cannot reach a vote that has not been
+    revealed, which is the property the numbers depend on.
+
+    ``meter`` is read — never reset — after each batch, and the difference is what that
+    batch is charged. A total that goes backwards means something wrote to the meter, and
+    the replay stops rather than publish a cost it cannot stand behind.
     """
     settings = options or ReplayOptions()
     catalog = dataset.by_ref
+    tally = meter or CostMeter()
     batches: list[BatchOutcome] = []
     for position, user in enumerate(sorted(dataset.users, key=lambda row: row.id)):
-        batches.extend(await _replay_user(dataset, user, position, factory, settings, catalog))
+        batches.extend(
+            await _replay_user(dataset, user, position, factory, settings, catalog, tally)
+        )
     return tuple(batches)
 
 
@@ -166,12 +186,16 @@ async def _replay_user(  # noqa: PLR0913, PLR0917 - one call site; splitting it 
     factory: StrategyFactory,
     options: ReplayOptions,
     catalog: Mapping[TitleRef, CatalogEntry],
+    meter: CostMeter,
 ) -> list[BatchOutcome]:
     votes = user.ordered_votes
     if len(votes) <= options.warm_up:
         return []
     strategy = factory()
-    library = user.library_index
+    # What the household owns, kept here. The index handed to a strategy is rebuilt for
+    # every batch and scoring never consults it: an object a strategy holds is an object
+    # a strategy can empty, and "owned" would then stop being waste.
+    owned = frozenset(user.library_index.refs)
     served: set[TitleRef] = set()
     outcomes: list[BatchOutcome] = []
     index = 0
@@ -194,19 +218,30 @@ async def _replay_user(  # noqa: PLR0913, PLR0917 - one call site; splitting it 
             region=dataset.region,
             taste_profile=user.taste_profile,
             history=history,
-            library=library,
+            library=user.library_index,
             served=frozenset(served),
             batch_index=index,
             seed=options.seed + position * 1_000 + index,
         )
+        before = meter.snapshot()
         proposed = await strategy.propose(context, options.batch_size)
+        try:
+            cost = meter.snapshot().since(before)
+        except ValueError as tampered:
+            raise ReplayError(str(tampered)) from None
         if len(proposed) > options.batch_size:
             raise ReplayError(
                 f"{getattr(strategy, 'name', 'the strategy')} returned "
                 f"{len(proposed)} cards for a batch of {options.batch_size}"
             )
         outcomes.append(
-            _score(user.id, index, options.batch_size, proposed, context, future, catalog)
+            _score(
+                _Scoring(user.id, index, options.batch_size, cost, owned),
+                proposed,
+                context,
+                future,
+                catalog,
+            )
         )
         served.update(card.ref for card in proposed)
         index += 1
@@ -222,10 +257,19 @@ def _future(votes: Sequence[Vote]) -> Mapping[TitleRef, Vote]:
     return future
 
 
-def _score(  # noqa: PLR0913, PLR0917 - the scoring inputs, passed rather than captured
-    user_id: str,
-    index: int,
-    requested: int,
+@dataclass(frozen=True, slots=True)
+class _Scoring:
+    """What a batch is scored against, gathered by the harness rather than the strategy."""
+
+    user_id: str
+    index: int
+    requested: int
+    cost: BatchCost
+    owned: frozenset[TitleRef]
+
+
+def _score(
+    scoring: _Scoring,
     proposed: Sequence[Candidate],
     context: StrategyContext,
     future: Mapping[TitleRef, Vote],
@@ -236,25 +280,35 @@ def _score(  # noqa: PLR0913, PLR0917 - the scoring inputs, passed rather than c
     cards: list[CardOutcome] = []
     for candidate in proposed:
         ref = candidate.ref
-        status = _status(ref, voted, context, seen_in_batch, future)
+        status = _status(ref, voted, context.served, scoring.owned, seen_in_batch, future)
         seen_in_batch.add(ref)
-        cards.append(CardOutcome(ref=ref, status=status, pick=candidate.pick))
+        details = candidate.details
+        cards.append(
+            CardOutcome(
+                ref=ref,
+                status=status,
+                pick=candidate.pick,
+                complete=details is not None and details.ref == ref,
+            )
+        )
     spread = _diversity(cards, catalog)
     return BatchOutcome(
-        user_id=user_id,
-        index=index,
-        requested=requested,
+        user_id=scoring.user_id,
+        index=scoring.index,
+        requested=scoring.requested,
         cards=tuple(cards),
+        cost=scoring.cost,
         known=spread.known,
         distinct_genres=spread.distinct_genres,
         franchise_repeat=spread.franchise_repeat,
     )
 
 
-def _status(
+def _status(  # noqa: PLR0913, PLR0917 - the six facts that decide what a card became
     ref: TitleRef,
     voted: frozenset[TitleRef],
-    context: StrategyContext,
+    served: frozenset[TitleRef],
+    owned: frozenset[TitleRef],
     seen_in_batch: set[TitleRef],
     future: Mapping[TitleRef, Vote],
 ) -> CardStatus:
@@ -262,9 +316,9 @@ def _status(
         return "duplicate"
     if ref in voted:
         return "repeat"
-    if ref in context.served:
+    if ref in served:
         return "served_again"
-    if context.library.owns(ref):
+    if ref in owned:
         return "owned"
     vote = future.get(ref)
     return vote.value if vote is not None else "unknown"

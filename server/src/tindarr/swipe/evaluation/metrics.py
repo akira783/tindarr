@@ -23,12 +23,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import Final, Literal
 
-from tindarr.swipe.evaluation.costs import CostMeter
+from tindarr.swipe.evaluation.costs import BatchCost
 from tindarr.swipe.evaluation.replay import BatchOutcome, CardStatus, ReplayOptions
 
 __all__ = [
     "DIRECTIONS",
-    "KINDS",
     "Counts",
     "EvaluationReport",
     "summarize",
@@ -52,6 +51,7 @@ type Kind = Literal["measured", "estimated"]
 DIRECTIONS: Final[Mapping[str, Direction]] = {
     "fill_rate": "higher",
     "usable_per_batch": "higher",
+    "complete_rate": "higher",
     "waste_rate": "lower",
     "coverage": "flat",
     "already_seen_rate": "lower",
@@ -66,22 +66,23 @@ DIRECTIONS: Final[Mapping[str, Direction]] = {
     "llm_tokens_per_card": "lower",
 }
 
-KINDS: Final[Mapping[str, Kind]] = {
-    key: ("estimated" if key == "llm_tokens_per_card" else "measured") for key in DIRECTIONS
-}
+#: The one metric that can be a guess. It is only *reported* as one when a provider
+#: actually withheld its token counts, so a fully measured run says "measured".
+ESTIMATED_WHEN_UNREPORTED: Final = "llm_tokens_per_card"
 
 #: One line each, printed under the table. A metric nobody can explain gets misread.
 MEANINGS: Final[Mapping[str, str]] = {
     "fill_rate": "cards returned, over cards asked for",
     "usable_per_batch": "cards per batch that could really have been shown",
+    "complete_rate": "usable cards the strategy handed back with their details",
     "waste_rate": "proposed cards the strategy had been told to avoid",
     "coverage": "usable cards the fixture has an opinion on (context, not a score)",
     "already_seen_rate": "scored cards the user had already watched (ADR 0013: 47 %)",
     "like_rate": "scored cards the user wanted, and had not seen",
     "new_like_rate": "likes among the cards that were new to them (ADR 0013: 63 %)",
     "agreement": "scored cards the user liked, already seen or not (read with the row above)",
-    "skip_rate": "usable cards the user had no opinion on at all",
-    "genre_diversity": "distinct genres per catalogued card in a batch",
+    "skip_rate": "judged cards the user had no opinion on at all",
+    "genre_diversity": "distinct genres per card a batch was asked for",
     "franchise_repeat_rate": "batches serving the same franchise twice",
     "tmdb_calls_per_batch": "metadata calls a batch cost",
     "llm_calls_per_batch": "model calls a batch cost",
@@ -90,6 +91,7 @@ MEANINGS: Final[Mapping[str, str]] = {
 
 _PERCENT_METRICS: Final[frozenset[str]] = frozenset(
     {
+        "complete_rate",
         "fill_rate",
         "waste_rate",
         "coverage",
@@ -122,6 +124,8 @@ class Counts:
     scored: int = 0
     skipped: int = 0
     unknown: int = 0
+    #: Usable cards that came with the details a card is rendered from.
+    complete: int = 0
     likes: int = 0
     dislikes: int = 0
     seen_liked: int = 0
@@ -146,6 +150,15 @@ class EvaluationReport:
     metrics: Mapping[str, float | None]
     notes: tuple[str, ...]
 
+    @property
+    def kinds(self) -> Mapping[str, Kind]:
+        """Whether each number was counted or guessed, for this run."""
+        estimated = bool(self.counts.llm_calls_estimated)
+        return {
+            key: ("estimated" if key == ESTIMATED_WHEN_UNREPORTED and estimated else "measured")
+            for key in DIRECTIONS
+        }
+
     def as_dict(self) -> dict[str, object]:
         """Return the report as the JSON document a baseline file holds."""
         return {
@@ -168,16 +181,20 @@ class EvaluationReport:
         return render(self)
 
 
-def summarize(  # noqa: PLR0913, PLR0917 - a report is exactly its inputs
+def summarize(
     dataset: str,
     source: str,
     strategy: str,
     batches: Sequence[BatchOutcome],
-    meter: CostMeter,
     options: ReplayOptions,
 ) -> EvaluationReport:
-    """Aggregate scored batches into a report. Pure: same batches, same numbers."""
-    counts = _counts(batches, meter)
+    """Aggregate scored batches into a report. Pure: same batches, same numbers.
+
+    The cost comes from the batches, each of which was charged the difference between
+    two readings of the meter while it was being proposed — not from the meter's final
+    state, which is an object the strategy was holding.
+    """
+    counts = _counts(batches)
     metrics = _metrics(counts, batches)
     return EvaluationReport(
         dataset=dataset,
@@ -190,16 +207,19 @@ def summarize(  # noqa: PLR0913, PLR0917 - a report is exactly its inputs
     )
 
 
-def _counts(batches: Sequence[BatchOutcome], meter: CostMeter) -> Counts:
+def _counts(batches: Sequence[BatchOutcome]) -> Counts:
     tally: dict[CardStatus, int] = {}
-    requested = proposed = usable = catalogued = 0
+    requested = proposed = usable = catalogued = complete = 0
+    spent = BatchCost()
     for batch in batches:
         requested += batch.requested
         proposed += len(batch.cards)
         catalogued += batch.known
+        spent = spent.plus(batch.cost)
         for card in batch.cards:
             tally[card.status] = tally.get(card.status, 0) + 1
             usable += int(card.usable)
+            complete += int(card.usable and card.complete)
     likes, dislikes = tally.get("like", 0), tally.get("dislike", 0)
     seen_liked, seen_disliked = tally.get("seen_liked", 0), tally.get("seen_disliked", 0)
     return Counts(
@@ -220,11 +240,12 @@ def _counts(batches: Sequence[BatchOutcome], meter: CostMeter) -> Counts:
         seen_liked=seen_liked,
         seen_disliked=seen_disliked,
         catalogued=catalogued,
-        tmdb_calls=meter.metadata_calls,
-        llm_calls=meter.llm_calls,
-        llm_input_tokens=meter.llm_input_tokens,
-        llm_output_tokens=meter.llm_output_tokens,
-        llm_calls_estimated=meter.llm_calls_estimated,
+        complete=complete,
+        tmdb_calls=spent.metadata_calls,
+        llm_calls=spent.llm_calls,
+        llm_input_tokens=spent.llm_input_tokens,
+        llm_output_tokens=spent.llm_output_tokens,
+        llm_calls_estimated=spent.llm_calls_estimated,
     )
 
 
@@ -239,22 +260,28 @@ def _ratio(numerator: int, denominator: int) -> float | None:
 
 def _metrics(counts: Counts, batches: Sequence[BatchOutcome]) -> Mapping[str, float | None]:
     wasted = counts.duplicates + counts.repeats + counts.served_again + counts.owned
+    # Divided by the cards the batch was *asked* for, not by the ones the catalogue
+    # happens to know about: three cards of three genres must not out-diversify ten
+    # cards of ten, and a card the catalogue cannot place contributes no genre.
     spreads = [
-        batch.distinct_genres / batch.known
+        batch.distinct_genres / batch.requested
         for batch in batches
-        if batch.distinct_genres is not None and batch.known
+        if batch.distinct_genres is not None and batch.known and batch.requested
     ]
     judged = [batch.franchise_repeat for batch in batches if batch.franchise_repeat is not None]
     return {
         "fill_rate": _ratio(counts.proposed, counts.requested),
         "usable_per_batch": _ratio(counts.usable, counts.batches),
+        "complete_rate": _ratio(counts.complete, counts.usable),
         "waste_rate": _ratio(wasted, counts.proposed),
         "coverage": _ratio(counts.scored, counts.usable),
         "already_seen_rate": _ratio(counts.seen_liked + counts.seen_disliked, counts.scored),
         "like_rate": _ratio(counts.likes, counts.scored),
         "new_like_rate": _ratio(counts.likes, counts.likes + counts.dislikes),
         "agreement": _ratio(counts.likes + counts.seen_liked, counts.scored),
-        "skip_rate": _ratio(counts.skipped, counts.usable),
+        # Over the cards the fixture has an opinion on, not over every usable card: a
+        # denominator padded with titles nobody voted on would drive this to zero.
+        "skip_rate": _ratio(counts.skipped, counts.scored + counts.skipped),
         "genre_diversity": round(sum(spreads) / len(spreads), _ROUNDING) if spreads else None,
         "franchise_repeat_rate": _ratio(sum(judged), len(judged)),
         "tmdb_calls_per_batch": _ratio(counts.tmdb_calls, counts.batches),
@@ -311,9 +338,10 @@ def render(report: EvaluationReport) -> str:
         f"{'metric':<22} {'value':>8}  {'better':<7} {'kind':<9} meaning",
         f"{'-' * 22} {'-' * 8}  {'-' * 7} {'-' * 9} {'-' * 40}",
     ]
+    kinds = report.kinds
     lines.extend(
         f"{key:<22} {_format(key, report.metrics[key]):>8}  "
-        f"{DIRECTIONS[key]:<7} {KINDS[key]:<9} {MEANINGS[key]}"
+        f"{DIRECTIONS[key]:<7} {kinds[key]:<9} {MEANINGS[key]}"
         for key in DIRECTIONS
     )
     lines += [

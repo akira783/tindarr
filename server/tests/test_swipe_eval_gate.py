@@ -28,8 +28,14 @@ from tindarr.swipe.evaluation import (
     EvaluationReport,
     ReplayOptions,
     check,
+    check_floor,
 )
-from tindarr.swipe.evaluation.gate import COUNT_TOLERANCE, DEFAULT_TOLERANCE, Regression
+from tindarr.swipe.evaluation.gate import (
+    COUNT_TOLERANCE,
+    DEFAULT_TOLERANCE,
+    Regression,
+    tolerance_of,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -39,6 +45,7 @@ def report(**overrides: object) -> EvaluationReport:
     metrics: dict[str, float | None] = {
         "fill_rate": 1.0,
         "usable_per_batch": 9.0,
+        "complete_rate": 1.0,
         "waste_rate": 0.05,
         "coverage": 0.6,
         "already_seen_rate": 0.40,
@@ -57,7 +64,7 @@ def report(**overrides: object) -> EvaluationReport:
         "source": "",
         "strategy": "popular",
         "options": ReplayOptions(),
-        "counts": Counts(batches=10, usable=90, scored=60),
+        "counts": Counts(batches=10, usable=90, scored=60, complete=90),
         "metrics": metrics,
         "notes": (),
     }
@@ -130,17 +137,55 @@ def test_a_metric_that_disappears_is_a_regression() -> None:
     assert "the metric disappeared" in str(gone[0])
 
 
-def test_a_metric_the_baseline_never_had_is_not_compared() -> None:
+def test_a_metric_missing_from_the_baseline_asks_to_be_re_baselined() -> None:
+    # Walking the baseline's own list would mean a metric added later protects nothing
+    # until every baseline has been rewritten — and a metric deleted from a baseline
+    # protects nothing at all.
     baseline = Baseline.of(report())
     thin = Baseline(
         dataset=baseline.dataset,
         strategy=baseline.strategy,
         options=baseline.options,
-        metrics={"like_rate": None, "invented": 1.0},
+        metrics={"like_rate": 0.35, "invented": 1.0},
         counts={},
         tolerances={},
     )
-    assert check(thin, report()) == []
+    missing = check(thin, report())
+
+    assert "like_rate" not in [row.metric for row in missing]
+    assert "already_seen_rate" in [row.metric for row in missing]
+    assert "not in the baseline" in str(missing[0])
+
+
+def test_a_metric_that_had_no_denominator_is_not_graded_until_it_does() -> None:
+    baseline = Baseline.of(moved("genre_diversity", None))
+    assert check(baseline, report()) == []
+
+
+def test_the_tolerances_come_from_the_code_and_not_from_the_file() -> None:
+    # A gate whose thresholds live inside the file it guards is switched off by a
+    # one-token diff that looks like a number.
+    baseline = Baseline.of(report())
+    loosened = Baseline(
+        dataset=baseline.dataset,
+        strategy=baseline.strategy,
+        options=baseline.options,
+        metrics=baseline.metrics,
+        counts=baseline.counts,
+        tolerances={"like_rate": 0.9},
+    )
+    assert [row.metric for row in check(loosened, moved("like_rate", 0.0))] == ["like_rate"]
+
+
+def test_a_cost_that_was_zero_gets_no_allowance() -> None:
+    # "A quarter of a model call per batch" is a margin around one call and a licence
+    # around none; the first model call a strategy makes is the change worth seeing.
+    baseline = Baseline.of(report(metrics=dict(report().metrics) | {"llm_calls_per_batch": 0.0}))
+    assert tolerance_of("llm_calls_per_batch", 0.0) == 0.0
+    assert tolerance_of("llm_calls_per_batch", 1.0) == 0.25
+    assert [row.metric for row in check(baseline, moved("llm_calls_per_batch", 0.1))] == [
+        "llm_calls_per_batch"
+    ]
 
 
 def test_proposing_fewer_cards_cannot_buy_a_better_rate() -> None:
@@ -166,9 +211,69 @@ def test_a_count_that_barely_moves_is_allowed() -> None:
 
 
 def test_a_regression_reads_as_a_sentence() -> None:
-    assert str(Regression("like_rate", None, None, 0.02)) == (
-        "like_rate: n/a -> n/a (the metric disappeared)"
+    assert str(Regression("like_rate", None, 0.3, 0.02)) == (
+        "like_rate: not in the baseline (re-baseline to measure it)"
     )
+    assert str(Regression("like_rate", 0.35, None, 0.02)) == (
+        "like_rate: 0.35 -> n/a (the metric disappeared)"
+    )
+    assert str(Regression("like_rate", 0.35, 0.1, 0.02)) == (
+        "like_rate: 0.35 -> 0.1 (tolerance 0.02)"
+    )
+
+
+# --- the floor a new strategy has to clear ---------------------------------------------
+
+
+def floors() -> list[Baseline]:
+    """The two reference strategies, one better on likes, one worse on already-seen."""
+    popular = Baseline.of(report(strategy="popular"))
+    random_floor = Baseline.of(
+        report(
+            strategy="random",
+            metrics=dict(report().metrics)
+            | {"like_rate": 0.28, "already_seen_rate": 0.57, "new_like_rate": 0.66},
+        )
+    )
+    return [popular, random_floor]
+
+
+def test_a_new_strategy_is_held_to_the_best_of_the_floors() -> None:
+    candidate = report(strategy="hybrid", metrics=dict(report().metrics) | {"like_rate": 0.30})
+    slipped = check_floor(floors(), candidate)
+
+    # The bar is per metric, and it is whichever floor did better on it: already-seen
+    # 0.40 (popular's, the lower of the two), like rate 0.35 (popular's), new-like 0.66
+    # (random's). The candidate matches the first and misses the other two.
+    assert [row.metric for row in slipped] == ["floor.like_rate", "floor.new_like_rate"]
+    assert "0.35 -> 0.3" in str(slipped[0])
+
+
+def test_a_strategy_that_beats_both_floors_passes() -> None:
+    better = report(
+        strategy="hybrid",
+        metrics=dict(report().metrics)
+        | {"like_rate": 0.5, "already_seen_rate": 0.2, "new_like_rate": 0.7},
+    )
+    assert check_floor(floors(), better) == []
+
+
+def test_the_floors_are_not_measured_against_each_other() -> None:
+    # Each is worse than the other somewhere; holding them to one another would mean
+    # neither could ever pass its own gate.
+    assert check_floor(floors(), report(strategy="popular")) == []
+    assert check_floor(floors(), report(strategy="random")) == []
+
+
+def test_a_floor_measured_on_another_vote_set_does_not_count() -> None:
+    elsewhere = [Baseline.of(report(strategy="popular", dataset="other"))]
+    with pytest.raises(BaselineError, match="no reference floor"):
+        check_floor(elsewhere, report(strategy="hybrid"))
+
+
+def test_a_floor_without_a_metric_does_not_bar_anything() -> None:
+    blank = [Baseline.of(report(strategy="popular", metrics={"like_rate": None}))]
+    assert check_floor(blank, report(strategy="hybrid")) == []
 
 
 @pytest.mark.parametrize(
@@ -226,7 +331,7 @@ async def test_every_metadata_call_is_counted_and_passed_through() -> None:
     await metadata.trailer(TitleRef("movie", 1), "en")
     await metadata.region_providers("FR")
 
-    assert meter.metadata_operations == [
+    assert meter.metadata_operations == (
         "test",
         "search",
         "match",
@@ -234,7 +339,7 @@ async def test_every_metadata_call_is_counted_and_passed_through() -> None:
         "watch_providers",
         "trailer",
         "region_providers",
-    ]
+    )
     assert meter.metadata_calls == 7
 
 

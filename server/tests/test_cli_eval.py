@@ -7,6 +7,7 @@ review, and a harness whose inputs cannot be reviewed proves nothing.
 
 import json
 import sqlite3
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -22,9 +23,11 @@ from tindarr.main.evaluation import (
     catalog_service,
     live_plan,
 )
+from tindarr.ports.metadata import Metadata, Title
 from tindarr.swipe.baselines import PopularBaseline
 from tindarr.swipe.evaluation import Baseline, ReplayOptions, load_dataset
 from tindarr.swipe.evaluation.synthetic import build_synthetic_dataset
+from tindarr.swipe.strategy import Candidate, StrategyContext
 
 FIXTURES = Path(__file__).resolve().parent.parent / DEFAULT_FIXTURES
 
@@ -101,22 +104,20 @@ def test_a_baseline_can_be_rewritten_and_the_report_dumped(
     report = tmp_path / "out" / "report.json"
 
     code = main(
-        [
-            "eval",
-            "run",
-            "--fixtures",
-            str(tmp_path),
-            "--json",
-            str(report),
-            "--update-baseline",
-            "--check",
-        ]
+        ["eval", "run", "--fixtures", str(tmp_path), "--json", str(report), "--update-baseline"]
     )
 
     assert code == 0
     assert "baseline written" in capsys.readouterr().out
     assert json.loads(report.read_text(encoding="utf-8"))["strategy"] == "popular"
     assert (tmp_path / "baseline-popular.json").is_file()
+
+
+def test_a_baseline_cannot_be_rewritten_and_checked_in_one_breath() -> None:
+    # Otherwise the run writes the numbers it is then compared to, and the gate can
+    # never fail. argparse refuses the pair outright.
+    with pytest.raises(SystemExit):
+        main(["eval", "run", "--update-baseline", "--check"])
 
 
 def test_the_replay_options_reach_the_run(capsys: pytest.CaptureFixture[str]) -> None:
@@ -422,3 +423,56 @@ def test_a_run_with_no_batches_at_all_still_prints() -> None:
         STRATEGIES["popular"], build_synthetic_dataset(SYNTHETIC_SEED), ReplayOptions(warm_up=500)
     )
     assert "up to 0 requests" in plan
+
+
+# --- a new strategy does not write its own floor ------------------------------------------
+
+
+def test_a_new_strategy_is_held_to_the_committed_floors(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A strategy worse than both baselines fails --check even on its first run.
+
+    Without this the gate is only a per-strategy regression test: the first baseline a
+    new strategy writes is whatever it scored, so anything can certify itself.
+    """
+    for name in ("votes.json", "tmdb.json", "baseline-popular.json", "baseline-random.json"):
+        (tmp_path / name).write_bytes((FIXTURES / name).read_bytes())
+
+    class Sloppy:
+        """Serves the household's own library, and never reads a title's details."""
+
+        name = "hybrid"
+
+        def __init__(self, pool: Sequence[Title], metadata: Metadata) -> None:
+            self._pool = pool
+
+        async def propose(self, context: StrategyContext, size: int) -> list[Candidate]:
+            owned = sorted(context.library.refs)
+            rest = [title.ref for title in self._pool if title.ref not in context.excluded]
+            return [Candidate(ref=ref) for ref in (owned + rest)[:size]]
+
+    monkeypatch.setitem(STRATEGIES, "hybrid", StrategySpec("hybrid", Sloppy))
+    main(["eval", "run", "--fixtures", str(tmp_path), "--strategy", "hybrid", "--update-baseline"])
+    capsys.readouterr()
+
+    code = main(["eval", "run", "--fixtures", str(tmp_path), "--strategy", "hybrid", "--check"])
+
+    printed = capsys.readouterr().out
+    assert code == 1
+    # Its own baseline is happy — it wrote it. The floors are not.
+    assert "floor.complete_rate" in printed
+    assert "worse than" in printed
+
+
+def test_a_floor_strategy_is_not_measured_against_the_other_floor(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # `popular` is worse than `random` on already-seen and better on nothing much; each
+    # is the yardstick, so neither is held to the other.
+    for strategy in ("popular", "random"):
+        assert (
+            main(["eval", "run", "--fixtures", str(FIXTURES), "--strategy", strategy, "--check"])
+            == 0
+        )
+    assert "no worse than the floors" in capsys.readouterr().out

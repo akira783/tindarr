@@ -13,9 +13,11 @@ from tests.support.evaluation import InMemoryMetadata, RecordedEngine, ScriptedS
 from tindarr.ports.titles import TitleRef
 from tindarr.swipe.baselines import PopularBaseline
 from tindarr.swipe.evaluation import (
+    BatchCost,
     BatchOutcome,
     CostMeter,
     CountingMetadata,
+    Counts,
     DatasetError,
     EvalDataset,
     EvaluationReport,
@@ -26,7 +28,9 @@ from tindarr.swipe.evaluation import (
     replay,
     summarize,
 )
+from tindarr.swipe.evaluation.metrics import DIRECTIONS
 from tindarr.swipe.evaluation.synthetic import build_synthetic_dataset
+from tindarr.swipe.strategy import Candidate, StrategyContext
 
 pytestmark = pytest.mark.anyio
 
@@ -73,7 +77,7 @@ async def run(
 ) -> tuple[EvaluationReport, tuple[BatchOutcome, ...]]:
     """Replay one scripted strategy and return its report and its batches."""
     batches = await replay(dataset, lambda: strategy, options)
-    report = summarize(dataset.name, "", strategy.name, batches, CostMeter(), options)
+    report = summarize(dataset.name, "", strategy.name, batches, options)
     return report, batches
 
 
@@ -101,7 +105,7 @@ async def test_replaying_the_engine_that_produced_the_votes_reproduces_those_rat
     engine = RecordedEngine(order)
 
     batches = await replay(dataset, lambda: engine, FULL)
-    report = summarize(dataset.name, dataset.source, "recorded", batches, CostMeter(), FULL)
+    report = summarize(dataset.name, dataset.source, "recorded", batches, FULL)
 
     # Every card was one the user really voted on, so nothing was left unknown...
     assert report.counts.unknown == 0
@@ -318,7 +322,7 @@ async def test_a_vote_set_without_a_catalogue_says_so_instead_of_guessing() -> N
 # --- the table and the JSON -----------------------------------------------------------
 
 
-async def test_the_table_names_every_metric_and_says_what_is_estimated() -> None:
+async def test_the_table_names_every_metric_and_the_cost_it_charged() -> None:
     dataset = build_synthetic_dataset()
     pool = dataset.pool
     meter = CostMeter()
@@ -328,11 +332,52 @@ async def test_the_table_names_every_metric_and_says_what_is_estimated() -> None
     table = report.table()
 
     assert "already_seen_rate" in table
-    assert "measured" in table
-    assert "estimated" in table
     assert "note  " in table
     assert report.counts.tmdb_calls == meter.metadata_calls > 0
     assert report.as_dict()["strategy"] == "popular"
+    # Nothing was guessed in this run, so nothing claims to have been.
+    assert "estimated" not in table
+    assert report.kinds["llm_tokens_per_card"] == "measured"
+
+
+def bare_report(counts: Counts) -> EvaluationReport:
+    """A report with no metrics, for the parts that only read the counts."""
+    return EvaluationReport(
+        dataset="d",
+        source="",
+        strategy="s",
+        options=ReplayOptions(),
+        counts=counts,
+        metrics=dict.fromkeys(DIRECTIONS),
+        notes=(),
+    )
+
+
+def test_tokens_are_called_estimated_only_when_a_provider_withheld_them() -> None:
+    measured = bare_report(Counts(llm_calls=2))
+    guessed = bare_report(Counts(llm_calls=2, llm_calls_estimated=1))
+
+    assert measured.kinds["llm_tokens_per_card"] == "measured"
+    assert guessed.kinds["llm_tokens_per_card"] == "estimated"
+    assert "estimated" in guessed.table()
+
+
+def test_a_run_says_how_many_calls_it_had_to_guess_the_tokens_of() -> None:
+    batch = BatchOutcome(
+        user_id="user-1",
+        index=0,
+        requested=1,
+        cards=(),
+        cost=BatchCost(llm_calls=2, llm_input_tokens=40, llm_calls_estimated=1),
+        known=0,
+        distinct_genres=None,
+        franchise_repeat=None,
+    )
+    report = summarize("d", "", "s", [batch], ReplayOptions())
+
+    assert report.counts.llm_calls == 2
+    assert report.counts.llm_calls_estimated == 1
+    assert any("estimated at four characters" in note for note in report.notes)
 
 
 # --- the file format ------------------------------------------------------------------
@@ -431,3 +476,105 @@ def test_replay_options_that_would_make_a_report_meaningless_are_refused(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         ReplayOptions(**options)
+
+
+# --- what a strategy cannot do to the numbers -------------------------------------------
+
+
+async def test_a_strategy_cannot_empty_the_library_to_hide_what_it_owns() -> None:
+    # The index in the context is rebuilt per batch and scoring never consults it: an
+    # object a strategy holds is an object a strategy can clear.
+    dataset = small_dataset(
+        [(index, "like") for index in range(1, 11)], library=[{"tmdb_id": 92, "kind": "movie"}]
+    )
+
+    class Wiper:
+        name = "wiper"
+
+        async def propose(self, context: StrategyContext, size: int) -> list[Candidate]:
+            context.library._by_ref = {}  # pyright: ignore[reportPrivateUsage]
+            return [Candidate(ref=movie(92))]
+
+    batches = await replay(dataset, Wiper, ReplayOptions(batch_size=1, warm_up=1, max_batches=1))
+
+    assert [card.status for batch in batches for card in batch.cards] == ["owned"]
+
+
+async def test_the_cost_meter_cannot_be_reset() -> None:
+    meter = CostMeter()
+    meter.record_metadata("details")
+    with pytest.raises(AttributeError):
+        meter.metadata_calls = 0  # pyright: ignore[reportAttributeAccessIssue]
+    assert meter.metadata_calls == 1
+
+
+async def test_a_cost_that_goes_backwards_stops_the_run() -> None:
+    dataset = small_dataset([(index, "like") for index in range(1, 11)])
+    meter = CostMeter()
+    meter.record_metadata("details")
+
+    class Eraser:
+        name = "eraser"
+
+        async def propose(self, context: StrategyContext, size: int) -> list[Candidate]:
+            meter._metadata.clear()  # pyright: ignore[reportPrivateUsage]
+            return []
+
+    with pytest.raises(ReplayError, match="went backwards"):
+        await replay(dataset, Eraser, ReplayOptions(batch_size=1, warm_up=1), meter)
+
+
+async def test_a_card_without_its_details_is_not_a_free_card() -> None:
+    # Otherwise "made no TMDb call" is a perfect score on the cost axis for cards that
+    # cannot be rendered.
+    dataset = small_dataset([(1, "like"), (2, "like"), (3, "like")])
+    report, _ = await run(dataset, ScriptedStrategy([[movie(1), movie(2)]]))
+
+    assert report.metrics["complete_rate"] == 0.0
+    assert report.metrics["tmdb_calls_per_batch"] == 0.0
+
+
+async def test_a_smaller_batch_cannot_out_diversify_a_bigger_one() -> None:
+    dataset = EvalDataset.model_validate(
+        {
+            "name": "sizes",
+            "catalog": [
+                {
+                    "tmdb_id": index,
+                    "kind": "movie",
+                    "title": f"T{index}",
+                    "genres": [f"G{index}"],
+                }
+                for index in range(1, 11)
+            ],
+            "users": [
+                {
+                    "id": "user-1",
+                    "votes": [
+                        {"seq": index, "tmdb_id": index, "kind": "movie", "vote": "like"}
+                        for index in range(1, 11)
+                    ],
+                }
+            ],
+        }
+    )
+    options = ReplayOptions(batch_size=10, warm_up=0, max_batches=1)
+    three, _ = await run(dataset, ScriptedStrategy([[movie(1), movie(2), movie(3)]]), options)
+    ten, _ = await run(
+        dataset, ScriptedStrategy([[movie(index) for index in range(1, 11)]]), options
+    )
+
+    # Three cards, three genres: one genre per card, not more than the full batch's.
+    assert three.metrics["genre_diversity"] == pytest.approx(0.3)
+    assert ten.metrics["genre_diversity"] == pytest.approx(1.0)
+
+
+async def test_unknown_cards_cannot_drive_the_skip_rate_down() -> None:
+    # The denominator is the cards the fixture has an opinion on, not every card that
+    # was not waste: padding a batch with titles nobody voted on must not look like a
+    # strategy nobody skips.
+    dataset = small_dataset([(1, "skip"), (2, "like")])
+    padded, _ = await run(dataset, ScriptedStrategy([[movie(1), movie(2), movie(90), movie(91)]]))
+
+    assert padded.counts.unknown == 2
+    assert padded.metrics["skip_rate"] == 0.5
