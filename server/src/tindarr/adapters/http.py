@@ -127,7 +127,8 @@ class HttpSession:
         look at it. That is fine for a service the operator configured and wrong for an
         address somebody typed: the size check would then happen after the damage. This
         streams instead and gives up the moment the body is longer than it could
-        legitimately be, so a hostile or broken endpoint cannot grow the process.
+        legitimately be, so a hostile or broken endpoint cannot grow the process. The cap
+        counts decoded bytes, which is what the process actually holds.
         """
         try:
             async with self._client.stream(
@@ -148,9 +149,17 @@ class HttpSession:
             raise RemoteCallError("timeout") from None
         except httpx2.RequestError as failure:
             raise RemoteCallError("tls_error" if is_tls_error(failure) else "unreachable") from None
-        return httpx2.Response(
-            response.status_code, headers=response.headers, content=b"".join(chunks)
+        # ``aiter_bytes`` decodes as it goes, so the body here is plain text while the
+        # original headers still describe it as compressed. Keeping them would make the
+        # caller decompress a second time; the length no longer matches either.
+        headers = httpx2.Headers(
+            [
+                (name, value)
+                for name, value in response.headers.multi_items()
+                if name.lower() not in ("content-encoding", "content-length", "transfer-encoding")
+            ]
         )
+        return httpx2.Response(response.status_code, headers=headers, content=b"".join(chunks))
 
     async def get_bounded(self, url: str, limit: int = MAX_RESPONSE_BYTES) -> httpx2.Response:
         """GET a response, reading at most ``limit`` bytes of its body."""
