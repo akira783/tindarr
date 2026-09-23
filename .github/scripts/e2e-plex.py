@@ -11,6 +11,9 @@ request from a fork can never reach the secrets.
     e2e-plex.py up          start and claim a throwaway server, start Tindarr,
                             append the Plex target to the environment file
     e2e-plex.py check-logs  fail if the Tindarr server logged an error
+    e2e-plex.py scan-artifacts
+                            fail if any file about to be uploaded holds the account
+                            token (traces included: they are zip files)
     e2e-plex.py down        remove the container and everything the run left on plex.tv
 
 Two secrets are read from the environment:
@@ -29,15 +32,19 @@ several other clients use. Treat the first dispatched run as the test of this fi
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ElementTree
+import zipfile
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -61,11 +68,38 @@ class PlexError(RuntimeError):
 
 
 def run(*command: str, check: bool = True) -> str:
+    """Run a command; on failure name only the program, never the arguments.
+
+    The arguments of a ``docker run`` carry things that must not be printed — a claim
+    token is minted at run time, so GitHub cannot mask it in the log. ``stderr`` is
+    kept because it is what says why the command failed, and Docker reports its own
+    diagnostics there, not the environment it was handed.
+    """
     result = subprocess.run(command, capture_output=True, text=True, check=False)  # noqa: S603
     if check and result.returncode != 0:
-        msg = f"{' '.join(command)} failed: {result.stderr.strip()}"
+        msg = f"{command[0]} failed ({result.returncode}): {result.stderr.strip()}"
         raise PlexError(msg)
     return result.stdout
+
+
+@contextlib.contextmanager
+def env_file(**values: str) -> Iterator[str]:
+    """Write ``--env-file`` content to a private temporary file, and remove it after.
+
+    Anything secret goes to Docker this way: an ``-e NAME=value`` argument is visible
+    in the process list, in the exception message of a failed call and in whatever the
+    job prints of its own command line.
+    """
+    handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False)  # noqa: SIM115
+    try:
+        os.chmod(handle.name, 0o600)  # noqa: PTH101 - the file is already open
+        for name, value in values.items():
+            handle.write(f"{name}={value}\n")
+        handle.close()
+        yield handle.name
+    finally:
+        handle.close()
+        Path(handle.name).unlink(missing_ok=True)
 
 
 def plex_tv(
@@ -152,7 +186,9 @@ def wait_for_resource(account_token: str, identifier: str, timeout: float) -> No
         )
         if status == 200 and isinstance(payload, list):  # noqa: PLR2004
             for resource in payload:
-                if resource.get("clientIdentifier") == identifier and resource.get("owned"):
+                if resource.get("clientIdentifier") == identifier and resource.get(
+                    "owned"
+                ):
                     return
         time.sleep(5)
     msg = f"plex.tv never listed {identifier} as an owned server"
@@ -165,15 +201,18 @@ def up() -> None:
         msg = "PLEX_ACCOUNT_TOKEN is not set"
         raise PlexError(msg)
 
-    run(
-        "docker", "run", "-d", "--name", PLEX_CONTAINER,
-        "-e", f"PLEX_CLAIM={claim_token(account_token)}",
-        # First-run only, and it saves a recursive chown of the config volume.
-        "-e", "CHANGE_CONFIG_DIR_OWNERSHIP=false",
-        "-e", f"ADVERTISE_IP=http://127.0.0.1:{PLEX_PORT}/",
-        "-p", f"127.0.0.1:{PLEX_PORT}:32400",
-        PLEX_IMAGE,
-    )  # fmt: skip
+    # The claim token never appears on a command line: it is minted at run time, so
+    # GitHub has nothing to mask, and argv is readable by every process on the runner.
+    with env_file(PLEX_CLAIM=claim_token(account_token)) as claim_env:
+        run(
+            "docker", "run", "-d", "--name", PLEX_CONTAINER,
+            "--env-file", claim_env,
+            # First-run only, and it saves a recursive chown of the config volume.
+            "-e", "CHANGE_CONFIG_DIR_OWNERSHIP=false",
+            "-e", f"ADVERTISE_IP=http://127.0.0.1:{PLEX_PORT}/",
+            "-p", f"127.0.0.1:{PLEX_PORT}:32400",
+            PLEX_IMAGE,
+        )  # fmt: skip
     identifier = server_identity(300)
     wait_for_resource(account_token, identifier, 180)
 
@@ -191,7 +230,9 @@ def up() -> None:
     code = ""
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline and not code:
-        code = run("docker", "exec", TINDARR_CONTAINER, "cat", "/data/setup-code", check=False)
+        code = run(
+            "docker", "exec", TINDARR_CONTAINER, "cat", "/data/setup-code", check=False
+        )
         code = code.strip()
         if not code:
             time.sleep(1)
@@ -242,9 +283,13 @@ def down() -> None:
     run("docker", "volume", "rm", "-f", TINDARR_CONTAINER, check=False)
     if not account_token:
         return
-    status, root = plex_tv("/devices.xml", token=account_token, accept="application/xml")
+    status, root = plex_tv(
+        "/devices.xml", token=account_token, accept="application/xml"
+    )
     if status != 200 or root is None:  # noqa: PLR2004
-        print(f"::warning::could not list plex.tv devices (status {status}); clean up by hand")
+        print(
+            f"::warning::could not list plex.tv devices (status {status}); clean up by hand"
+        )
         return
     for device in root.findall("Device"):
         product = device.get("product") or ""
@@ -254,15 +299,61 @@ def down() -> None:
         device_id = device.get("id")
         if device_id is None:
             continue
-        removed, _ = plex_tv(f"/devices/{device_id}.xml", method="DELETE", token=account_token)
+        removed, _ = plex_tv(
+            f"/devices/{device_id}.xml", method="DELETE", token=account_token
+        )
         print(f"removed plex.tv device {device_id} ({product} / {name}): {removed}")
 
 
+def scan_artifacts() -> None:
+    """Fail if the account token can be found in anything about to be uploaded.
+
+    The real defence is that the token never goes through Playwright (``plex.spec.ts``
+    sends it with Node's own ``fetch``, not through the browser context), so it is in
+    no trace and no report. This is the check that says so out loud, on every run,
+    before the artifact leaves the runner: masking applies to logs, never to files.
+    """
+    token = os.environ.get("PLEX_ACCOUNT_TOKEN", "")
+    if not token:
+        msg = "PLEX_ACCOUNT_TOKEN is not set"
+        raise PlexError(msg)
+    needle = token.encode()
+    found: list[str] = []
+    for root in (
+        REPO / "web" / "test-results",
+        REPO / "web" / "playwright-report",
+        REPO / "e2e-logs",
+    ):
+        for path in sorted(root.rglob("*")) if root.is_dir() else []:
+            if not path.is_file():
+                continue
+            if _holds(path, needle):
+                found.append(str(path.relative_to(REPO)))
+    if found:
+        # The name of the file is safe to print; its content is not.
+        msg = f"the account token is in {len(found)} file(s) that would be uploaded: {found[:5]}"
+        raise PlexError(msg)
+    print("no secret in the files that would be uploaded")
+
+
+def _holds(path: Path, needle: bytes) -> bool:
+    """Whether the file contains ``needle``, looking inside a Playwright trace too."""
+    if zipfile.is_zipfile(path):
+        with zipfile.ZipFile(path) as archive:
+            return any(needle in archive.read(member) for member in archive.namelist())
+    return needle in path.read_bytes()
+
+
 def main(argv: list[str]) -> int:
-    actions = {"up": up, "check-logs": check_logs, "down": down}
+    actions = {
+        "up": up,
+        "check-logs": check_logs,
+        "down": down,
+        "scan-artifacts": scan_artifacts,
+    }
     action = actions.get(argv[1] if len(argv) > 1 else "")
     if action is None:
-        print(f"usage: {argv[0]} <up|check-logs|down>", file=sys.stderr)
+        print(f"usage: {argv[0]} <up|check-logs|down|scan-artifacts>", file=sys.stderr)
         return 2
     action()
     return 0

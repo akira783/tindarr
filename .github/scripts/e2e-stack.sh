@@ -173,10 +173,12 @@ up() {
     media_port="$(field "$row" 4)"; console_port="$(field "$row" 5)"
     media_url="http://127.0.0.1:${media_port}"
     note "seeding ${target} (${kind}) at ${media_url}"
-    seeded="$(python3 "${repo_root}/.github/scripts/seed-media-server.py" \
+    # The passwords go through the environment, not argv: a command line is readable
+    # by every process on the machine for as long as the command runs.
+    seeded="$(SEED_ADMIN_PASSWORD="$admin_password" SEED_USER_PASSWORD="$plain_password" \
+      python3 "${repo_root}/.github/scripts/seed-media-server.py" \
       --kind "$kind" --url "$media_url" \
-      --admin "$ADMIN_USER" --admin-password "$admin_password" \
-      --user "$PLAIN_USER" --user-password "$plain_password" \
+      --admin "$ADMIN_USER" --user "$PLAIN_USER" \
       --timeout "$READY_TIMEOUT")"
     local api_key
     api_key="$(echo "$seeded" | sed -n 's/^MEDIA_API_KEY=//p')"

@@ -55,12 +55,17 @@ async function pinCodeFromPage(page: Page): Promise<string> {
  * `PUT /api/v2/pins/link` is not in Plex's published documentation; it is the call
  * python-plexapi's `MyPlexAccount.link()` makes, and the only way to approve a PIN
  * without a browser. A `204` means the PIN now carries an `authToken`.
+ *
+ * It is sent with Node's own `fetch`, **never** through `page.request` or any other
+ * Playwright request context: those are recorded in the trace, the trace is uploaded
+ * as a CI artifact, and GitHub's secret masking applies to logs, not to files inside
+ * an artifact. The account token is long-lived and owns the account — it must not
+ * leave this process. For the same reason the assertion quotes the status only: the
+ * plex.tv body can echo the request back, and the message lands in the report.
  */
-async function approvePlexPin(
-  page: Page,
-  code: string,
-): Promise<void> {
-  const response = await page.request.put(`${PLEX_TV}/api/v2/pins/link`, {
+async function approvePlexPin(code: string): Promise<void> {
+  const response = await fetch(`${PLEX_TV}/api/v2/pins/link`, {
+    method: "PUT",
     headers: {
       Accept: "application/json",
       "Content-Type": "application/x-www-form-urlencoded",
@@ -68,11 +73,11 @@ async function approvePlexPin(
       "X-Plex-Client-Identifier": "tindarr-e2e-ci",
       "X-Plex-Token": accountToken(),
     },
-    form: { code },
+    body: new URLSearchParams({ code }).toString(),
   });
   expect(
-    [200, 204].includes(response.status()),
-    `plex.tv refused to link the PIN: ${response.status()} ${await response.text()}`,
+    [200, 204].includes(response.status),
+    `plex.tv refused to link the PIN: ${response.status}`,
   ).toBe(true);
 }
 
@@ -104,7 +109,7 @@ test("the wizard links the owner's Plex account and finishes setup", async ({
   // completed PIN of purpose `owner_token` (docs/auth.md, section 5).
   await expect(page.getByLabel("Administrator API key")).toHaveCount(0);
   await page.getByRole("button", { name: "Link the owner's Plex account" }).click();
-  await approvePlexPin(page, await pinCodeFromPage(page));
+  await approvePlexPin(await pinCodeFromPage(page));
   await expect(page.getByText(/^Linked as /)).toBeVisible();
 
   await page.getByRole("button", { name: "Test and save" }).click();
@@ -113,7 +118,7 @@ test("the wizard links the owner's Plex account and finishes setup", async ({
   // the account owns that server, so the only sign-in method offered is the PIN.
   await expect(page.getByRole("heading", { name: "Sign in as an administrator" })).toBeVisible();
   await page.getByRole("button", { name: "Sign in with Plex" }).click();
-  await approvePlexPin(page, await pinCodeFromPage(page));
+  await approvePlexPin(await pinCodeFromPage(page));
 
   await expect(page.getByRole("heading", { name: "Public address" })).toBeVisible();
   await page.getByLabel("Public address").fill(publicUrl);
@@ -132,7 +137,7 @@ test("a phone pairs with the console and gets a working token pair", async ({
 
   await page.goto("/sign-in");
   await page.getByRole("button", { name: "Sign in with Plex" }).click();
-  await approvePlexPin(page, await pinCodeFromPage(page));
+  await approvePlexPin(await pinCodeFromPage(page));
   await expect(page).toHaveURL(/\/settings$/);
 
   await page.getByRole("link", { name: "Connect a phone" }).click();

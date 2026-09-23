@@ -16,8 +16,12 @@ Only the standard library is used, so it runs on a bare GitHub runner.
 
 Usage::
 
-    seed-media-server.py --kind jellyfin --url http://127.0.0.1:18096 \
-        --admin tindarr-admin --admin-password … --user tindarr-user --user-password …
+    SEED_ADMIN_PASSWORD=… SEED_USER_PASSWORD=… \
+        seed-media-server.py --kind jellyfin --url http://127.0.0.1:18096 \
+        --admin tindarr-admin --user tindarr-user
+
+The two passwords come from the environment, never from the command line: argv is
+readable by any process on the machine, and it is what a shell trace prints.
 
 It prints ``NAME=value`` lines on stdout for the caller to source:
 ``MEDIA_API_KEY``, ``MEDIA_SERVER_ID``, ``MEDIA_SERVER_NAME``, ``MEDIA_SERVER_VERSION``.
@@ -28,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -263,26 +268,37 @@ def ensure_user(url: str, token: str, kind: str, name: str, password: str) -> st
     return user_id
 
 
+def _password(name: str) -> str:
+    """Read one of the two passwords from the environment, or fail saying which."""
+    value = os.environ.get(name, "")
+    if not value:
+        message = f"{name} is not set"
+        raise SystemExit(message)
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kind", required=True, choices=["jellyfin", "emby"])
     parser.add_argument("--url", required=True, help="Base URL of the media server.")
     parser.add_argument("--admin", required=True)
-    parser.add_argument("--admin-password", required=True)
     parser.add_argument("--user", required=True)
-    parser.add_argument("--user-password", required=True)
     parser.add_argument("--app-name", default="Tindarr e2e")
     parser.add_argument("--timeout", type=float, default=300.0)
     args = parser.parse_args(argv)
+    # Never on the command line: argv is world-readable in /proc for as long as the
+    # process lives, and it is what a shell trace or a failed-command message prints.
+    admin_password = _password("SEED_ADMIN_PASSWORD")
+    user_password = _password("SEED_USER_PASSWORD")
 
     info = wait_ready(args.url, args.timeout)
     if wizard_pending(args.url):
-        run_wizard(args.url, args.kind, args.admin, args.admin_password)
+        run_wizard(args.url, args.kind, args.admin, admin_password)
         info = wait_ready(args.url, 60.0)
 
-    token, _ = sign_in(args.url, args.admin, args.admin_password)
+    token, _ = sign_in(args.url, args.admin, admin_password)
     api_key = ensure_api_key(args.url, token, args.app_name)
-    ensure_user(args.url, token, args.kind, args.user, args.user_password)
+    ensure_user(args.url, token, args.kind, args.user, user_password)
 
     print(f"MEDIA_API_KEY={api_key}")
     print(f"MEDIA_SERVER_ID={_field(info, 'Id')}")

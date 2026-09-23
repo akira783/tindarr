@@ -166,8 +166,19 @@ jobs:
         if: always()
         run: python3 .github/scripts/e2e-plex.py check-logs
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      # The account token is long-lived and owns the account. It is never sent through
+      # the browser context (`plex.spec.ts` uses Node's own `fetch`), so it is in no
+      # trace and no report — and this proves it before anything leaves the runner,
+      # because GitHub masks secrets in logs, never inside an artifact's files.
+      - name: No secret in the files about to be uploaded
+        id: scan-artifacts
         if: failure()
+        env:
+          PLEX_ACCOUNT_TOKEN: ${{ secrets.PLEX_ACCOUNT_TOKEN }}
+        run: python3 .github/scripts/e2e-plex.py scan-artifacts
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure() && steps.scan-artifacts.outcome == 'success'
         with:
           name: e2e-plex-failure
           path: |
