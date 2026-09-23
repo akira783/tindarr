@@ -36,6 +36,32 @@ def clean_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     clear_registered_secrets()
 
 
+@pytest.fixture(autouse=True)
+def pristine_logging() -> Iterator[None]:
+    """Put the root logger back the way each test found it.
+
+    ``configure_logging`` clears the root handlers and installs its own, bound to
+    whatever ``sys.stdout`` was at that moment — which, inside a captured test, is a
+    stream pytest closes when the test ends. Any command-line test that reaches it
+    therefore leaves a handler behind that later tests still log through: it writes to a
+    closed file, and, worse, its redaction filter *mutates the records on its way past*,
+    clearing the ``exc_info`` a later test was about to assert on. That is exactly the
+    failure that made ``test_jobs`` pass alone and fail in the suite.
+
+    Restoring the handlers here fixes the whole class of it, rather than the one test
+    that noticed.
+    """
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    access = logging.getLogger("uvicorn.access")
+    disabled = access.disabled
+    try:
+        yield
+    finally:
+        root.handlers, root.level = handlers, level
+        access.disabled = disabled
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
