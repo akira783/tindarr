@@ -7,7 +7,9 @@ replaced and nobody can re-authenticate on it any more (docs/auth.md, section 3)
 ``tindarr eval`` is the offline evaluation harness of ADR 0013 (docs/evaluation.md). It
 is a development command: it opens no instance database, it makes no network call unless
 ``--live`` is given and confirmed, and it exits 1 — not 2 — when the numbers regressed,
-so a build can tell "worse" from "broken".
+so a build can tell "worse" from "broken". ``tindarr eval session`` is the exception
+that proves the rule: it is live by definition, because its whole point is to put real
+cards in front of a real person, and it says what it will call and waits for a yes.
 """
 
 import argparse
@@ -41,8 +43,10 @@ from tindarr.main.evaluation import (
     write_fixtures,
     write_report,
 )
+from tindarr.main.session import SESSION_FIXTURES, SessionOptions, run_session
 from tindarr.storage.settings import environment_overrides
 from tindarr.swipe.evaluation import ReplayOptions
+from tindarr.swipe.strategy import NOVELTY_LEVELS, Novelty
 
 HEALTHCHECK_TIMEOUT_S = 3
 #: Connections uvicorn serves at the same time; beyond it a connection gets `503` and
@@ -128,6 +132,12 @@ def _add_eval(harness: argparse.ArgumentParser) -> None:
     record.add_argument("--fixtures", type=Path, default=DEFAULT_FIXTURES)
     record.add_argument("--yes", action="store_true", help="answer the live-run question (scripts)")
 
+    _add_session(
+        actions.add_parser(
+            "session", help="swipe real cards yourself and measure what you answered"
+        )
+    )
+
     imported = actions.add_parser("import", help="build a private vote set from a real database")
     imported.add_argument("--from", dest="database", type=Path, required=True)
     imported.add_argument("--source", choices=["tindarr", "suggestarr"], default=None)
@@ -138,6 +148,30 @@ def _add_eval(harness: argparse.ArgumentParser) -> None:
         default=PRIVATE_FIXTURES / "votes.json",
         help="where to write it; must be under a 'private/' directory",
     )
+
+
+def _add_session(session: argparse.ArgumentParser) -> None:
+    """Add ``tindarr eval session``, the one measurement a person answers themselves."""
+    session.add_argument(
+        "--out",
+        type=Path,
+        default=SESSION_FIXTURES / "votes.json",
+        help=f"where the votes go; must be under a 'private/' directory "
+        f"(default: {SESSION_FIXTURES / 'votes.json'})",
+    )
+    session.add_argument("--name", default="private-session", help="the vote set's name")
+    session.add_argument("--user", dest="user_id", default="you")
+    session.add_argument("--batches", type=int, default=3, help="how many batches to deal")
+    session.add_argument("--batch-size", type=int, default=10)
+    session.add_argument("--novelty", default="balanced", choices=sorted(NOVELTY_LEVELS))
+    session.add_argument("--language", default="en", help="ISO 639-1, for titles and rationales")
+    session.add_argument("--region", default="US", help="ISO 3166-1, for streaming offers")
+    session.add_argument(
+        "--providers",
+        action="store_true",
+        help="ask TMDb where each card streams in the region (one more request per card)",
+    )
+    session.add_argument("--yes", action="store_true", help="answer the live-run question")
 
 
 def serve(config: ServerConfig) -> int:
@@ -219,10 +253,29 @@ def evaluate_command(args: argparse.Namespace) -> int:
         if args.action == "import":
             import_fixture(args.database, args.out, args.name, args.source, out)
             return 0
+        if args.action == "session":
+            asyncio.run(run_session(_session_options(args), confirmed=args.yes, out=out))
+            return 0
         return _eval_run(args, out)
     except EvalError as failure:
         logger.error("%s", failure)  # noqa: TRY400 - the traceback adds nothing here
         return 2
+
+
+def _session_options(args: argparse.Namespace) -> SessionOptions:
+    """Read one session's switches off the command line."""
+    novelty: Novelty = args.novelty
+    return SessionOptions(
+        out=args.out,
+        name=args.name,
+        user_id=args.user_id,
+        batches=args.batches,
+        batch_size=args.batch_size,
+        novelty=novelty,
+        language=args.language,
+        region=args.region,
+        providers=args.providers,
+    )
 
 
 def _eval_run(args: argparse.Namespace, out: "TextIO") -> int:

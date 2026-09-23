@@ -48,6 +48,8 @@ __all__ = [
     "CardStatus",
     "ReplayError",
     "ReplayOptions",
+    "Spread",
+    "diversity",
     "replay",
 ]
 
@@ -331,7 +333,7 @@ def _score(  # noqa: PLR0913, PLR0917 - a batch is scored against six separate f
                 complete=details is not None and details.ref == ref,
             )
         )
-    spread = _diversity(cards, catalog)
+    spread = diversity(cards, catalog)
     return BatchOutcome(
         user_id=scoring.user_id,
         index=scoring.index,
@@ -369,24 +371,30 @@ def _status(  # noqa: PLR0913, PLR0917 - the six facts that decide what a card b
 
 
 @dataclass(frozen=True, slots=True)
-class _Spread:
+class Spread:
+    """How varied one batch was, as far as the catalogue can say."""
+
     known: int
     distinct_genres: int | None
     franchise_repeat: bool | None
 
 
-def _diversity(cards: Sequence[CardOutcome], catalog: Mapping[TitleRef, CatalogEntry]) -> _Spread:
+def diversity(cards: Sequence[CardOutcome], catalog: Mapping[TitleRef, CatalogEntry]) -> Spread:
     """Count genres and franchise repeats over the catalogue.
 
     Never over what the strategy said about its own picks: a metric a strategy can
     write its own answer to measures nothing.
+
+    Public because a live session scores its own batches with it
+    (``tindarr.swipe.evaluation.session``) and two implementations of "how varied was
+    this batch" would be two answers to one question.
     """
     entries = [
         entry for card in cards if card.usable and (entry := catalog.get(card.ref)) is not None
     ]
     if not entries:
-        return _Spread(known=0, distinct_genres=None, franchise_repeat=None)
+        return Spread(known=0, distinct_genres=None, franchise_repeat=None)
     genres = {genre for entry in entries for genre in entry.genres}
     franchises = [entry.franchise for entry in entries if entry.franchise]
     repeat = len(franchises) != len(set(franchises)) if len(entries) > 1 else None
-    return _Spread(known=len(entries), distinct_genres=len(genres), franchise_repeat=repeat)
+    return Spread(known=len(entries), distinct_genres=len(genres), franchise_repeat=repeat)

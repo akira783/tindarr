@@ -10,6 +10,10 @@ uv run tindarr eval run                      # the author's 99 votes, the "popul
 uv run tindarr eval run --strategy hybrid    # the engine of ADR 0013
 uv run tindarr eval run --check              # what CI does: fail when the numbers slid
 uv run tindarr eval run --fixtures fixtures/eval/synthetic-99 --check   # the other set
+
+# And the one a person answers: real cards, real model, one keypress each.
+TINDARR_EVAL_TMDB_API_KEY=… TINDARR_EVAL_LLM_BASE_URL=http://…/v1 \
+  uv run tindarr eval session --batches 3 --language fr --region FR
 ```
 
 Two vote sets are committed and both are gated in CI, for all three strategies. Every
@@ -350,9 +354,51 @@ please a real person.
 `eval fixtures` refuses to write into a directory holding a vote set it did not generate:
 the two directories carry the same file names, and only one of them can be rebuilt.
 
-### A third: your own
+### A third: your own, answered tonight
 
-The most useful vote set is the one on your instance:
+The vote sets above are replays: they score a strategy against cards **another engine**
+served, which is why nine cards in ten come back `unknown` on the real one. The way out
+of that is not another metric. It is somebody answering.
+
+```bash
+cd server
+TINDARR_EVAL_TMDB_API_KEY=… TINDARR_EVAL_LLM_BASE_URL=http://…/v1 \
+  TINDARR_EVAL_LLM_MODEL=… uv run tindarr eval session --batches 3
+```
+
+`tindarr eval session` builds real batches with the hybrid strategy against the real
+TMDb and a real OpenAI-compatible model, shows one card at a time — title, year, genres,
+rating and how many people gave it, the model's one sentence — and reads one keypress:
+`l` like, `d` dislike, `s` already seen and liked it, `x` already seen and disliked it,
+space to skip, `q` to stop. `--providers` adds a line saying which services carry the
+card **in the region**, for one more TMDb request each; it is not "on your services",
+because this command opens no instance database and knows no household's subscriptions.
+
+It prints the harness's own table at the end, computed on the session itself. Every card
+was answered, so there is no coverage gap: `already_seen_rate` is the rate and not a
+lower bound, and `new_like_rate` is ADR 0013's 63 % measured again on a person rather
+than on a fixture. `liked_recall` is `n/a` and says so — nothing was withheld, so there
+is no set of titles the strategy failed to find.
+
+Three things it promises. It **says what it will call** and waits for a `yes` or a
+`--yes`, naming the address the prompts go to; the model endpoint has no default. It
+writes every answer to disk **before drawing the next card**, so a session that stops
+keeps its votes and the next one picks up from them, never re-showing a title. And it
+writes into a `private/` directory the repository ignores, in the same `EvalDataset` v1
+shape as the committed fixtures — so the harness can replay it, and so it could be
+merged into a committed fixture **if, and only if, the person whose history it is says
+so**.
+
+To replay one past the floors, record the TMDb answers it needs once:
+
+```bash
+TINDARR_EVAL_TMDB_API_KEY=… uv run tindarr eval record --fixtures fixtures/eval/private/session
+uv run tindarr eval run --fixtures fixtures/eval/private/session --strategy popular
+```
+
+### A fourth: the one on your instance
+
+The most useful vote set you already have is the one in your database:
 
 ```bash
 uv run tindarr eval import --from /path/to/suggestarr.db      # or Tindarr's own database

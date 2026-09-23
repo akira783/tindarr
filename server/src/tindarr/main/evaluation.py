@@ -72,9 +72,12 @@ __all__ = [
     "StrategySpec",
     "build_cassette",
     "catalog_service",
+    "confirm",
     "hybrid_strategy",
     "import_fixture",
+    "live_key",
     "live_plan",
+    "llm_connection",
     "merge",
     "popular_baseline",
     "private_path",
@@ -249,13 +252,13 @@ async def run_evaluation(  # noqa: PLR0913 - one command's worth of switches
         )
     if live or wants_model:
         out.write(live_plan(spec, dataset, options, live=live, live_llm=wants_model))
-        _answered(confirmed=confirmed)
+        confirm(confirmed=confirmed)
     recorders: dict[str, RecordingTransport] = {}
     # The keys first: a transport opened before its credential is checked is a
     # connection pool nobody closes when the run gives up, and an unraisable warning
     # later, in whichever test the garbage collector happens to land on.
-    api_key = _live_key() if live else "offline"
-    connection = _llm_connection(live=wants_model) if spec.needs_llm else None
+    api_key = live_key() if live else "offline"
+    connection = llm_connection(live=wants_model) if spec.needs_llm else None
     try:
         transport = _tmdb_transport(paths, recorders, live=live)
         llm = _llm_provider(paths, connection, recorders, live=wants_model)
@@ -325,7 +328,7 @@ def _topped_up(path: Path) -> httpx2.AsyncBaseTransport:
     return TopUpTransport(_existing(path), httpx2.AsyncHTTPTransport())
 
 
-def _llm_connection(*, live: bool) -> LlmConnection:
+def llm_connection(*, live: bool) -> LlmConnection:
     """Where a model run talks, and as what.
 
     Only ``openai_compatible``: the harness is a development command run against a local
@@ -503,7 +506,8 @@ def _cassette(path: Path) -> Cassette:
         raise EvalError(f"{path}: {failure}") from None
 
 
-def _live_key() -> str:
+def live_key() -> str:
+    """Return the TMDb key a live run was given, or refuse to make one."""
     import os  # noqa: PLC0415 - read at the moment of use, never cached in a module
 
     key = os.environ.get(LIVE_KEY_VARIABLE, "").strip()
@@ -563,7 +567,7 @@ def live_plan(
     return "\n".join(lines) + "\n"
 
 
-def _answered(*, confirmed: bool) -> None:
+def confirm(*, confirmed: bool) -> None:
     """Wait for a ``yes`` at the terminal, unless ``--yes`` already said it."""
     if confirmed:
         return
@@ -774,8 +778,8 @@ async def record_cassette(paths: EvalPaths, *, confirmed: bool, out: TextIO) -> 
     """
     dataset = _dataset(paths.votes)
     out.write(_record_plan(dataset))
-    _answered(confirmed=confirmed)
-    api_key = _live_key()
+    confirm(confirmed=confirmed)
+    api_key = live_key()
     recorder = RecordingTransport(httpx2.AsyncHTTPTransport(), provider="tmdb")
     tmdb = TmdbMetadata(api_key, transport=recorder)
     try:
@@ -1024,14 +1028,14 @@ def _tmdb_payload(entry: CatalogEntry, genres: Mapping[str, int]) -> dict[str, A
 def private_path(path: Path) -> Path:
     """Return ``path``, refusing one that is not inside a directory called ``private``.
 
-    A vote set read out of somebody's instance is their viewing history. The rule is a
-    blunt one on purpose: a file the repository ignores by name cannot be committed by
-    an ``git add .`` on a tired evening.
+    A vote set read out of somebody's instance, or answered by them at a terminal, is
+    their viewing history. The rule is a blunt one on purpose: a file the repository
+    ignores by name cannot be committed by a ``git add .`` on a tired evening.
     """
     if PRIVATE_DIRECTORY not in path.parts:
         raise EvalError(
-            f"{path} is not under a '{PRIVATE_DIRECTORY}/' directory. An imported vote set is "
-            "somebody's viewing history; it goes somewhere the repository ignores."
+            f"{path} is not under a '{PRIVATE_DIRECTORY}/' directory. These votes are "
+            "somebody's viewing history; they go somewhere the repository ignores."
         )
     return path
 
