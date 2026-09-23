@@ -22,7 +22,7 @@ previous step's checks are red.
 **Check:** CI green. The image starts, `server/info` answers, and a contract test
 passes on the implemented endpoints.
 
-## Step 2: setup, authentication and web console shell
+## Step 2: setup, authentication and web console shell ✅ done
 
 Everything here is specified in [the authentication reference](auth.md) and
 [`api/openapi.yaml`](../api/openapi.yaml); the console and build parts in the
@@ -90,8 +90,9 @@ Build and CI:
   `.dockerignore`; compose example updated (`context: ..`).
 - `web.yml`; `server.yml` also triggered by `web/**` and `shared/**`; `e2e.yml`.
 
-**Check.** Run in CI only: the development host has no Docker, Plex needs a human or a
-real account, and browsers are not installed there.
+**Check.** (a) runs anywhere. (b) needs Docker and a browser; its Jellyfin and Emby
+targets run locally as well as in CI (`.github/scripts/e2e-stack.sh`), while the Plex
+target runs in CI only, on a dispatch, because it needs a real plex.tv account.
 
 - **(a) Security test suite (pytest, runs locally and in `server.yml`).** Fake media
   servers and a fake plex.tv built on `httpx.MockTransport`, no network. It covers:
@@ -127,18 +128,24 @@ real account, and browsers are not installed there.
   - redaction of every new secret kind, security headers per path, SPA fallback never
     under `/api`, contract validation of every new endpoint's responses.
 - **(b) End-to-end workflow (`e2e.yml`, GitHub Actions).** Builds the image, starts it
-  with Jellyfin and Emby containers (images pinned by digest) seeded through their
+  next to Jellyfin and Emby containers (pinned by digest) seeded through their
   startup-wizard APIs (`/Startup/…`: admin user, then an API key and a second,
-  non-admin user). Playwright (Chromium) drives the console against the built image:
-  claim a fresh server, configure each media server, complete setup, sign in with a
-  password on both, and with Quick Connect on Jellyfin (the test approves the code
-  through Jellyfin's `POST /QuickConnect/Authorize` with a user token), set
-  `public_url`, create a pairing, and complete it through the API as the app would
-  (preview, request, approve in the console, complete). Every page is checked for zero
-  CSP violations (`securitypolicyviolation` events and console errors). Plex runs only
-  on `workflow_dispatch`, with repository secrets (a Plex account token and a claim
-  token for a throwaway Plex server): the test approves the PIN through plex.tv's API
-  with that token. Pull requests from forks never get these secrets.
+  non-admin user). Three targets run, one Tindarr server each: Jellyfin 12, the oldest
+  Jellyfin supported (10.10) and Emby. Playwright (Chromium) drives the console against
+  the built image: claim a fresh server, configure the media server, complete setup with
+  an administrator password sign-in, set `public_url`, sign a plain user in and check
+  they land where a non-administrator belongs, sign in with Quick Connect on Jellyfin
+  (the test approves the code through `POST /QuickConnect/Authorize` with a real user
+  token), then a full pairing round trip — the console creates the code, the API is
+  called as the app would (preview, request with a PKCE challenge, the confirmation
+  code matched on both sides, approval in the console, completion) and the token pair is
+  used and rotated. Every test fails on any `securitypolicyviolation`, any console
+  message about the CSP and any uncaught exception, and the run fails if a Tindarr
+  server logged an error. Plex runs only on `workflow_dispatch`, with repository secrets
+  (a Plex account token; a claim token is minted from it, since claim tokens expire in
+  minutes): the test approves the PIN through plex.tv's device-link endpoint with that
+  token. Pull requests from forks never get these secrets. The same workflow lints the
+  workflows (`actionlint`) and the CI shell scripts (`shellcheck`).
 
 ## Step 3: adapters
 

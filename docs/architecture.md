@@ -367,9 +367,21 @@ Details in [the authentication reference](auth.md), with the reasons in
     coverage, `npm run build` (Vite plus a check that the built page carries no inline
     script or style, no `data:` URI and no third-party origin), the generated-client
     check and `npm audit`; triggered by `web/**`, `shared/**`, `api/openapi.yaml`.
-  - `e2e.yml` (step 2): the end-to-end suite against the built image, described in the
-    [roadmap](roadmap.md#step-2-setup-authentication-and-web-console-shell). It runs in
-    CI only.
+  - `e2e.yml` (step 2): Playwright (Chromium) drives the console of the **built image**
+    against real Jellyfin and Emby containers pinned by digest, described in the
+    [roadmap](roadmap.md#step-2-setup-authentication-and-web-console-shell). Three
+    targets run: Jellyfin 12, the oldest Jellyfin supported (10.10) and Emby. Plex is a
+    separate job, `workflow_dispatch` only, because it needs a real plex.tv account —
+    and a pull request from a fork never sees repository secrets. The same workflow
+    lints the workflows (`actionlint`) and the CI shell scripts (`shellcheck`).
+  - **Running the end-to-end stack yourself.** `.github/scripts/e2e-stack.sh up` starts
+    the media servers, seeds them through their own first-run wizard APIs
+    (`seed-media-server.py`) and starts one Tindarr server per target, all on loopback
+    in the host network namespace: the browser, the server's own `public_url` check and
+    the media server URL then all use the same addresses. `E2E_IMAGE=source` runs the
+    server from the working tree with uv instead of an image, which needs no image
+    build; `npm run build` in `web/` first. Then, in `web/`:
+    `set -a; . ../e2e.env; set +a; npm run test:e2e`.
 
 ## App
 

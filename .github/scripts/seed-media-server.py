@@ -137,7 +137,8 @@ def wait_ready(url: str, timeout: float) -> dict[str, Any]:
         except OSError as error:
             last = str(error)
         else:
-            if status == HTTP_OK and _field(payload, "Id") and probe in (HTTP_OK, HTTP_UNAUTHORIZED):
+            settled = probe in (HTTP_OK, HTTP_UNAUTHORIZED)
+            if status == HTTP_OK and _field(payload, "Id") and settled:
                 return payload if isinstance(payload, dict) else {}
             last = f"/System/Info/Public {status}, {WIZARD_PROBE} {probe}"
         time.sleep(1.0)
