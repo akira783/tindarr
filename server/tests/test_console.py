@@ -188,8 +188,11 @@ def test_reserved_paths_are_not_the_consoles(path: str, served: bool) -> None:
 # --- headers per path ---------------------------------------------------------------
 
 
-def test_index_html_carries_the_console_policy(console: TestClient) -> None:
-    response = console.get("/")
+@pytest.mark.parametrize("path", ["/", "/index.html"])
+def test_index_html_carries_the_console_policy(console: TestClient, path: str) -> None:
+    # `/index.html` is the same page as `/`, so it must not be served as a static file
+    # — that branch carries no policy at all.
+    response = console.get(path)
     assert response.headers["content-security-policy"] == CONSOLE_CSP
     assert response.headers["cache-control"] == INDEX_CACHE_CONTROL
     assert response.headers["cross-origin-opener-policy"] == "same-origin"

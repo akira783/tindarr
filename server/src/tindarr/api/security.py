@@ -165,7 +165,7 @@ class Authenticator:
             credential = Credential(authenticated.session, authenticated.user, "cookie")
             if request.method in UNSAFE_METHODS:
                 require_csrf_token(request, credential.session, context)
-        self._authorize(credential, context)
+        self.authorize(credential, context)
         return credential
 
     async def _from_cookie(
@@ -183,8 +183,14 @@ class Authenticator:
                 problem = failure
         raise problem
 
-    def _authorize(self, credential: Credential, context: RequestContext) -> None:
+    def authorize(self, credential: Credential, context: RequestContext) -> None:
+        """Apply what this dependency requires of an already authenticated caller."""
         if credential.user is None:
+            # A session with no user (setup) can never be an administrator. No admin
+            # endpoint accepts one today, and this is what keeps that true if one ever
+            # does: the check refuses rather than being skipped.
+            if self._admin:
+                raise errors.admin_required()
             return
         if self._admin:
             access.require_admin(credential.user)

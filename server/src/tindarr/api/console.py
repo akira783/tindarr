@@ -153,7 +153,9 @@ class WebConsole:
             asset = self._file(relative)
             # A hashed asset that is gone is gone: never answer it with the page.
             return _not_found() if asset is None else _file_response(asset, ASSET_CACHE_CONTROL)
-        if relative:
+        # `/index.html` is the page, not a static file: it goes through the branch
+        # below, which is the one that carries the console's CSP.
+        if relative and relative != INDEX_FILE:
             static = self._file(relative)
             if static is not None:
                 return _file_response(static, STATIC_CACHE_CONTROL)
