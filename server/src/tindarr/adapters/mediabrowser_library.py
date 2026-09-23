@@ -29,7 +29,7 @@ import logging
 from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from http import HTTPStatus
-from typing import Any, Final, cast
+from typing import Any, Final
 
 import httpx2
 
@@ -38,6 +38,7 @@ from tindarr.adapters.http import (
     RemoteCallError,
     as_flag,
     as_object,
+    as_object_list,
     as_text,
     read_mapping,
 )
@@ -143,11 +144,9 @@ def library_item(row: Mapping[str, Any]) -> LibraryItem | None:
 
 def rows_of(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     """Return the ``Items`` of a listing response, skipping anything that is not an object."""
-    items: object = payload.get("Items")
-    if not isinstance(items, list):
+    if not isinstance(payload.get("Items"), list):
         raise RemoteCallError("unexpected_response")
-    values = cast("list[object]", items)
-    return [row for value in values if (row := as_object(value)) is not None]
+    return as_object_list(payload.get("Items"))
 
 
 class UserItemsReader:

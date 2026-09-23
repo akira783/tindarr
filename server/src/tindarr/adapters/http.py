@@ -177,6 +177,19 @@ def as_object(value: object) -> Mapping[str, Any] | None:
     return cast("Mapping[str, Any]", value) if isinstance(value, dict) else None
 
 
+def as_object_list(value: object) -> list[Mapping[str, Any]]:
+    """Return a JSON array's object entries, dropping anything that is not one.
+
+    Decoded JSON is ``Any``, and every adapter reads arrays of objects out of it. Doing
+    the narrowing once means no adapter repeats the cast, and a remote service that
+    slips a string into an array of objects loses that entry instead of the call.
+    """
+    if not isinstance(value, list):
+        return []
+    entries = cast("list[object]", value)
+    return [entry for item in entries if (entry := as_object(item)) is not None]
+
+
 def read_mapping(response: httpx2.Response) -> Mapping[str, Any]:
     """Return the response's JSON body when it is an object, else fail."""
     payload = as_object(read_json(response))
