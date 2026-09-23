@@ -83,7 +83,8 @@
         "start": "Link the owner's Plex account",
         "help": "Approve on plex.tv with the account that owns this Plex server.",
         "waiting": "Waiting for approval on plex.tv…",
-        "linked": "Linked as {{account}}"
+        "linked": "Linked as {{account}}",
+        "tokenNotice": "Tindarr keeps your plex.tv account token, not a token limited to this server: it is the only way to read each user's progress and to know who may use the server. It is encrypted, it is used only for the library, the watch state and the user list, and Tindarr never manages your Plex account."
       }
     },
     "signIn": {

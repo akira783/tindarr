@@ -130,6 +130,8 @@ export function MediaServerStep({
         {kind === "plex" ? (
           <div className="flow">
             <p className="hint">{t("setup.mediaServer.plex.help")}</p>
+            {/* ADR 0012: the account token is kept, and it is said here, not only in a doc. */}
+            <p className="hint">{t("setup.mediaServer.plex.tokenNotice")}</p>
             {owner === null ? (
               <PlexPinFlow
                 purpose="owner_token"

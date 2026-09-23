@@ -8,7 +8,8 @@ the app.
 | Asset | Where | Impact if leaked or abused |
 |---|---|---|
 | AI provider API keys | server DB (encrypted) | Direct cost for the owner |
-| Media server admin API key / Plex owner token | server DB (encrypted) | Full control of the media server |
+| Media server admin API key | server DB (encrypted) | Full control of the media server |
+| Plex account token of the owner | server DB (encrypted) | Full control of the **plex.tv account**: every server it owns, its settings, its sharing, its devices ([ADR 0012](adr/0012-plex-tokens.md)) |
 | Request backend API key | server DB (encrypted) | Unlimited requests, disk fill, quota bypass |
 | TMDb / OMDb keys | server DB (encrypted) | Key revoked by the provider |
 | Watch history, votes, taste profile | server DB | Privacy |

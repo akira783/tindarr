@@ -1,13 +1,13 @@
 # 0012. Which Plex token Tindarr keeps
 
-- Status: proposed (the owner's decision is pending)
+- Status: accepted (option A, 2026-09-23)
 - Date: 2026-09-23
 - Amends: [0005](0005-adapters-and-ai-providers.md) (the Plex half of the media server
   adapter), when it is accepted
 
-> This ADR is **not implemented**. Step 3 built the Plex adapter on what the stored
-> credential can already do, and wrote down precisely what it cannot. Both options below
-> are live; neither has been coded beyond what exists today.
+> **Decided on 2026-09-23: option A.** The account token stays, with the three conditions
+> below. The first one — saying so in the console where the token is collected — is done.
+> Per-user tokens, fetched on demand and never stored, belong to step 4.
 
 ## Context
 

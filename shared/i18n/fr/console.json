@@ -83,7 +83,8 @@
         "start": "Lier le compte Plex propriétaire",
         "help": "Approuvez sur plex.tv avec le compte propriétaire de ce serveur Plex.",
         "waiting": "En attente de l'approbation sur plex.tv…",
-        "linked": "Lié en tant que {{account}}"
+        "linked": "Lié en tant que {{account}}",
+        "tokenNotice": "Tindarr conserve le jeton de votre compte plex.tv, pas un jeton limité à ce serveur : c'est le seul moyen de lire la progression de chaque utilisateur et de savoir qui a accès au serveur. Il est chiffré, il ne sert qu'à la bibliothèque, à l'historique et à la liste des utilisateurs, et Tindarr ne gère jamais votre compte Plex."
       }
     },
     "signIn": {
