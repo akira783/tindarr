@@ -30,12 +30,14 @@ change instead of on the weather.
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from tindarr.ports.titles import TitleRef
 from tindarr.swipe.evaluation.costs import BatchCost, CostMeter
 from tindarr.swipe.evaluation.dataset import CatalogEntry, EvalDataset, EvalUser
+from tindarr.swipe.evaluation.popularity import FameSample, PoolWatcher, profile
+from tindarr.swipe.retrieval import CandidatePool
 from tindarr.swipe.strategy import Candidate, PickKind, StrategyContext, StrategyFactory
 from tindarr.swipe.votes import Vote
 
@@ -158,6 +160,10 @@ class BatchOutcome:
     #: denominator of recall, and it is deliberately a property of the **vote set**
     #: rather than of what any strategy proposed, so no strategy can shrink it.
     liked_available: int = 0
+    #: How famous these cards were, and how famous the pool they came from was. Read
+    #: from the pool the retrieval layer actually returned, never from what the strategy
+    #: said about its own picks, and empty when nothing watched the pool.
+    fame: FameSample = field(default_factory=FameSample)
 
     @property
     def usable(self) -> tuple[CardOutcome, ...]:
@@ -170,6 +176,7 @@ async def replay(
     factory: StrategyFactory,
     options: ReplayOptions | None = None,
     meter: CostMeter | None = None,
+    watcher: PoolWatcher | None = None,
 ) -> tuple[BatchOutcome, ...]:
     """Walk every user of ``dataset`` past a fresh strategy and return the scored batches.
 
@@ -181,6 +188,12 @@ async def replay(
     ``meter`` is read — never reset — after each batch, and the difference is what that
     batch is charged. A total that goes backwards means something wrote to the meter, and
     the replay stops rather than publish a cost it cannot stand behind.
+
+    ``watcher`` is the same idea for the candidate pool: when the caller wrapped the
+    strategy's ``PoolSource`` in one, each batch is scored for *fame* as well — how
+    popular its cards were against how popular the pool it chose them from was. Without
+    it that half of the report is simply absent, which is what happens in the tests that
+    hand a strategy no pool at all.
     """
     settings = options or ReplayOptions()
     catalog = dataset.by_ref
@@ -188,7 +201,7 @@ async def replay(
     batches: list[BatchOutcome] = []
     for position, user in enumerate(sorted(dataset.users, key=lambda row: row.id)):
         batches.extend(
-            await _replay_user(dataset, user, position, factory, settings, catalog, tally)
+            await _replay_user(dataset, user, position, factory, settings, catalog, tally, watcher)
         )
     return tuple(batches)
 
@@ -201,6 +214,7 @@ async def _replay_user(  # noqa: PLR0913, PLR0917 - one call site; splitting it 
     options: ReplayOptions,
     catalog: Mapping[TitleRef, CatalogEntry],
     meter: CostMeter,
+    watcher: PoolWatcher | None = None,
 ) -> list[BatchOutcome]:
     votes = user.ordered_votes
     if len(votes) <= options.warm_up:
@@ -255,6 +269,7 @@ async def _replay_user(  # noqa: PLR0913, PLR0917 - one call site; splitting it 
                 f"{getattr(strategy, 'name', 'the strategy')} returned "
                 f"{len(proposed)} cards for a batch of {options.batch_size}"
             )
+        offered = watcher.offered(user.id, index) if watcher is not None else None
         outcomes.append(
             _score(
                 _Scoring(user.id, index, options.batch_size, cost, owned, liked_available),
@@ -262,6 +277,7 @@ async def _replay_user(  # noqa: PLR0913, PLR0917 - one call site; splitting it 
                 context,
                 future,
                 catalog,
+                offered,
             )
         )
         served.update(card.ref for card in proposed)
@@ -290,12 +306,13 @@ class _Scoring:
     liked_available: int
 
 
-def _score(
+def _score(  # noqa: PLR0913, PLR0917 - a batch is scored against six separate facts
     scoring: _Scoring,
     proposed: Sequence[Candidate],
     context: StrategyContext,
     future: Mapping[TitleRef, Vote],
     catalog: Mapping[TitleRef, CatalogEntry],
+    offered: CandidatePool | None = None,
 ) -> BatchOutcome:
     voted = context.voted
     seen_in_batch: set[TitleRef] = set()
@@ -325,6 +342,9 @@ def _score(
         distinct_genres=spread.distinct_genres,
         franchise_repeat=spread.franchise_repeat,
         liked_available=scoring.liked_available,
+        # Usable cards only: a duplicate or a title they already voted on is waste, and
+        # waste has no taste to profile.
+        fame=profile(offered, [card.ref for card in cards if card.usable]),
     )
 
 

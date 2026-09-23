@@ -61,6 +61,12 @@ is not a hit and not a miss. It is counted as the gap in coverage that it is.
 | `skip_rate` | lower | votes | measured | judged cards the user had no opinion on |
 | `genre_diversity` | higher | catalogue | measured | distinct genres per card the batch was asked for |
 | `franchise_repeat_rate` | lower | catalogue | measured | batches serving the same franchise twice |
+| `popularity_median` | — | pool | measured | TMDb popularity of the proposed cards, middle value |
+| `popularity_p75` | — | pool | measured | the same, at the famous end |
+| `pool_popularity_median` | — | pool | measured | the same, over the pool they were chosen from |
+| `vote_count_median` | — | pool | measured | how many people ever voted on a proposed card |
+| `pool_vote_count_median` | — | pool | measured | the same, over the pool |
+| `above_floor` | — | pool | measured | proposed cards at or above the band's popularity floor |
 | `tmdb_calls_per_batch` | lower | pool-free | measured | metadata calls a batch cost |
 | `llm_calls_per_batch` | lower | pool-free | measured | model calls a batch cost |
 | `llm_tokens_per_card` | lower | pool-free | **estimated** | tokens per usable card |
@@ -87,6 +93,11 @@ So each metric declares what it needs:
 - **`votes`** — divides by the proposed cards the fixture voted on.
 - **`catalogue`** — needs the fixture to *describe* the proposed cards; with an open
   pool it usually cannot.
+- **`pool`** — needs **no vote at all**. TMDb says how popular a title is and how many
+  people ever voted on it for every candidate, whether or not anybody in the fixture
+  ever saw it, so these survive a coverage of two per cent. They are read from the pool
+  the retrieval layer actually returned — a ``PoolWatcher`` records it on the way past —
+  and never from what a strategy says about its own picks.
 
 With fewer than **twelve cards** behind it, a number is printed with a `?`, named in
 the report's notes, and **not compared with another strategy's**. A count rather than a
@@ -148,6 +159,32 @@ cost axis for cards that cannot be rendered. `skip_rate` divides by the cards th
 has an opinion on rather than by every card that was not waste, so padding a batch with
 titles nobody voted on cannot drive it to zero; `genre_diversity` divides by the cards the
 batch was *asked* for, so three cards cannot out-diversify ten.
+
+### The popularity profile: what a strategy took out of the pool
+
+Six rows answer the question ADR 0013 is actually about — *is this serving the wall of
+blockbusters again?* — without needing a single vote. They compare two distributions
+that always exist: the cards a strategy proposed, and **the pool it chose them from**.
+A strategy that takes the famous end of its own pool has a higher median than the pool;
+one that spreads evenly matches it. That is what tells a **ranking** bias apart from a
+**retrieval** one, and it is the only diagnostic here that an open pool does not dilute.
+
+Two currencies, deliberately, because they say different things. TMDb's `popularity` is
+a rolling measure of *this week's* activity; the vote count is how many people ever had
+an opinion, which is much closer to "they have probably already seen it" — the very
+reason the novelty band's own window is expressed in votes. A strategy can be low on one
+and high on the other, and on the real vote set exactly that happened.
+
+`above_floor` is the share of proposed cards at or above the novelty band's adaptive
+popularity floor. It is **100 % for every strategy on both vote sets**, and that is the
+finding rather than a reassurance: the floor is applied to the pool, so every card has
+already passed it and no strategy can ever be measured against it. A floor a strategy
+cannot fail is a floor that cannot be the lever.
+
+None of the six is graded. A popularity that is too low is as much a defect as one that
+is too high — the floor exists because a deck of listings and home videos is not a deck
+— so there is no direction to fail a build on, and a diagnostic that becomes a target
+stops diagnosing. They are recorded in the baselines, so a diff shows when they move.
 
 **Three metrics are printed and not graded**, and the reason matters. `coverage` and
 `catalogue_coverage` fall when a strategy reaches past the recorded history, which is

@@ -43,6 +43,7 @@ from tindarr.swipe.evaluation.metrics import (
     EvaluationReport,
     summarize,
 )
+from tindarr.swipe.evaluation.popularity import FameSample, PoolWatcher
 from tindarr.swipe.evaluation.replay import (
     BatchOutcome,
     CardOutcome,
@@ -69,7 +70,9 @@ __all__ = [
     "EvalDataset",
     "EvalUser",
     "EvaluationReport",
+    "FameSample",
     "FixtureVote",
+    "PoolWatcher",
     "Regression",
     "ReplayError",
     "ReplayOptions",
@@ -83,12 +86,13 @@ __all__ = [
 ]
 
 
-async def evaluate(
+async def evaluate(  # noqa: PLR0913, PLR0917 - six inputs, each one a whole concern
     dataset: EvalDataset,
     factory: StrategyFactory,
     strategy_name: str,
     meter: CostMeter,
     options: ReplayOptions | None = None,
+    watcher: PoolWatcher | None = None,
 ) -> EvaluationReport:
     """Replay ``dataset`` past the strategy ``factory`` builds, and return the report.
 
@@ -96,7 +100,11 @@ async def evaluate(
     ports the strategy will reach, and a meter this function created would count nothing.
     Each batch is charged the difference between two readings of it, so what the report
     prints does not depend on the meter still holding the right number at the end.
+
+    ``watcher`` is the same arrangement for the candidate pool: the caller is the one who
+    wrapped the strategy's ``PoolSource``, and without it the popularity profile is
+    simply absent from the report rather than guessed at.
     """
     settings = options or ReplayOptions()
-    batches = await replay(dataset, factory, settings, meter)
+    batches = await replay(dataset, factory, settings, meter, watcher)
     return summarize(dataset.name, dataset.source, strategy_name, batches, settings)

@@ -150,6 +150,12 @@ class CandidatePool:
     #: a model without its genres is a title string and a year, which is nothing to
     #: match a taste against.
     genres: Mapping[int, str] = field(default_factory=dict[int, str])
+    #: The novelty band this pool was built under: ADR 0013's adaptive popularity floor
+    #: and the fame window every candidate here already passed. Carried on the pool
+    #: rather than recomputed by whoever needs it, because two places deciding what
+    #: "balanced" means is how a filter and a prompt start disagreeing. ``None`` for a
+    #: pool built by hand, which is what a strategy's own tests hand it.
+    band: Band | None = None
 
     def genre_names(self, title: Title) -> tuple[str, ...]:
         """Return the genres of one candidate, in TMDb's own words and order."""
@@ -239,6 +245,7 @@ class Retrieval:
             titles=tuple(title for title, _ in ranked),
             origin=origin,
             genres=await self._genre_names(),
+            band=band,
         )
 
     async def _genre_names(self) -> Mapping[int, str]:

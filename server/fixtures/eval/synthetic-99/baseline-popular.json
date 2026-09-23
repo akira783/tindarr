@@ -8,6 +8,7 @@
   },
   "dataset": "synthetic-99",
   "metrics": {
+    "above_floor": 1.0,
     "agreement": 0.857143,
     "already_seen_rate": 0.857143,
     "catalogue_coverage": 1.0,
@@ -23,10 +24,15 @@
     "llm_calls_per_batch": 0.0,
     "llm_tokens_per_card": 0.0,
     "new_like_rate": 0.333333,
+    "pool_popularity_median": 52.372,
+    "pool_vote_count_median": 4498.0,
+    "popularity_median": 79.386,
+    "popularity_p75": 90.085,
     "seen_per_batch": 2.0,
     "skip_rate": 0.045455,
     "tmdb_calls_per_batch": 19.444444,
     "usable_per_batch": 10.0,
+    "vote_count_median": 3890.0,
     "waste_rate": 0.0
   },
   "options": {

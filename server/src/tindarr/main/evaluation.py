@@ -45,6 +45,7 @@ from tindarr.swipe.evaluation import (
     DatasetError,
     EvalDataset,
     EvaluationReport,
+    PoolWatcher,
     Regression,
     ReplayOptions,
     check,
@@ -58,7 +59,7 @@ from tindarr.swipe.evaluation.gate import FLOOR_STRATEGIES
 from tindarr.swipe.evaluation.importing import ImportSummary, VoteImportError, import_votes
 from tindarr.swipe.evaluation.synthetic import SYNTHETIC_NAME, build_synthetic_dataset
 from tindarr.swipe.hybrid import HybridStrategy
-from tindarr.swipe.retrieval import NOVELTY_BANDS, POOL_SIZE, Retrieval
+from tindarr.swipe.retrieval import NOVELTY_BANDS, POOL_SIZE, PoolSource, Retrieval
 from tindarr.swipe.strategy import Strategy
 
 __all__ = [
@@ -137,7 +138,7 @@ class Parts:
     a factory signature nobody can implement.
     """
 
-    retrieval: Retrieval
+    retrieval: PoolSource
     metadata: Metadata
     #: ``None`` for a strategy that calls no model. A strategy that needs one says so in
     #: its spec, and the harness refuses to build it without one rather than handing it
@@ -288,14 +289,20 @@ async def _replay(
     meter = CostMeter()
     metadata = CountingMetadata(TmdbMetadata(ports.tmdb_key, transport=ports.transport), meter)
     counted = CountingLlmProvider(ports.llm, meter) if ports.llm is not None else None
+    # One watcher for the whole run, and one retrieval per user behind it. It only
+    # *records* what retrieval returned, so it cannot carry anything into a strategy;
+    # what it buys is a popularity profile read from the pool rather than from what a
+    # strategy says about its own picks.
+    watcher = PoolWatcher()
 
     def build() -> Strategy:
         # A retrieval per user, like a strategy: its cache holds nothing private, but an
         # object two people share is an object that can carry one person's state into
         # the other's batch, and the replay's guarantees are not worth that.
-        return spec.build(Parts(Retrieval(metadata, POOL_SIZE), metadata, counted))
+        pool = watcher.watching(Retrieval(metadata, POOL_SIZE))
+        return spec.build(Parts(pool, metadata, counted))
 
-    return await evaluate(dataset, build, spec.name, meter, options)
+    return await evaluate(dataset, build, spec.name, meter, options, watcher)
 
 
 def _tmdb_transport(

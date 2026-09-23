@@ -8,6 +8,7 @@
   },
   "dataset": "akira-99",
   "metrics": {
+    "above_floor": 1.0,
     "agreement": 1.0,
     "already_seen_rate": 1.0,
     "catalogue_coverage": 0.022222,
@@ -23,10 +24,15 @@
     "llm_calls_per_batch": 0.0,
     "llm_tokens_per_card": 0.0,
     "new_like_rate": null,
+    "pool_popularity_median": 51.1393,
+    "pool_vote_count_median": 2799.0,
+    "popularity_median": 183.5472,
+    "popularity_p75": 276.6365,
     "seen_per_batch": 0.222222,
     "skip_rate": 0.0,
     "tmdb_calls_per_batch": 17.222222,
     "usable_per_batch": 10.0,
+    "vote_count_median": 2153.0,
     "waste_rate": 0.0
   },
   "options": {

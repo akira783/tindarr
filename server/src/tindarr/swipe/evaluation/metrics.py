@@ -24,6 +24,7 @@ from dataclasses import asdict, dataclass
 from typing import Final, Literal
 
 from tindarr.swipe.evaluation.costs import BatchCost
+from tindarr.swipe.evaluation.popularity import spread
 from tindarr.swipe.evaluation.replay import BatchOutcome, CardStatus, ReplayOptions
 
 __all__ = [
@@ -50,6 +51,12 @@ type Kind = Literal["measured", "estimated"]
 #: ``catalogue`` by the proposed cards it can describe — both collapse the moment a
 #: strategy retrieves from the whole of TMDb instead of from the fixture's own titles.
 #:
+#: ``pool`` is the one that needs no vote at all: TMDb says how popular every candidate
+#: is whether or not anybody in the fixture ever saw it, so the popularity profile of
+#: what a strategy proposed — read against the pool it chose from — survives a coverage
+#: of two per cent. It is the answer to "is this serving the wall of blockbusters again?"
+#: when the votes can no longer say (``tindarr.swipe.evaluation.popularity``).
+#:
 #: ``bound`` is the awkward one, and it is named rather than hidden. A count of faults —
 #: cards the user had already watched, cards they turned down — can only count the ones
 #: the fixture was asked about, so it is a **lower bound**: every fault it reports is
@@ -57,7 +64,7 @@ type Kind = Literal["measured", "estimated"]
 #: to compare between two runs of different depth, because a strategy proposing nothing
 #: the fixture recognises reports no faults *and* no recall. It is compared under the
 #: same condition as a rate, and read next to ``liked_recall``, never alone.
-type Basis = Literal["pool-free", "bound", "votes", "catalogue"]
+type Basis = Literal["pool-free", "bound", "votes", "catalogue", "pool"]
 
 #: Read this as the harness's opinion, stated once.
 #:
@@ -69,6 +76,11 @@ type Basis = Literal["pool-free", "bound", "votes", "catalogue"]
 #: people have already watched, will *lower* it. Grading either would make the gate
 #: punish the improvement it exists to protect. The denominators are guarded by the
 #: counts instead (``tindarr.swipe.evaluation.gate``).
+#:
+#: The six **popularity** rows are ``flat`` for a third reason: a popularity that is too
+#: low is as much a defect as one that is too high — the floor exists because a deck of
+#: listings and home videos is not a deck — so there is no direction to fail a build on.
+#: They are a diagnostic, and a diagnostic that becomes a target stops diagnosing.
 DIRECTIONS: Final[Mapping[str, Direction]] = {
     "fill_rate": "higher",
     "usable_per_batch": "higher",
@@ -87,6 +99,12 @@ DIRECTIONS: Final[Mapping[str, Direction]] = {
     "skip_rate": "lower",
     "genre_diversity": "higher",
     "franchise_repeat_rate": "lower",
+    "popularity_median": "flat",
+    "popularity_p75": "flat",
+    "pool_popularity_median": "flat",
+    "vote_count_median": "flat",
+    "pool_vote_count_median": "flat",
+    "above_floor": "flat",
     "tmdb_calls_per_batch": "lower",
     "llm_calls_per_batch": "lower",
     "llm_tokens_per_card": "lower",
@@ -136,6 +154,12 @@ BASIS: Final[Mapping[str, Basis]] = {
     "skip_rate": "votes",
     "genre_diversity": "catalogue",
     "franchise_repeat_rate": "catalogue",
+    "popularity_median": "pool",
+    "popularity_p75": "pool",
+    "pool_popularity_median": "pool",
+    "vote_count_median": "pool",
+    "pool_vote_count_median": "pool",
+    "above_floor": "pool",
     "tmdb_calls_per_batch": "pool-free",
     "llm_calls_per_batch": "pool-free",
     "llm_tokens_per_card": "pool-free",
@@ -216,6 +240,12 @@ MEANINGS: Final[Mapping[str, str]] = {
     "skip_rate": "judged cards the user had no opinion on at all",
     "genre_diversity": "distinct genres per card a batch was asked for",
     "franchise_repeat_rate": "batches serving the same franchise twice",
+    "popularity_median": "TMDb popularity of the proposed cards, middle value",
+    "popularity_p75": "the same, at the famous end: three cards in four are below it",
+    "pool_popularity_median": "the same middle value over the pool they were chosen from",
+    "vote_count_median": "how many people ever voted on a proposed card, middle value",
+    "pool_vote_count_median": "the same over the pool: the fame a strategy was offered",
+    "above_floor": "proposed cards at or above the novelty band's popularity floor",
     "tmdb_calls_per_batch": "metadata calls a batch cost",
     "llm_calls_per_batch": "model calls a batch cost",
     "llm_tokens_per_card": "tokens per usable card",
@@ -236,6 +266,7 @@ _PERCENT_METRICS: Final[frozenset[str]] = frozenset(
         "agreement",
         "skip_rate",
         "franchise_repeat_rate",
+        "above_floor",
     }
 )
 #: Below this, the rates rest on too few scored cards to argue with.
@@ -273,6 +304,9 @@ class Counts:
     #: Scored cards that were new to the user: the denominator of ``new_like_rate``.
     new_votes: int = 0
     catalogued: int = 0
+    #: Proposed cards the harness could place in the pool they came from, which is what
+    #: the popularity profile rests on. Zero when nothing watched the pool.
+    profiled: int = 0
     tmdb_calls: int = 0
     llm_calls: int = 0
     llm_input_tokens: int = 0
@@ -419,6 +453,7 @@ def _counts(batches: Sequence[BatchOutcome]) -> Counts:
         likes_in_top=likes_in_top,
         new_votes=likes + dislikes,
         catalogued=catalogued,
+        profiled=sum(len(batch.fame.cards) for batch in batches),
         complete=complete,
         tmdb_calls=spent.metadata_calls,
         llm_calls=spent.llm_calls,
@@ -474,6 +509,9 @@ def _metrics(counts: Counts, batches: Sequence[BatchOutcome]) -> Mapping[str, fl
         "skip_rate": _ratio(counts.skipped, counts.scored + counts.skipped),
         "genre_diversity": round(sum(spreads) / len(spreads), _ROUNDING) if spreads else None,
         "franchise_repeat_rate": _ratio(sum(judged), len(judged)),
+        # Needs no vote: TMDb describes every candidate, and the pool is recorded as
+        # the retrieval layer returned it (``tindarr.swipe.evaluation.popularity``).
+        **spread([batch.fame for batch in batches]),
         "tmdb_calls_per_batch": _ratio(counts.tmdb_calls, counts.batches),
         "llm_calls_per_batch": _ratio(counts.llm_calls, counts.batches),
         "llm_tokens_per_card": _ratio(
@@ -567,6 +605,8 @@ def render(report: EvaluationReport) -> str:
         f"found {counts.likes} of the {counts.liked_available} titles these users liked "
         f"({counts.likes_in_top} in the first {TOP_RANKS} cards of a batch); "
         f"by batch: {', '.join(str(found) for found in report.liked_by_batch) or 'none'}",
+        f"fame {counts.profiled} of the {counts.usable} usable cards were placed in the "
+        "pool they were chosen from, which is what the popularity rows rest on",
         f"cost {counts.tmdb_calls} metadata calls, {counts.llm_calls} model calls, "
         f"{counts.llm_input_tokens + counts.llm_output_tokens} tokens",
         "",
