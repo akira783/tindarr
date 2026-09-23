@@ -1,0 +1,48 @@
+{
+  "counts": {
+    "batches": 9,
+    "scored": 58,
+    "usable": 58
+  },
+  "dataset": "akira-99",
+  "metrics": {
+    "agreement": 0.827586,
+    "already_seen_rate": 0.431034,
+    "complete_rate": 1.0,
+    "coverage": 1.0,
+    "fill_rate": 0.644444,
+    "franchise_repeat_rate": 0.0,
+    "genre_diversity": 1.1,
+    "like_rate": 0.413793,
+    "llm_calls_per_batch": 0.0,
+    "llm_tokens_per_card": 0.0,
+    "new_like_rate": 0.727273,
+    "skip_rate": 0.0,
+    "tmdb_calls_per_batch": 6.444444,
+    "usable_per_batch": 6.444444,
+    "waste_rate": 0.0
+  },
+  "options": {
+    "batch_size": 10,
+    "max_batches": null,
+    "seed": 1,
+    "warm_up": 10
+  },
+  "strategy": "random",
+  "tolerances": {
+    "already_seen_rate": 0.02,
+    "complete_rate": 0.02,
+    "fill_rate": 0.02,
+    "franchise_repeat_rate": 0.0,
+    "genre_diversity": 0.05,
+    "like_rate": 0.02,
+    "llm_calls_per_batch": 0.0,
+    "llm_tokens_per_card": 0.0,
+    "new_like_rate": 0.02,
+    "skip_rate": 0.0,
+    "tmdb_calls_per_batch": 1.0,
+    "usable_per_batch": 0.25,
+    "waste_rate": 0.0
+  },
+  "version": 1
+}

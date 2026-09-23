@@ -46,29 +46,44 @@ from tindarr.swipe.evaluation import (
 from tindarr.swipe.evaluation.dataset import CatalogEntry
 from tindarr.swipe.evaluation.gate import FLOOR_STRATEGIES
 from tindarr.swipe.evaluation.importing import ImportSummary, VoteImportError, import_votes
-from tindarr.swipe.evaluation.synthetic import build_synthetic_dataset
+from tindarr.swipe.evaluation.synthetic import SYNTHETIC_NAME, build_synthetic_dataset
 from tindarr.swipe.strategy import Strategy
 
 __all__ = [
+    "AUTHOR_FIXTURES",
+    "PRIVATE_FIXTURES",
     "STRATEGIES",
+    "SYNTHETIC_FIXTURES",
     "EvalPaths",
     "build_cassette",
     "catalog_service",
     "import_fixture",
     "private_path",
+    "record_cassette",
     "run_evaluation",
     "write_fixtures",
 ]
 
 logger = logging.getLogger(__name__)
 
-#: Where the committed fixture lives, relative to ``server/``.
-DEFAULT_FIXTURES: Final = Path("fixtures/eval")
+#: Where the committed vote sets live, relative to ``server/``. One directory per vote
+#: set, named after the set it holds — which is the name printed at the top of every
+#: report, so a number on a terminal and a directory in a diff cannot be confused.
+FIXTURES_ROOT: Final = Path("fixtures/eval")
+#: The author's own 99 votes, published with their consent. The set ADR 0013 was
+#: measured on, and what ``tindarr eval run`` walks when nobody says otherwise.
+AUTHOR_FIXTURES: Final = FIXTURES_ROOT / "akira-99"
+#: The generated vote set. Invented from a seed, so it proves the harness computes what
+#: it claims to and nothing about what a real person would enjoy.
+SYNTHETIC_FIXTURES: Final = FIXTURES_ROOT / "synthetic-99"
+DEFAULT_FIXTURES: Final = AUTHOR_FIXTURES
 #: The environment variable a live run reads its TMDb key from. Deliberately not the
 #: connector's stored key: a development command does not open the instance's database.
 LIVE_KEY_VARIABLE: Final = "TINDARR_EVAL_TMDB_API_KEY"
 #: The only directory name an imported, private vote set may be written into.
 PRIVATE_DIRECTORY: Final = "private"
+#: Where ``eval import`` writes by default. ``.gitignore`` keeps it out of the repository.
+PRIVATE_FIXTURES: Final = FIXTURES_ROOT / PRIVATE_DIRECTORY
 #: ``/3/<kind>/<id>``, the only shape the fixture service answers.
 _DETAILS_PARTS: Final = 2
 
@@ -244,6 +259,11 @@ def _confirm_live(
     out: TextIO,
 ) -> None:
     out.write(live_plan(spec, dataset, options))
+    _answered(confirmed=confirmed)
+
+
+def _answered(*, confirmed: bool) -> None:
+    """Wait for a ``yes`` at the terminal, unless ``--yes`` already said it."""
     if confirmed:
         return
     if not sys.stdin.isatty():  # pragma: no cover - only reached from a terminal
@@ -311,7 +331,8 @@ def write_baseline(paths: EvalPaths, report: EvaluationReport, out: TextIO) -> N
 
 
 def write_fixtures(paths: EvalPaths, seed: int, out: TextIO) -> EvalDataset:
-    """Regenerate the committed vote set and the cassette that goes with it."""
+    """Regenerate the generated vote set and the cassette that goes with it."""
+    _only_the_generated_set(paths)
     dataset = build_synthetic_dataset(seed)
     dataset.write(paths.votes)
     cassette = build_cassette(dataset)
@@ -321,6 +342,27 @@ def write_fixtures(paths: EvalPaths, seed: int, out: TextIO) -> EvalDataset:
         f"{len(dataset.catalog)} titles\n{paths.cassette}: {len(cassette)} recorded answers\n"
     )
     return dataset
+
+
+def _only_the_generated_set(paths: EvalPaths) -> None:
+    """Refuse to rebuild on top of a vote set that no seed can produce again.
+
+    The vote sets are sibling directories holding the same file names, and one of them
+    is somebody's real votes. A mistyped ``--fixtures`` would replace them with invented
+    titles, and the diff would look like any other regeneration.
+    """
+    if not paths.votes.is_file():
+        return
+    try:
+        existing = load_dataset(paths.votes)
+    except DatasetError:
+        return
+    if existing.name != SYNTHETIC_NAME:
+        raise EvalError(
+            f"{paths.votes} holds the '{existing.name}' vote set, which is not generated. "
+            f"'eval fixtures' rebuilds '{SYNTHETIC_NAME}' and nothing else: point "
+            f"--fixtures at {SYNTHETIC_FIXTURES}."
+        )
 
 
 def build_cassette(dataset: EvalDataset) -> Cassette:
@@ -341,6 +383,46 @@ def build_cassette(dataset: EvalDataset) -> Cassette:
         return transport.cassette
 
     return asyncio.run(record())
+
+
+async def record_cassette(paths: EvalPaths, *, confirmed: bool, out: TextIO) -> Cassette:
+    """Record, from the real TMDb, the answers an offline replay of this vote set needs.
+
+    ``eval fixtures`` rebuilds the generated set's cassette from its own catalogue,
+    because that catalogue is invented and TMDb has never heard of it. A vote set of
+    real titles has no such source: the answers come from TMDb once, and are then
+    committed.
+
+    The **whole catalogue** is recorded, not whatever one strategy happened to ask for.
+    That way the file is a function of the vote set rather than of the run that produced
+    it, and the next strategy does not need another live run to be measured.
+    """
+    dataset = _dataset(paths.votes)
+    out.write(_record_plan(dataset))
+    _answered(confirmed=confirmed)
+    api_key = _live_key()
+    recorder = RecordingTransport(httpx2.AsyncHTTPTransport(), provider="tmdb")
+    tmdb = TmdbMetadata(api_key, transport=recorder)
+    try:
+        for entry in sorted(dataset.catalog, key=lambda row: row.ref):
+            await tmdb.details(entry.ref, dataset.language)
+    finally:
+        await recorder.aclose()
+    cassette = recorder.cassette
+    cassette.write(paths.cassette)
+    out.write(f"{paths.cassette}: {len(cassette)} recorded answers\n")
+    return cassette
+
+
+def _record_plan(dataset: EvalDataset) -> str:
+    return (
+        "A live recording reaches real services. This one would call:\n"
+        f"  TMDb        {len(dataset.catalog)} titles of '{dataset.name}', in "
+        f"{dataset.language} (a title with no translated overview costs a second call "
+        "for the English one). TMDb's API is free for personal use; its rate limits and "
+        "caching terms apply.\n"
+        "  AI provider none.\n"
+    )
 
 
 def catalog_service(dataset: EvalDataset) -> httpx2.MockTransport:

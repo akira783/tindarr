@@ -101,10 +101,18 @@ jobs:
       # Offline: the adapters talk through the recorded cassette, and a request it does
       # not hold raises rather than reaching TMDb. --check fails the build when a number
       # slid past the tolerance in the committed baseline (docs/evaluation.md).
-      - name: Replay the committed votes and hold the numbers to their baselines
+      #
+      # Both committed vote sets, each against its own baselines. The author's real 99
+      # votes are what ADR 0013 was measured on; the generated set is what says the
+      # harness computes what it claims to. A gate on one of them is half a gate.
+      - name: Replay the author's votes (akira-99) against their baselines
         run: |
-          uv run tindarr eval run --strategy popular --check
-          uv run tindarr eval run --strategy random --check
+          uv run tindarr eval run --fixtures fixtures/eval/akira-99 --strategy popular --check
+          uv run tindarr eval run --fixtures fixtures/eval/akira-99 --strategy random --check
+      - name: Replay the generated votes (synthetic-99) against their baselines
+        run: |
+          uv run tindarr eval run --fixtures fixtures/eval/synthetic-99 --strategy popular --check
+          uv run tindarr eval run --fixtures fixtures/eval/synthetic-99 --strategy random --check
 
   audit:
     name: Dependency audit

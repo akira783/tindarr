@@ -10,10 +10,14 @@ is wired into the product.
 
 ```bash
 cd server
-uv run tindarr eval run                      # the committed vote set, the "popular" floor
+uv run tindarr eval run                      # the author's 99 votes, the "popular" floor
 uv run tindarr eval run --strategy random
 uv run tindarr eval run --check              # what CI does: fail when the numbers slid
+uv run tindarr eval run --fixtures fixtures/eval/synthetic-99 --check   # the other set
 ```
+
+Two vote sets are committed and both are gated in CI. Every table says which one it was
+measured on, on its second line; a number quoted without that line means nothing.
 
 ## What it measures
 
@@ -83,20 +87,23 @@ Every rate is printed with its denominator, and the gate reads the denominators 
   one fixed history; it does not simulate a person.
 - **A vote cast later is used as the opinion at this point.** Tastes move. Over a few
   months of votes this is a small lie; over years it would not be.
-- **Coverage is low on a fixture with a large catalogue**, around 20 % on the committed
-  one. The rates rest on tens of cards, not thousands. The report says so in its own
-  notes whenever coverage is under half.
+- **The rates rest on tens of cards, not thousands.** Coverage is around 20 % on
+  `synthetic-99`, whose catalogue is larger than its vote history; the report says so in
+  its own notes whenever coverage is under half. On `akira-99` it is 100 %, which is not
+  a better fixture but a narrower one — see the next point.
+- **The candidate pool is narrower than life.** `dataset.pool` is the fixture's own
+  catalogue, and on a vote set built from real votes that catalogue holds exactly the
+  titles somebody voted on. A strategy drawing from it is picking from a shortlist of
+  scoreable titles, which flatters coverage and flatters the floors: on `akira-99`,
+  `popular` scores *fewer* already-seen cards than the engine that produced the votes,
+  because its pool is 99 titles rather than all of TMDb. That is an artefact, not a
+  discovery. Lot 4b's retrieval layer is what fixes it: the pool should come from TMDb.
 - **A fixture's taste profile is static.** In production it is rewritten every ten votes,
   so it only ever knows the past; a fixture carries one profile for the whole history. In
   a *generated* fixture it would name the very genres the later votes were drawn from —
-  the answer key — so the committed vote set carries none at all and the gate is
-  profile-blind. An imported one keeps its own, written by a real engine from real votes,
-  which carries no such leak.
-- **On an imported vote set, the candidate pool is narrower than life.** `dataset.pool` is
-  the fixture's catalogue, and an imported catalogue holds exactly the titles somebody
-  voted on. A strategy drawing from it is choosing from a shortlist of scoreable titles,
-  which flatters coverage. Lot 4b's retrieval layer is what fixes this: the pool should
-  come from TMDb, not from the fixture.
+  the answer key — so neither committed vote set carries one at all and the gate is
+  profile-blind. An imported one may keep its own, written by a real engine from real
+  votes, which carries no such leak.
 - **It says nothing about prose.** Whether a rationale reads well, whether a poster
   loads, whether the deck feels good in the hand: none of that is here.
 - **It cannot prove a strategy is good.** It can show that one is worse than another on
@@ -113,6 +120,8 @@ scored 20 (1 like, 2 dislike, 16 seen+liked, 1 seen+disliked), skipped 1, no vot
 cost 90 metadata calls, 0 model calls, 0 tokens
 ```
 
+(that one is a `synthetic-99` run: three users, so three vote histories.)
+
 Read the counts first. `scored` is the denominator of every rate in the table above it;
 if it is small, the rates are indicative and nothing more. `no vote` is the coverage gap.
 `wasted` should be zero for any strategy that reads its own context.
@@ -120,38 +129,87 @@ if it is small, the rates are indicative and nothing more. `no vote` is the cove
 `--json <path>` writes the same report as a JSON document, sorted and stable, for a diff
 or a dashboard.
 
-## The fixtures
+## The vote sets
 
-`server/fixtures/eval/` holds three committed files:
+Two of them, each in its own directory under `server/fixtures/eval/`, named after the
+set it holds — the same name the report prints on its second line. Each directory holds
+the same four files:
 
 - `votes.json` — the vote set: a catalogue of titles and one vote history per user;
 - `tmdb.json` — a **cassette**, the TMDb answers an offline run replays;
 - `baseline-popular.json`, `baseline-random.json` — the numbers CI holds a run to.
 
-The committed vote set is **generated**, and everything in it is invented: the titles do
-not exist and the TMDb ids are in a range (from 900001) that TMDb does not use. Real
-votes are a list of what somebody watched and what they thought of it, which is not
-something a public repository should carry.
+`--fixtures` picks one, and both are gated in CI against their own committed baselines.
+A baseline records the vote set it was measured on, so the gate refuses to hold a run of
+one set to the numbers of the other.
 
-What is *not* invented is the shape. The distribution is the one ADR 0013 was measured
-on — 99 opinion votes, 47 % of them "I had already seen this", 63 % of the genuinely new
-ones liked — plus six skips, which carry no opinion and must change no rate. A test
-replays the recorded cards back through the harness and checks that both numbers come
-out again; anything else means the scoring is wrong.
+### `akira-99` — one person's real votes
+
+`server/fixtures/eval/akira-99/` holds **99 real votes, cast by Tindarr's author in the
+SuggestArr fork's swipe deck and published here with their consent.** This is the vote
+set ADR 0013 was written from: 47 % of the opinions are "I had already seen this", and
+63 % of the genuinely new titles were liked. A test replays the recorded cards back
+through the harness and checks that both numbers come out again. Anything else means the
+scoring is wrong, and the fix would then be in the scoring — never in the expectation.
+
+Published is the minimum a replay needs: the TMDb id, the media type, the verdict, the
+rank of the vote in the history, and which kind of pick produced the card. Not published:
+the account, every timestamp, the taste profile the engine had written, the household's
+library, and every word the model generated. The catalogue beside the votes — titles,
+years, genres, franchises, popularity — is TMDb's own data about public films and series,
+and says nothing about a person.
+
+**What one person's votes can and cannot support.** This is one household, one taste, a
+few evenings of swiping, 99 opinions. The rates rest on tens of cards: enough to catch a
+mis-scoring harness and a strategy that is obviously worse, not enough to separate two
+good ones, and no evidence at all about anybody else's taste. The bias is not only
+statistical either — these are the votes of the person writing the recommender, which is
+the one taste a recommender is least likely to get wrong by accident. **A second vote
+set, from somebody else, would do more for these numbers than any amount of tuning.**
+
+Its cassette was recorded once, from the real TMDb:
+
+```bash
+TINDARR_EVAL_TMDB_API_KEY=… uv run tindarr eval record --fixtures fixtures/eval/akira-99
+```
+
+That says what it is about to call and waits for an answer, like every live path here. It
+records the **whole catalogue** rather than whatever one strategy happened to ask for, so
+the file is a function of the vote set and the next strategy needs no live run of its own.
+Nothing can regenerate it, so a test holds it to the only property that still means
+something: it answers, with a 200, for every title an offline replay can be asked about.
+
+### `synthetic-99` — the generated set
+
+`server/fixtures/eval/synthetic-99/` is invented, and so is everything in it: the titles
+do not exist and the TMDb ids are in a range (from 900001) that TMDb does not use.
+
+It is kept, because it does two things the real set cannot. It is **reproducible** —
+`eval fixtures` rebuilds it from a seed and a test holds the committed bytes to what the
+generator produces — so the repository is not left with fixtures nobody can rebuild. And
+it carries **three users and six skips**, neither of which the real set has, which is how
+the per-user reveal schedule, and the rule that a skip must change no rate, stay tested.
 
 ```bash
 uv run tindarr eval fixtures      # rebuild votes.json and tmdb.json from the seed
 ```
 
-A test holds the committed files to what the generator produces. A fixture nobody can
-regenerate is a fixture nobody can review.
+It was given the same distribution as the real set — 99 opinions, 47 % already seen, 63 %
+of the new ones liked — so the same sanity check runs on both. **But a generated fixture
+cannot surprise anybody.** It has exactly the distribution it was handed. It says whether
+the harness computes what it claims to; it says nothing about whether a strategy will
+please a real person.
 
-**A generated fixture cannot surprise anybody.** It has the distribution it was given, so
-it says whether the harness computes what it claims to; it does not say whether a strategy
-will please a real person. For that, point the harness at a real instance:
+`eval fixtures` refuses to write into a directory holding a vote set it did not generate:
+the two directories carry the same file names, and only one of them can be rebuilt.
+
+### A third: your own
+
+The most useful vote set is the one on your instance:
 
 ```bash
 uv run tindarr eval import --from /path/to/suggestarr.db      # or Tindarr's own database
+uv run tindarr eval record --fixtures fixtures/eval/private
 uv run tindarr eval run --fixtures fixtures/eval/private
 ```
 
@@ -159,13 +217,8 @@ The import reads the database **read-only**, keeps the TMDb id, the media type, 
 and the order, and drops the account ids (users become `user-1`, `user-2`…), the model's
 rationales, poster paths and every timestamp. It refuses to write anywhere but a
 directory called `private/`, which `.gitignore` keeps out of the repository. An imported
-vote set is somebody's viewing history; it stays on their machine.
-
-**A second, larger vote set would make all of this more robust.** One history of a
-hundred votes is enough to catch a mis-scoring harness and a strategy that is obviously
-worse; it is not enough to separate two good strategies. Anybody running Tindarr can
-produce one with `eval import`, and the numbers from several private runs are worth more
-than the committed one.
+vote set is somebody's viewing history: publishing one is *their* decision, and the
+harness never makes it for them.
 
 ## No paid calls
 
@@ -174,7 +227,8 @@ stand-in — talks through the recorded cassette, and a request the cassette doe
 raises `CassetteMissError` instead of falling through to the internet. An offline run
 cannot quietly become a paid one.
 
-`--live` is the only way out, and it says what it is about to do first:
+`--live` on a run, and `eval record` on a whole vote set, are the only ways out, and both
+say what they are about to do first:
 
 ```
 A live run reaches real services. This one would call:
@@ -183,19 +237,20 @@ A live run reaches real services. This one would call:
   AI provider none: this strategy calls no model, so nothing is billed.
 ```
 
-It then waits for an answer at the terminal, or for `--yes`. A live run reads its TMDb
-key from `TINDARR_EVAL_TMDB_API_KEY` — never from the instance's database — and
-`--record <path>` writes what came back as a new cassette. The credential is stripped
+It then waits for an answer at the terminal, or for `--yes`. Both read the TMDb key from
+`TINDARR_EVAL_TMDB_API_KEY` — never from the instance's database. On a run, `--record
+<path>` writes what came back as a new cassette; `eval record` writes the whole
+catalogue's answers straight into the fixture directory. The credential is stripped
 before a request becomes a cassette key, so a recording is safe to keep and survives a
 key rotation.
 
 ## The CI gate
 
-`server.yml` runs `tindarr eval run --check` for every committed baseline. A baseline
-holds the vote set it was measured on, the strategy, the replay options, the metrics and
-the tolerances. `--check` asks two questions, because one is not enough: *did this
-strategy get worse than it was?* (its own baseline) and *is it better than doing nothing
-clever?* (the floors).
+`server.yml` runs `tindarr eval run --check` for every committed baseline — that is both
+vote sets times both strategies, four runs. A baseline holds the vote set it was measured
+on, the strategy, the replay options, the metrics and the tolerances. `--check` asks two
+questions, because one is not enough: *did this strategy get worse than it was?* (its own
+baseline) and *is it better than doing nothing clever?* (the floors).
 
 The check fails the build when:
 
@@ -233,7 +288,7 @@ Deliberately, with a reason:
 cd server
 uv run tindarr eval run --strategy popular --update-baseline
 uv run tindarr eval run --strategy popular --check   # the floors still have to be clear
-git diff server/fixtures/eval/baseline-popular.json
+git diff server/fixtures/eval/akira-99/baseline-popular.json
 ```
 
 `--update-baseline` and `--check` cannot be given together: a run that writes the numbers
@@ -273,8 +328,9 @@ batch.
 Two implementations ship today, both floors rather than candidates:
 
 - `popular` — the most popular unvoted title. Knows nothing about taste, everything about
-  fame, and duly scores 85 % already-seen on the committed fixture: the defect ADR 0013 is
-  about, in one line of code.
+  fame, and duly scores 85 % already-seen on `synthetic-99`: the defect ADR 0013 is about,
+  in one line of code. On `akira-99` it scores 39 %, for the reason under "what it cannot
+  measure": its pool there is the 99 titles the author voted on, not all of TMDb.
 - `random` — a seeded draw from the same pool. Nothing should ever score below it.
 
 Adding one means writing the class, registering it in `STRATEGIES`

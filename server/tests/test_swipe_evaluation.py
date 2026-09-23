@@ -35,6 +35,9 @@ from tindarr.swipe.strategy import Candidate, StrategyContext
 pytestmark = pytest.mark.anyio
 
 FULL = ReplayOptions(batch_size=10, warm_up=0)
+#: The author's own votes, as committed. Read here rather than through the CLI: this is
+#: about the scoring, not about the command.
+AUTHOR_VOTES = Path(__file__).resolve().parent.parent / "fixtures/eval/akira-99/votes.json"
 
 
 def movie(tmdb_id: int) -> TitleRef:
@@ -113,6 +116,46 @@ async def test_replaying_the_engine_that_produced_the_votes_reproduces_those_rat
     assert report.counts.skipped == 6
     assert report.counts.usable == 105
     assert report.metrics["coverage"] == pytest.approx(99 / 105)
+    # ...and the two numbers ADR 0013 was written from come back out of the harness.
+    assert report.metrics["already_seen_rate"] == pytest.approx(0.47, abs=0.01)
+    assert report.metrics["new_like_rate"] == pytest.approx(0.63, abs=0.01)
+
+
+def test_the_authors_vote_set_carries_the_distribution_adr_0013_measured() -> None:
+    """The real votes, counted straight out of the file, before any harness touches them."""
+    dataset = load_dataset(AUTHOR_VOTES)
+    votes = [row.vote for user in dataset.users for row in user.votes]
+    opinions = [value for value in votes if value != "skip"]
+    seen = [value for value in opinions if value.startswith("seen_")]
+    new = [value for value in opinions if not value.startswith("seen_")]
+
+    assert len(opinions) == 99
+    assert len(seen) / len(opinions) == pytest.approx(0.47, abs=0.01)
+    assert new.count("like") / len(new) == pytest.approx(0.63, abs=0.01)
+
+
+async def test_replaying_the_authors_own_votes_reproduces_those_rates() -> None:
+    """The sanity gate on the real vote set: hand the recorded cards back to the harness.
+
+    ADR 0013 quotes 47 % already-seen and 63 % liked among the genuinely new titles.
+    Those two numbers are about *these* votes, so feeding the very cards the engine
+    served back through the scoring has to produce them again. If it does not, the
+    harness is mis-scoring, and the fix is in the harness — never in the expectation.
+    """
+    dataset = load_dataset(AUTHOR_VOTES)
+    order = {
+        user.id: [row.as_vote().ref for row in sorted(user.votes, key=lambda row: row.seq)]
+        for user in dataset.users
+    }
+
+    batches = await replay(dataset, lambda: RecordedEngine(order), FULL)
+    report = summarize(dataset.name, dataset.source, "recorded", batches, FULL)
+
+    # Every card was one the author really voted on, so nothing was left unknown...
+    assert report.counts.unknown == 0
+    assert report.counts.scored == 99
+    assert report.counts.skipped == 0
+    assert report.metrics["coverage"] == 1.0
     # ...and the two numbers ADR 0013 was written from come back out of the harness.
     assert report.metrics["already_seen_rate"] == pytest.approx(0.47, abs=0.01)
     assert report.metrics["new_like_rate"] == pytest.approx(0.63, abs=0.01)

@@ -28,11 +28,14 @@ from tindarr.core.logs import configure_logging
 from tindarr.main.app import create_app, start
 from tindarr.main.evaluation import (
     DEFAULT_FIXTURES,
+    PRIVATE_FIXTURES,
     STRATEGIES,
+    SYNTHETIC_FIXTURES,
     EvalError,
     EvalPaths,
     compare_to_baseline,
     import_fixture,
+    record_cassette,
     run_evaluation,
     write_baseline,
     write_fixtures,
@@ -77,7 +80,12 @@ def _add_eval(harness: argparse.ArgumentParser) -> None:
     actions = harness.add_subparsers(dest="action", required=True)
 
     run = actions.add_parser("run", help="replay a vote set past a strategy and print the table")
-    run.add_argument("--fixtures", type=Path, default=DEFAULT_FIXTURES, help="fixture directory")
+    run.add_argument(
+        "--fixtures",
+        type=Path,
+        default=DEFAULT_FIXTURES,
+        help=f"the vote set to walk (default: {DEFAULT_FIXTURES})",
+    )
     run.add_argument("--strategy", default="popular", choices=sorted(STRATEGIES))
     run.add_argument("--batch-size", type=int, default=10)
     run.add_argument(
@@ -97,9 +105,17 @@ def _add_eval(harness: argparse.ArgumentParser) -> None:
     run.add_argument("--record", type=Path, help="write a live run's answers to a cassette")
     run.add_argument("--yes", action="store_true", help="answer the live-run question (scripts)")
 
-    fixtures = actions.add_parser("fixtures", help="regenerate the committed vote set")
-    fixtures.add_argument("--fixtures", type=Path, default=DEFAULT_FIXTURES)
+    fixtures = actions.add_parser("fixtures", help="regenerate the generated vote set")
+    # Its own default, and it refuses any directory holding a vote set it did not
+    # generate: the real votes next door cannot be rebuilt from a seed.
+    fixtures.add_argument("--fixtures", type=Path, default=SYNTHETIC_FIXTURES)
     fixtures.add_argument("--seed", type=int, default=SYNTHETIC_SEED)
+
+    record = actions.add_parser(
+        "record", help="record a vote set's TMDb answers from the real TMDb (says what first)"
+    )
+    record.add_argument("--fixtures", type=Path, default=DEFAULT_FIXTURES)
+    record.add_argument("--yes", action="store_true", help="answer the live-run question (scripts)")
 
     imported = actions.add_parser("import", help="build a private vote set from a real database")
     imported.add_argument("--from", dest="database", type=Path, required=True)
@@ -108,7 +124,7 @@ def _add_eval(harness: argparse.ArgumentParser) -> None:
     imported.add_argument(
         "--out",
         type=Path,
-        default=DEFAULT_FIXTURES / "private" / "votes.json",
+        default=PRIVATE_FIXTURES / "votes.json",
         help="where to write it; must be under a 'private/' directory",
     )
 
@@ -185,6 +201,9 @@ def evaluate_command(args: argparse.Namespace) -> int:
     try:
         if args.action == "fixtures":
             write_fixtures(EvalPaths(args.fixtures), args.seed, out)
+            return 0
+        if args.action == "record":
+            asyncio.run(record_cassette(EvalPaths(args.fixtures), confirmed=args.yes, out=out))
             return 0
         if args.action == "import":
             import_fixture(args.database, args.out, args.name, args.source, out)
