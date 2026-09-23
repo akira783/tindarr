@@ -50,6 +50,7 @@ __all__ = [
     "STRATEGIES",
     "EvalPaths",
     "build_cassette",
+    "catalog_service",
     "import_fixture",
     "private_path",
     "run_evaluation",
@@ -303,7 +304,7 @@ def build_cassette(dataset: EvalDataset) -> Cassette:
     import asyncio  # noqa: PLC0415 - only the fixture builder blocks on a loop
 
     async def record() -> Cassette:
-        transport = RecordingTransport(_catalog_service(dataset), provider="tmdb")
+        transport = RecordingTransport(catalog_service(dataset), provider="tmdb")
         tmdb = TmdbMetadata("fixture", transport=transport)
         for entry in sorted(dataset.catalog, key=lambda row: row.ref):
             await tmdb.details(entry.ref, dataset.language)
@@ -313,8 +314,13 @@ def build_cassette(dataset: EvalDataset) -> Cassette:
     return asyncio.run(record())
 
 
-def _catalog_service(dataset: EvalDataset) -> httpx2.MockTransport:
-    """TMDb, answering from the fixture's own catalogue. Only the fixture builder uses it."""
+def catalog_service(dataset: EvalDataset) -> httpx2.MockTransport:
+    """Return TMDb as the fixture's own catalogue answers it.
+
+    The fixture builder records through this, and a test drives a "live" run against it
+    without reaching anything. A title the catalogue does not hold gets a 404, so the
+    recording covers the catalogue and nothing else.
+    """
     catalog = dataset.by_ref
 
     def handle(request: httpx2.Request) -> httpx2.Response:

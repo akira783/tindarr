@@ -77,6 +77,12 @@ Every rate is printed with its denominator, and the gate reads the denominators 
 - **Coverage is low on a fixture with a large catalogue**, around 20 % on the committed
   one. The rates rest on tens of cards, not thousands. The report says so in its own
   notes whenever coverage is under half.
+- **The taste profile in a fixture is static, and in a generated one it is the answer.**
+  In production the profile is rewritten every ten votes, so it only ever knows the past.
+  A fixture carries one profile for the whole history; in the generated one it names the
+  genres the later votes were drawn from. A strategy that reads the profile therefore
+  scores better here than it would in life. The private fixtures, whose profiles were
+  written by a real engine from real votes, do not have this problem.
 - **It says nothing about prose.** Whether a rationale reads well, whether a poster
   loads, whether the deck feels good in the hand: none of that is here.
 - **It cannot prove a strategy is good.** It can show that one is worse than another on

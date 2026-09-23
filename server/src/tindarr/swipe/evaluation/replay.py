@@ -134,8 +134,8 @@ class BatchOutcome:
     known: int
     #: Distinct genres across those cards; ``None`` without a catalogue.
     distinct_genres: int | None
-    #: Whether two cards of this batch belong to the same franchise; ``None`` when fewer
-    #: than two of them are titles the catalogue places in one.
+    #: Whether two cards of this batch belong to the same franchise; ``None`` when the
+    #: catalogue knows fewer than two of them and there is nothing to compare.
     franchise_repeat: bool | None
 
     @property

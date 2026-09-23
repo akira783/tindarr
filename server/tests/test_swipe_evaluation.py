@@ -5,6 +5,8 @@ card nobody voted on as a hit, or that lets a strategy improve its rates by prop
 three cards instead of ten, would happily wave through the engine ADR 0013 rejected.
 """
 
+from pathlib import Path
+
 import pytest
 
 from tests.support.evaluation import InMemoryMetadata, RecordedEngine, ScriptedStrategy
@@ -14,11 +16,13 @@ from tindarr.swipe.evaluation import (
     BatchOutcome,
     CostMeter,
     CountingMetadata,
+    DatasetError,
     EvalDataset,
     EvaluationReport,
     ReplayError,
     ReplayOptions,
     evaluate,
+    load_dataset,
     replay,
     summarize,
 )
@@ -329,3 +333,101 @@ async def test_the_table_names_every_metric_and_says_what_is_estimated() -> None
     assert "note  " in table
     assert report.counts.tmdb_calls == meter.metadata_calls > 0
     assert report.as_dict()["strategy"] == "popular"
+
+
+# --- the file format ------------------------------------------------------------------
+
+
+def test_a_vote_set_carries_what_the_replay_needs() -> None:
+    dataset = EvalDataset.model_validate(
+        {
+            "name": "shapes",
+            "language": "fr",
+            "region": "FR",
+            "catalog": [
+                {
+                    "tmdb_id": 7,
+                    "kind": "tv",
+                    "title": "Sept",
+                    "year": 2001,
+                    "genres": ["Drama"],
+                    "popularity": 3.5,
+                    "vote_average": 8.1,
+                    "vote_count": 12,
+                    "overview": "Seven.",
+                }
+            ],
+            "users": [
+                {
+                    "id": "user-1",
+                    "media_kind": "tv",
+                    "novelty": "bold",
+                    "mood": "something slow",
+                    "library": [{"tmdb_id": 42, "kind": "movie"}],
+                    "votes": [
+                        {"seq": 3, "tmdb_id": 7, "kind": "tv", "vote": "like", "pick": "explore"},
+                        {"seq": 1, "tmdb_id": 9, "kind": "movie", "vote": "skip"},
+                    ],
+                }
+            ],
+        }
+    )
+    user = dataset.users[0]
+
+    # Votes come back in their own order, whatever order the file listed them in.
+    assert [row.ref.tmdb_id for row in user.ordered_votes] == [9, 7]
+    assert user.ordered_votes[0].at < user.ordered_votes[1].at
+    assert user.wanted_kind == "tv"
+    assert user.novelty_level == "bold"
+    assert user.library_index.owns(TitleRef("movie", 42))
+    assert dataset.pool[0].title == "Sept"
+    assert dataset.pool[0].ref == TitleRef("tv", 7)
+    assert dataset.by_ref[TitleRef("tv", 7)].year == 2001
+    assert EvalDataset.loads(dataset.dump()) == dataset
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("not json", "JSON"),
+        ('{"name": "x", "surprise": 1}', "surprise"),
+        ('{"name": "x", "catalog": [{"tmdb_id": 0, "kind": "movie", "title": "t"}]}', "tmdb_id"),
+        ('{"name": "x", "catalog": [{"tmdb_id": 1, "kind": "film", "title": "t"}]}', "kind"),
+        (
+            '{"name": "x", "users": [{"id": "u", "votes":'
+            ' [{"seq": 0, "tmdb_id": 1, "kind": "movie", "vote": "loved"}]}]}',
+            "vote",
+        ),
+        ('{"version": 2, "name": "x"}', "version"),
+    ],
+)
+def test_a_file_that_is_not_a_vote_set_is_refused(text: str, message: str) -> None:
+    with pytest.raises(DatasetError, match=message):
+        EvalDataset.loads(text)
+
+
+def test_a_vote_set_that_cannot_be_read_says_so(tmp_path: Path) -> None:
+    with pytest.raises(DatasetError, match="cannot read the vote set"):
+        load_dataset(tmp_path / "missing.json")
+
+
+def test_a_vote_set_round_trips_through_its_file(tmp_path: Path) -> None:
+    dataset = build_synthetic_dataset()
+    path = tmp_path / "nested" / "votes.json"
+    dataset.write(path)
+    assert load_dataset(path) == dataset
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({"batch_size": 0}, "at least one card"),
+        ({"warm_up": -1}, "cannot be negative"),
+        ({"max_batches": 0}, "at least one batch"),
+    ],
+)
+def test_replay_options_that_would_make_a_report_meaningless_are_refused(
+    options: dict[str, int], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        ReplayOptions(**options)

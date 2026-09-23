@@ -126,6 +126,12 @@ class EvalUser(_Model):
     votes: tuple[FixtureVote, ...] = ()
     #: What the household already owned when these votes were cast.
     library: tuple[OwnedTitle, ...] = ()
+    #: The "Loves / Avoids / Nuances" bullets as they stood. One profile for the whole
+    #: history, which is a simplification with teeth: in production the profile is
+    #: rewritten every ten votes, so it only ever knows the past, while here it is
+    #: whatever the fixture's author wrote — in a generated fixture, the very rule the
+    #: later votes were drawn from. A strategy that reads it therefore scores better on
+    #: a generated vote set than it would in life (docs/evaluation.md).
     taste_profile: str | None = None
     novelty: Literal["familiar", "balanced", "bold"] = "balanced"
     media_kind: Literal["movie", "tv"] | None = None

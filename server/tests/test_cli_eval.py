@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from tindarr.adapters.cassette import Cassette
 from tindarr.main.cli import SYNTHETIC_SEED, main
 from tindarr.main.evaluation import (
     DEFAULT_FIXTURES,
@@ -18,6 +19,7 @@ from tindarr.main.evaluation import (
     EvalPaths,
     StrategySpec,
     build_cassette,
+    catalog_service,
     live_plan,
 )
 from tindarr.swipe.baselines import PopularBaseline
@@ -366,3 +368,57 @@ def test_a_database_that_is_not_there_is_refused(
     code = main(["eval", "import", "--from", str(tmp_path / "nope.db"), "--out", str(out)])
     assert code == 2
     assert "no such database" in capsys.readouterr().out
+
+
+# --- the fixture service behind the cassette --------------------------------------------
+
+
+def test_the_fixture_service_answers_404_for_a_title_it_does_not_have() -> None:
+    dataset = build_synthetic_dataset(SYNTHETIC_SEED)
+    cassette = build_cassette(dataset)
+    # The recording covers exactly the catalogue; anything else is a miss, which is what
+    # stops a strategy inventing a title and the harness quietly serving it one.
+    assert len(cassette) == len(dataset.catalog)
+    assert cassette.find("GET https://api.themoviedb.org/3/movie/1?language=en") is None
+
+
+def test_a_live_run_records_what_came_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The "live" service here is the fixture's own, reached through the recording
+    # transport: the point is that --record writes a cassette a later run can replay.
+    dataset = build_synthetic_dataset(SYNTHETIC_SEED)
+    monkeypatch.setattr(
+        "tindarr.main.evaluation.httpx2.AsyncHTTPTransport",
+        lambda: catalog_service(dataset),
+    )
+    monkeypatch.setenv("TINDARR_EVAL_TMDB_API_KEY", "a-real-looking-key")
+    recorded = tmp_path / "tmdb.json"
+
+    code = main(
+        [
+            "eval",
+            "run",
+            "--fixtures",
+            str(FIXTURES),
+            "--live",
+            "--yes",
+            "--record",
+            str(recorded),
+        ]
+    )
+
+    assert code == 0
+    assert "A live run reaches real services" in capsys.readouterr().out
+    replayed = Cassette.load(recorded)
+    # 90 cards were proposed, but the three users share the famous ones: a cassette
+    # holds one answer per address, not one per call.
+    assert len(replayed) == 44
+    assert "a-real-looking-key" not in recorded.read_text(encoding="utf-8")
+
+
+def test_a_run_with_no_batches_at_all_still_prints() -> None:
+    plan = live_plan(
+        STRATEGIES["popular"], build_synthetic_dataset(SYNTHETIC_SEED), ReplayOptions(warm_up=500)
+    )
+    assert "up to 0 requests" in plan
