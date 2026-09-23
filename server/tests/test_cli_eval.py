@@ -476,3 +476,24 @@ def test_a_floor_strategy_is_not_measured_against_the_other_floor(
             == 0
         )
     assert "no worse than the floors" in capsys.readouterr().out
+
+
+def test_a_live_run_without_a_key_opens_no_connection_pool(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Giving up must not leave a transport behind.
+
+    One built before the key is checked is never closed, and its ``ResourceWarning``
+    surfaces later, in whichever test the garbage collector happens to land on — which
+    is how this arrived, as an intermittent failure three files away.
+    """
+    opened: list[object] = []
+    monkeypatch.setattr(
+        "tindarr.main.evaluation.httpx2.AsyncHTTPTransport",
+        lambda: opened.append(object()) or catalog_service(build_synthetic_dataset()),
+    )
+    monkeypatch.delenv("TINDARR_EVAL_TMDB_API_KEY", raising=False)
+
+    assert main(["eval", "run", "--fixtures", str(FIXTURES), "--live", "--yes"]) == 2
+    assert "a live run needs a TMDb key" in capsys.readouterr().out
+    assert opened == []

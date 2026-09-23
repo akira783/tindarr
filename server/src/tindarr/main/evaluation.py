@@ -135,9 +135,12 @@ async def run_evaluation(  # noqa: PLR0913 - one command's worth of switches
     recorder = None
     if live:
         _confirm_live(spec, dataset, options, confirmed=confirmed, out=out)
+        # The key first: a transport opened before it is checked is a connection pool
+        # nobody closes when the run gives up, and an unraisable warning later, in
+        # whichever test the garbage collector happens to land on.
+        api_key = _live_key()
         recorder = RecordingTransport(httpx2.AsyncHTTPTransport(), provider="tmdb")
         transport: httpx2.AsyncBaseTransport = recorder
-        api_key = _live_key()
     else:
         transport = _cassette(paths.cassette).transport()
         api_key = "offline"
