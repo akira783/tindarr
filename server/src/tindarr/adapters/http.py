@@ -8,7 +8,10 @@ code rather than leaking an exception from the vendor's library.
 - **Redirects are never followed.** A media server that answers `302` to another host
   would otherwise receive the API key or the user's password.
 - **Bodies are bounded.** ``read_json`` and ``read_xml`` refuse anything larger than
-  ``MAX_RESPONSE_BYTES``, so a hostile or broken server cannot make the process grow.
+  ``MAX_RESPONSE_BYTES``. That check happens once the body is in memory, which is only
+  good enough for a service the operator configured; every call to an address an
+  administrator typed goes through ``request_bounded`` instead, which stops reading at
+  the limit rather than after it.
 - **Nothing here logs a URL.** Quick Connect's secret travels in a query string
   (docs/auth.md, section 13), so the httpx loggers are kept at ``WARNING``
   (``tindarr.core.logs.quiet_noisy_libraries``) and adapters log their own lines.
@@ -108,16 +111,32 @@ class HttpSession:
         except httpx2.RequestError as failure:
             raise RemoteCallError("tls_error" if is_tls_error(failure) else "unreachable") from None
 
-    async def get_bounded(self, url: str, limit: int = MAX_RESPONSE_BYTES) -> httpx2.Response:
-        """GET a response, reading at most ``limit`` bytes of its body.
+    async def request_bounded(  # noqa: PLR0913 - the same arguments as ``request``, plus the cap
+        self,
+        method: str,
+        url: str,
+        *,
+        json_body: object | None = None,
+        params: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+        limit: int = MAX_RESPONSE_BYTES,
+    ) -> httpx2.Response:
+        """Make one call, reading at most ``limit`` bytes of the answer.
 
-        ``request`` lets the client read the whole body before anything can look at it,
-        which is fine for a media server the operator configured and wrong for an
-        address somebody typed: this streams instead and gives up as soon as the body
-        is longer than it could legitimately be.
+        ``request`` lets the client read the whole body into memory before anything can
+        look at it. That is fine for a service the operator configured and wrong for an
+        address somebody typed: the size check would then happen after the damage. This
+        streams instead and gives up the moment the body is longer than it could
+        legitimately be, so a hostile or broken endpoint cannot grow the process.
         """
         try:
-            async with self._client.stream("GET", url) as response:
+            async with self._client.stream(
+                method,
+                url,
+                json=json_body,
+                params=dict(params or {}),
+                headers=dict(headers or {}),
+            ) as response:
                 chunks: list[bytes] = []
                 size = 0
                 async for chunk in response.aiter_bytes():
@@ -132,6 +151,10 @@ class HttpSession:
         return httpx2.Response(
             response.status_code, headers=response.headers, content=b"".join(chunks)
         )
+
+    async def get_bounded(self, url: str, limit: int = MAX_RESPONSE_BYTES) -> httpx2.Response:
+        """GET a response, reading at most ``limit`` bytes of its body."""
+        return await self.request_bounded("GET", url, limit=limit)
 
 
 def is_tls_error(failure: BaseException) -> bool:

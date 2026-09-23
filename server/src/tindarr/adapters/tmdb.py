@@ -234,7 +234,7 @@ class TmdbMetadata:
     async def _get(
         self, session: HttpSession, path: str, params: Mapping[str, str] | None = None
     ) -> Mapping[str, Any]:
-        response = await session.request("GET", path, params=self._params(params))
+        response = await session.request_bounded("GET", path, params=self._params(params))
         if response.status_code != HTTPStatus.OK:
             raise RemoteCallError(f"status_{response.status_code}")
         return read_mapping(response)
@@ -253,7 +253,9 @@ class TmdbMetadata:
         """Check the key against ``/configuration``, the cheapest call that needs one."""
         try:
             async with self._session() as session:
-                response = await session.request("GET", "/configuration", params=self._params())
+                response = await session.request_bounded(
+                    "GET", "/configuration", params=self._params()
+                )
         except RemoteCallError as failure:
             return ConnectionCheck(self._health_of(failure), "TMDb")
         if response.status_code in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN):

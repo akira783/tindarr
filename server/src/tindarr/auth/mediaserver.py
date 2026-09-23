@@ -39,7 +39,11 @@ from tindarr.storage import server_state as state_repository
 from tindarr.storage import sessions as session_repository
 from tindarr.storage import users as user_repository
 from tindarr.storage.db import write_transaction
-from tindarr.storage.settings import SettingLockedError, SettingsStore
+from tindarr.storage.settings import (
+    SecretPinnedToItsAddressError,
+    SettingLockedError,
+    SettingsStore,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -326,7 +330,17 @@ class MediaServerConnector:
     async def _secret_for(self, request: MediaServerInput, *, session_id: str) -> str:
         locked = self._settings.locked_value("media_server_api_key")
         if isinstance(locked, str):
-            # The environment holds the API key (or the Plex owner token): it wins.
+            # The environment holds the API key (or the Plex owner token). It wins, but
+            # it does **not** escape the rule below: a pinned key is a stored key, and a
+            # stored key is never sent to an address it was not stored for. An
+            # administrator cannot send it again — they may not set it at all — so once
+            # a media server is configured, its address is pinned with the key. Without
+            # this, a plain administrator could point ``…/media_server/test`` at their
+            # own host and read the operator's Jellyfin admin key (or Plex owner token)
+            # out of the request (the security model, section 7).
+            current = await self.configured()
+            if current is not None and not self._same_address(current, request):
+                raise SecretPinnedToItsAddressError("media_server_api_key")
             return locked
         if request.plex_pin_id is not None:
             return await self._owner_tokens.peek(request.plex_pin_id, session_id)
@@ -334,21 +348,25 @@ class MediaServerConnector:
             return request.api_key
         return await self._kept_secret(request)
 
-    async def _kept_secret(self, request: MediaServerInput) -> str:
-        """Reuse the stored secret only for the same server, reached the same way.
+    @staticmethod
+    def _same_address(current: MediaServerSettings, request: MediaServerInput) -> bool:
+        """Whether a request points at the server the stored secret was stored for.
 
         The kind and the URL are the obvious part. ``verify_tls`` belongs with them:
         turning it off and omitting the key would otherwise replay the stored
         administrator key over a connection nobody checks, which is all an on-path
         attacker needs. A downgrade has to come with the key.
         """
+        return (
+            current.kind == request.kind
+            and current.url == request.url
+            and current.verify_tls == request.verify_tls
+        )
+
+    async def _kept_secret(self, request: MediaServerInput) -> str:
+        """Reuse the stored secret only for the same server, reached the same way."""
         current = await self.configured()
-        if (
-            current is None
-            or current.kind != request.kind
-            or current.url != request.url
-            or current.verify_tls != request.verify_tls
-        ):
+        if current is None or not self._same_address(current, request):
             raise errors.secret_required()
         return current.secret
 

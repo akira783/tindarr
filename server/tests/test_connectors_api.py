@@ -544,3 +544,103 @@ def test_a_locked_connector_cannot_be_removed(
 
     assert response.status_code == 409
     assert response.json()["code"] == "setting_locked"
+
+
+def test_a_pinned_key_cannot_be_sent_to_a_new_address(
+    tmp_path: Any,
+    internet: FakeInternet,
+    outside: FakeOutside,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole point of the rule: a stolen console session is not a courier."""
+    monkeypatch.setenv("TINDARR_REQUESTS_API_KEY", SEERR_API_KEY)
+    data_dir = tmp_path / "pinned"
+    data_dir.mkdir()
+    pinned = build_app(data_dir, internet=internet, outside=outside)
+
+    with console_client(pinned) as client:
+        csrf = set_up_server(client, pinned)
+        assert (
+            save(client, csrf, "requests", {"connector": "requests", "url": SEERR_URL}).status_code
+            == 200
+        )
+        moved = check_one(
+            client, csrf, "requests", {"connector": "requests", "url": "http://collector.lan"}
+        )
+        downgraded = check_one(
+            client,
+            csrf,
+            "requests",
+            {"connector": "requests", "url": SEERR_URL, "verify_tls": False},
+        )
+        removed = client.delete(f"{CONNECTORS}/requests", headers=console_headers(csrf))
+
+    assert moved.status_code == 409
+    assert moved.json()["code"] == "setting_locked"
+    assert downgraded.status_code == 409
+    # And removal is not a way around it: an unconfigured connector with a pinned key
+    # would accept any first address.
+    assert removed.status_code == 409
+    assert removed.json()["code"] == "setting_locked"
+
+
+def test_a_pinned_ai_key_cannot_follow_a_change_of_provider(
+    tmp_path: Any,
+    internet: FakeInternet,
+    outside: FakeOutside,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TINDARR_LLM_API_KEY", OPENAI_KEY)
+    data_dir = tmp_path / "pinned-llm"
+    data_dir.mkdir()
+    pinned = build_app(data_dir, internet=internet, outside=outside)
+
+    with console_client(pinned) as client:
+        csrf = set_up_server(client, pinned)
+        assert (
+            save(
+                client, csrf, "llm", {"connector": "llm", "provider": "openai", "model": "model-a"}
+            ).status_code
+            == 200
+        )
+        elsewhere = client.post(
+            MODELS,
+            json={
+                "connector": "llm",
+                "provider": "openai_compatible",
+                "base_url": COMPATIBLE_URL,
+            },
+            headers=console_headers(csrf),
+        )
+
+    assert elsewhere.status_code == 409
+    assert elsewhere.json()["code"] == "setting_locked"
+
+
+def test_a_pinned_address_is_shown_so_the_key_can_still_be_entered(
+    tmp_path: Any,
+    internet: FakeInternet,
+    outside: FakeOutside,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The operator pins the address in compose; the administrator types the key."""
+    monkeypatch.setenv("TINDARR_REQUESTS_URL", SEERR_URL)
+    data_dir = tmp_path / "pinned-url"
+    data_dir.mkdir()
+    pinned = build_app(data_dir, internet=internet, outside=outside)
+
+    with console_client(pinned) as client:
+        csrf = set_up_server(client, pinned)
+        listed = {row["kind"]: row for row in client.get(CONNECTORS).json()["connectors"]}
+        without = save(client, csrf, "requests", {"connector": "requests", "url": SEERR_URL})
+        with_key = save(client, csrf, "requests", requests_body())
+
+    # The console can show and pre-fill the pinned address even though nothing is
+    # stored, which is what makes the card usable at all.
+    assert listed["requests"]["configured"] is False
+    assert listed["requests"]["url"] == SEERR_URL
+    assert listed["requests"]["locked_fields"] == ["url"]
+    # The key is still the administrator's to enter, and only then does it work.
+    assert without.status_code == 409
+    assert without.json()["code"] == "secret_required"
+    assert with_key.status_code == 200, with_key.text

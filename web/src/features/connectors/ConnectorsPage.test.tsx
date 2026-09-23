@@ -217,7 +217,45 @@ describe("the connectors page", () => {
     expect(await within(tmdb).findByLabelText("API key")).toBeDisabled();
     expect(within(tmdb).getAllByText(/Set by an environment variable/)).not.toHaveLength(0);
   });
+
+  it("pre-fills an address the environment pins, so the key can still be entered", async () => {
+    const user = userEvent.setup();
+    let saved: unknown = null;
+    const api = connectorsApi(
+      fixtures.connectors({
+        requests: {
+          configured: false,
+          url: "http://seerr.lan:5055",
+          locked_fields: ["url"],
+          status: { health: "not_configured" },
+        },
+      }),
+    ).on("PUT", "/api/v1/admin/connectors/{kind}", (call) => {
+      saved = call.body;
+      return ok(fixtures.connector("requests", { configured: true, status: { health: "ok" } }));
+    });
+
+    renderApp({ api, route: "/connectors" });
+
+    const requests = await card("Requests (Seerr)");
+    const url = within(requests).getByLabelText("Address");
+    expect(url).toHaveValue("http://seerr.lan:5055");
+    expect(url).toBeDisabled();
+
+    await user.type(within(requests).getByLabelText("API key"), "seerr-key");
+    await user.click(within(requests).getByRole("button", { name: "Save" }));
+
+    await within(requests).findByText("Connector saved.");
+    expect(saved).toEqual({
+      connector: "requests",
+      url: "http://seerr.lan:5055",
+      api_key: "seerr-key",
+      verify_tls: true,
+      tv_seasons: "all",
+    });
+  });
 });
+
 
 describe("the AI provider card", () => {
   it("asks the provider for its models and fills the field from the list", async () => {

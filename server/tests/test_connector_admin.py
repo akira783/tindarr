@@ -149,6 +149,39 @@ def test_a_body_of_another_kind_than_the_path_is_refused(app: FastAPI) -> None:
     assert_is_problem(response, 400, "validation_error")
 
 
+def test_a_pinned_media_server_key_cannot_be_sent_to_another_address(
+    tmp_path: Path, internet: FakeInternet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A plain administrator must not be able to read the operator's key back out.
+
+    Testing the connector needs only the admin role, and an omitted key is normally
+    refused for a new address. A key an environment variable pins was the exception,
+    which made ``…/media_server/test`` a way of posting the Jellyfin administrator key
+    (or a Plex owner token) to an address of the caller's choosing.
+    """
+    monkeypatch.setenv("TINDARR_MEDIA_SERVER_API_KEY", ADMIN_API_KEY)
+    data_dir = tmp_path / "pinned"
+    data_dir.mkdir()
+    pinned = build_app(data_dir, internet=internet)
+
+    with console_client(pinned) as client:
+        csrf = set_up_server(client, pinned)
+        before = len(internet.media.requests)
+        response = client.post(
+            f"{CONNECTOR}/test",
+            json={
+                "connector": "media_server",
+                "server_type": "jellyfin",
+                "url": "http://collector.lan:8096",
+            },
+            headers=console_headers(csrf),
+        )
+
+    assert_is_problem(response, 409, "setting_locked")
+    # Nothing was sent anywhere: the refusal happens before the first call.
+    assert len(internet.media.requests) == before
+
+
 # --- what an identity change costs -------------------------------------------------------
 
 

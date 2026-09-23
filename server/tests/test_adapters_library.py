@@ -31,6 +31,9 @@ from tindarr.adapters.emby import EmbyServer
 from tindarr.adapters.jellyfin import JellyfinServer
 from tindarr.adapters.mediabrowser import MediaBrowserServer
 from tindarr.adapters.plex import PlexServer
+from tindarr.adapters.plex_library import library_item as plex_item
+from tindarr.adapters.plex_library import moment_of as plex_moment
+from tindarr.adapters.plex_library import tmdb_id_of as plex_tmdb_id
 from tindarr.adapters.plextv import PlexTvClient
 from tindarr.core.errors import ProblemError
 from tindarr.ports.media_server import Engagement, LibraryItem, MediaServerConnection, MediaUser
@@ -397,6 +400,37 @@ async def test_an_episode_in_the_resume_list_counts_for_its_series(
     assert (await engagement_of(media, clock))["10"].state == "in_progress"
 
 
+async def test_a_series_is_dated_by_its_most_recent_resumed_episode(
+    media: FakeMediaBrowser, clock: FakeClock
+) -> None:
+    """One series, several resumed episodes: the newest date decides, not the first row."""
+    row = media.add_library_item("10", "Severance", "Series", tmdb_id="95396")
+    row.user_data[USER.id] = {"UnplayedItemCount": 18}
+    media.resume.append(
+        ResumeEntry(item_id="e1", series_id="10", item_type="Episode", user_id=USER.id)
+    )
+    media.resume.append(
+        ResumeEntry(
+            item_id="e2",
+            series_id="10",
+            item_type="Episode",
+            user_id=USER.id,
+            last_played=when(clock, 300),
+        )
+    )
+    media.resume.append(
+        ResumeEntry(
+            item_id="e3",
+            series_id="10",
+            item_type="Episode",
+            user_id=USER.id,
+            last_played=when(clock, 2),
+        )
+    )
+
+    assert (await engagement_of(media, clock))["10"].state == "in_progress"
+
+
 async def test_another_users_history_is_not_read(media: FakeMediaBrowser, clock: FakeClock) -> None:
     media.add_library_item("1", "Arrival", "Movie", tmdb_id="329865")
     media.resume.append(ResumeEntry(item_id="1", user_id="b" * 32, percentage=40.0))
@@ -609,3 +643,97 @@ async def test_a_plex_server_that_refuses_the_token_is_unreachable(
     with pytest.raises(ProblemError) as failure:
         await server.library_ids()
     assert failure.value.code == "media_server_unreachable"
+
+
+# --- reading what Plex sends ---------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("guids", "expected"),
+    [
+        ([{"id": "tmdb://329865"}], 329865),
+        ([{"id": "imdb://tt2543164"}, {"id": "tmdb://329865?lang=en"}], 329865),
+        ([{"id": "tmdb://329865/extra"}], 329865),
+        ([{"id": "tmdb://"}], None),
+        ([{"id": "tmdb://0"}], None),
+        ([{"id": "tmdb://not-a-number"}], None),
+        ([{"id": "tvdb://1234"}], None),
+        ([{"nope": 1}], None),
+        (["tmdb://329865"], None),
+        ("tmdb://329865", None),
+        (None, None),
+    ],
+)
+def test_a_tmdb_id_is_read_out_of_plexs_guid_list(guids: object, expected: int | None) -> None:
+    assert plex_tmdb_id({"Guid": guids}) == expected
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"ratingKey": "1", "type": "artist", "title": "Bowie"},
+        {"type": "movie", "title": "No rating key"},
+    ],
+)
+def test_a_plex_row_that_is_neither_kind_is_not_an_item(row: dict[str, Any]) -> None:
+    assert plex_item(row) is None
+
+
+def test_a_plex_row_with_no_year_keeps_none(clock: FakeClock) -> None:
+    found = plex_item({"ratingKey": "1", "type": "movie", "title": "X", "year": "soon"})
+    assert found is not None
+    assert found.year is None
+    assert clock.now() is not None
+
+
+@pytest.mark.parametrize("value", [None, "2026-09-22", True, 0, -1, 10**30])
+def test_a_plex_timestamp_that_is_not_one_reads_as_nothing(value: object) -> None:
+    assert plex_moment(value) is None
+
+
+def test_a_plex_timestamp_is_epoch_seconds() -> None:
+    found = plex_moment(1_758_540_000)
+    assert found is not None
+    assert found.tzinfo is not None
+
+
+async def test_a_plex_film_nobody_opened_produces_nothing(
+    plex: FakeInternet, clock: FakeClock
+) -> None:
+    owner = media_user(OWNER_ACCOUNT, "Robin")
+    found = await plex_server(plex, clock).engagement(owner)
+    assert found == []
+
+
+async def test_a_plex_film_with_no_duration_is_judged_on_its_view_count(
+    plex: FakeInternet, clock: FakeClock
+) -> None:
+    plex.plex_items["1"] = [
+        {
+            "ratingKey": "100",
+            "title": "Arrival",
+            "type": "movie",
+            "Guid": [{"id": "tmdb://329865"}],
+            "viewCount": 1,
+            "lastViewedAt": int((clock.now() - timedelta(days=400)).timestamp()),
+        }
+    ]
+    plex.plex_items["2"] = []
+    owner = media_user(OWNER_ACCOUNT, "Robin")
+
+    found = {e.item.item_id: e for e in await plex_server(plex, clock).engagement(owner)}
+
+    assert found["100"].state == "watched"
+
+
+async def test_a_plex_history_row_that_is_neither_is_ignored(
+    plex: FakeInternet, clock: FakeClock
+) -> None:
+    friend = media_user("77", "Sam")
+    plex.plex_history = [
+        {"type": "track", "ratingKey": "500", "accountID": 77, "viewedAt": 1},
+        {"type": "episode", "ratingKey": "201", "accountID": 77, "viewedAt": 1},
+        {"type": "movie", "accountID": 77, "viewedAt": 1},
+    ]
+
+    assert await plex_server(plex, clock).engagement(friend) == []

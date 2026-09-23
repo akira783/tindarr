@@ -40,6 +40,14 @@ DEFAULT_MAX_OUTPUT_TOKENS: Final = 8192
 logger = logging.getLogger(__name__)
 
 
+def _plus(left: LlmUsage, right: LlmUsage) -> LlmUsage:
+    """Add up what two attempts cost."""
+    return LlmUsage(
+        input_tokens=left.input_tokens + right.input_tokens,
+        output_tokens=left.output_tokens + right.output_tokens,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class RawAnswer:
     """One provider's answer, before anything has been made of it."""
@@ -98,19 +106,27 @@ class StructuredProvider(ABC):
         untrusted text, and that is exactly the path an injection would take.
         """
         hint: str | None = None
+        spent = LlmUsage()
         for attempt in range(MAX_ATTEMPTS):
             answer = await self.complete(prompt, schema, hint)
+            # A refused answer was paid for like any other, so it is added to the total
+            # before it is thrown away: the usage page has to show what the household
+            # was charged, not what it got (the security model, "cost abuse").
+            spent = _plus(spent, answer.usage)
             try:
                 value = parse_structured(answer.text, schema)
             except InvalidOutputError:
                 hint = RETRY_INSTRUCTION
                 continue
-            return Generation(
-                value=value, model=self._model, usage=answer.usage, retried=attempt > 0
-            )
+            return Generation(value=value, model=self._model, usage=spent, retried=attempt > 0)
         logger.warning(
             "the AI provider never answered in the expected format",
-            extra={"llm": self.kind, "attempts": MAX_ATTEMPTS},
+            extra={
+                "llm": self.kind,
+                "attempts": MAX_ATTEMPTS,
+                "input_tokens": spent.input_tokens,
+                "output_tokens": spent.output_tokens,
+            },
         )
         raise problems.llm_invalid_output()
 

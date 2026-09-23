@@ -166,13 +166,15 @@ class UserItemsReader:
     async def page(self, suffix: str, params: Mapping[str, str]) -> Mapping[str, Any]:
         """Read one listing page, falling back to the pre-10.9 route once."""
         if not self._legacy:
-            response = await self._session.request(
+            response = await self._session.request_bounded(
                 "GET", self._modern(suffix), params=self._with_user(params)
             )
             if response.status_code != HTTPStatus.NOT_FOUND or self._user_id is None:
                 return read_mapping(_expect_ok(response))
             self._legacy = True
-        response = await self._session.request("GET", self._legacy_path(suffix), params=params)
+        response = await self._session.request_bounded(
+            "GET", self._legacy_path(suffix), params=params
+        )
         return read_mapping(_expect_ok(response))
 
     def _modern(self, suffix: str) -> str:
@@ -272,7 +274,7 @@ class ResumeList:
 
     def __init__(self, rows: Sequence[Mapping[str, Any]]) -> None:
         self._progress: dict[str, float] = {}
-        self._last: dict[str, datetime | None] = {}
+        self._last: dict[str, datetime] = {}
         for row in rows:
             key = as_text(row.get("SeriesId")) or as_text(row.get("Id"))
             if key is None:
@@ -281,7 +283,13 @@ class ResumeList:
             self._progress[key] = max(
                 self._progress.get(key, 0.0), fraction(user_data.get("PlayedPercentage"))
             )
-            self._last.setdefault(key, parse_media_date(user_data.get("LastPlayedDate")))
+            # Several resumed episodes share one series, and the first one in the list
+            # is not the most recent: keeping it — or keeping its missing date, which no
+            # later row could then replace — would age a series that is being watched.
+            moment = parse_media_date(user_data.get("LastPlayedDate"))
+            known = self._last.get(key)
+            if moment is not None and (known is None or moment > known):
+                self._last[key] = moment
 
     def __contains__(self, item_id: str) -> bool:
         """Whether the user has this item part-watched."""

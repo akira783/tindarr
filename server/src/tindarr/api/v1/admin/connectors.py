@@ -29,6 +29,7 @@ more than a coarse health value and, at most, the remote product's own name and 
 ``unknown`` until an administrator presses "test".
 """
 
+from collections.abc import Mapping
 from typing import Annotated, Literal, get_args
 
 from fastapi import APIRouter, Body, Path, Response, status
@@ -135,27 +136,61 @@ def connector_body(
 
 
 def optional_connector_body(
-    state: ConnectorState, status_body: ConnectorStatusResponse, locked: list[str]
+    kind: OptionalConnectorKind,
+    state: ConnectorState | None,
+    status_body: ConnectorStatusResponse,
+    locked: list[str],
+    forced: Mapping[str, object],
 ) -> ConnectorResponse:
-    """Describe a saved optional connector, with the secret masked."""
+    """Describe an optional connector, configured or not, with the secret masked.
+
+    ``forced`` carries the non-secret values an environment variable sets, and they are
+    shown even when nothing is stored yet. That matters: an operator who pins the
+    request backend's address but leaves its key to the administrator would otherwise
+    hand them a console with an empty, disabled address field and no way to finish.
+    """
     return ConnectorResponse(
-        kind=state.kind,
-        configured=True,
-        provider=state.provider,
-        url=state.url,
-        verify_tls=state.verify_tls,
-        model=state.model,
-        tv_seasons=state.tv_seasons,
-        secret=secret_state(state.secret, locked="api_key" in locked),
+        kind=kind,
+        configured=state is not None,
+        provider=_forced_text(forced, "provider") or (state.provider if state else None),
+        url=_forced_text(forced, "url", "base_url") or (state.url if state else None),
+        verify_tls=_forced_flag(forced) if "verify_tls" in forced else _verify_tls(state),
+        model=state.model if state is not None else None,
+        tv_seasons=_forced_seasons(forced) or (state.tv_seasons if state else None),
+        secret=secret_state(state.secret if state is not None else "", locked="api_key" in locked),
         locked_fields=locked,
         status=status_body,
     )
 
 
-def unconfigured(kind: ConnectorKind, locked: list[str]) -> ConnectorResponse:
-    """Describe a connector nothing has been stored for."""
+def _verify_tls(state: ConnectorState | None) -> bool | None:
+    return state.verify_tls if state is not None else None
+
+
+def _forced_text(forced: Mapping[str, object], *names: str) -> str | None:
+    for name in names:
+        value = forced.get(name)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _forced_flag(forced: Mapping[str, object]) -> bool | None:
+    value = forced.get("verify_tls")
+    return value if isinstance(value, bool) else None
+
+
+def _forced_seasons(forced: Mapping[str, object]) -> Literal["all", "first"] | None:
+    value = forced.get("tv_seasons")
+    if value == "first":
+        return "first"
+    return "all" if value == "all" else None
+
+
+def unconfigured_media_server(locked: list[str]) -> ConnectorResponse:
+    """Describe a media server connector nothing has been stored for."""
     return ConnectorResponse(
-        kind=kind,
+        kind="media_server",
         configured=False,
         secret=SecretStateResponse(set=False, locked="api_key" in locked),
         locked_fields=locked,
@@ -168,14 +203,17 @@ async def _listed(services: Services, kind: ConnectorKind) -> ConnectorResponse:
         settings = await services.connector.configured()
         locked = services.connector.locked_fields()
         if settings is None:
-            return unconfigured(kind, locked)
+            return unconfigured_media_server(locked)
         return connector_body(settings, ConnectorStatusResponse.untested(configured=True), locked)
     optional: OptionalConnectorKind = kind
-    locked = services.connectors.locked_fields(optional)
     state = await services.connectors.state(optional)
-    if state is None:
-        return unconfigured(kind, locked)
-    return optional_connector_body(state, ConnectorStatusResponse.untested(configured=True), locked)
+    return optional_connector_body(
+        optional,
+        state,
+        ConnectorStatusResponse.untested(configured=state is not None),
+        services.connectors.locked_fields(optional),
+        services.connectors.locked_values(optional),
+    )
 
 
 @router.get(
@@ -230,13 +268,12 @@ async def save_connector(  # noqa: PLR0913, PLR0917 - one per dependency
     if kind != "media_server":
         request = as_connector_input(optional_body(payload, kind))
         check = await services.connectors.save(request)
-        state = await services.connectors.state(request.kind)
-        if state is None:  # pragma: no cover - the save just wrote it
-            raise ProblemError(500, "internal_error")
         return optional_connector_body(
-            state,
+            request.kind,
+            await services.connectors.state(request.kind),
             ConnectorStatusResponse.of(check, services.clock.now()),
             services.connectors.locked_fields(request.kind),
+            services.connectors.locked_values(request.kind),
         )
     access.require_media_server_admin(session.signed_in_user)
     access.require_recent_reauth(session.session, services.clock.now())

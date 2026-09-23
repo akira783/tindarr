@@ -271,10 +271,29 @@ URLs, and the server calls them. That is intended and restricted to admins.
   version, never a response body. The model list only returns ids parsed from the
   provider's expected JSON shape. Neither can be used to read internal pages.
 - **No secret replay.** When a test, a model listing or a save omits a secret, the
-  stored one is reused only if the URL is unchanged. A new URL requires the secret
-  again (`code` = `secret_required`), so a stolen admin session cannot send the stored
-  keys to a host of its choice.
+  stored one is reused only if the address is unchanged. A new address requires the
+  secret again (`code` = `secret_required`), so a stolen admin session cannot send the
+  stored keys to a host of its choice. "The address" is read strictly: for the AI
+  provider it includes the **provider** (switching from a local gateway to a hosted one
+  is a new address), and for the media server and the request backend it includes
+  `verify_tls`, since turning verification off while omitting the key would replay that
+  key over a connection nobody checks. TMDb and OMDb have one host each, written into
+  Tindarr, so their keys have no address to be moved to.
+- **A pinned secret pins its address.** A secret set by an environment variable obeys
+  the same rule, and this is the part that is easy to get backwards: it cannot be
+  changed from the console, so it is tempting to treat it as always available. It is a
+  stored secret, and an administrator cannot "send it again" — they may not set it at
+  all. So once a connector has an address, that address is fixed with the secret, and
+  moving it answers `setting_locked` naming the variable to change instead. A connector
+  whose key is pinned cannot be removed either: an unconfigured connector accepts any
+  first address, which would make removal the way around the rule.
 - **Redirects** are not followed to another host. The `public_url` check follows none.
+- **Bodies are bounded as they arrive.** Every call to an address an administrator typed
+  stops reading at the size limit rather than after it, so a hostile or broken endpoint
+  cannot grow the process before the check runs. A connection test's answer carries at
+  most a coarse health value plus the remote product's own name and version, each cut to
+  64 printable characters; a model listing carries model ids only, capped in number and
+  in length.
 
 ### 8. Supply chain
 

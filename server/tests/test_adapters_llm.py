@@ -196,6 +196,18 @@ async def test_a_bad_answer_is_retried_once_without_quoting_it_back(
     assert "did not match the required JSON schema" in retry["messages"][0]["content"]
 
 
+async def test_a_retry_is_paid_for_twice_and_counted_twice(
+    openai_fake: FakeOpenAi,
+) -> None:
+    openai_fake.answers = ["I would rather not.", ONE_CARD]
+
+    found = await openai_provider(openai_fake).generate(PROMPT, Batch)
+
+    # The refused answer cost tokens too; the usage page has to show what was charged.
+    assert found.usage.input_tokens == 22
+    assert found.usage.output_tokens == 14
+
+
 async def test_two_bad_answers_are_a_reported_failure(openai_fake: FakeOpenAi) -> None:
     openai_fake.answers = ["nope", "still nope"]
 

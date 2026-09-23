@@ -15,7 +15,7 @@ that no longer fits its type falls back to the default with a warning.
 
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import cached_property
@@ -53,6 +53,11 @@ type PasswordSignIn = Literal["enabled", "lan_only", "disabled"]
 #: An origin the phones reach this server at (docs/auth.md, section 10).
 type PublicUrl = Annotated[str, AfterValidator(normalize_public_url)]
 type StreamingRegion = Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]
+#: An address an administrator (or an environment variable) gives a connector. The
+#: scheme is checked here as well as in the request body, so ``TINDARR_LLM_BASE_URL``
+#: pointing at ``file://`` stops the server at startup, naming the variable, rather than
+#: failing at the first call.
+type ConnectorUrl = Annotated[str, StringConstraints(pattern=r"^https?://", max_length=512)]
 
 
 def as_password_sign_in(value: object) -> PasswordSignIn:
@@ -140,13 +145,13 @@ SETTINGS: Final[Mapping[str, SettingDefinition]] = {
         # configures it, and each secret is encrypted like the media server's.
         SettingDefinition("tmdb_api_key", str | None, secret=True),
         SettingDefinition("omdb_api_key", str | None, secret=True),
-        SettingDefinition("requests_url", str | None),
+        SettingDefinition("requests_url", ConnectorUrl | None),
         SettingDefinition("requests_api_key", str | None, secret=True),
         SettingDefinition("requests_verify_tls", bool, default=True),
         SettingDefinition("requests_tv_seasons", SeasonPolicy, default="all"),
         SettingDefinition("llm_provider", LlmProviderKind | None),
         SettingDefinition("llm_api_key", str | None, secret=True),
-        SettingDefinition("llm_base_url", str | None),
+        SettingDefinition("llm_base_url", ConnectorUrl | None),
         SettingDefinition("llm_model", str | None),
         SettingDefinition("llm_reasoning_effort", ReasoningEffort | None),
         # Stored from step 2, used by the swipe engine from step 4.
@@ -196,6 +201,27 @@ class SettingLockedError(ProblemError):
             HTTPStatus.CONFLICT,
             "setting_locked",
             f"{name} is set by {env_var_name(name)} and cannot be changed here",
+        )
+        self.name = name
+
+
+class SecretPinnedToItsAddressError(ProblemError):
+    """A pinned secret may not follow a connector to another address (409).
+
+    The security model's section 7 says a stored secret is never sent to an address it
+    was not stored for, and the way out of that rule is to send the secret again. An
+    administrator cannot do that for a secret an environment variable sets: they are not
+    allowed to set it at all. So the rule becomes "the address is fixed too", and the
+    answer says which variable to change instead.
+    """
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            HTTPStatus.CONFLICT,
+            "setting_locked",
+            f"{name} is set by {env_var_name(name)}, so the address it is sent to cannot "
+            f"be changed here; set the address in the environment too, or unset "
+            f"{env_var_name(name)}",
         )
         self.name = name
 
@@ -346,11 +372,23 @@ class SettingsStore:
 
     async def delete(self, name: str) -> None:
         """Remove the stored value, falling back to the default."""
-        self._definition(name)
-        if name in self._overrides:
-            raise SettingLockedError(name)
+        await self.delete_many([name])
+
+    async def delete_many(self, names: Sequence[str]) -> None:
+        """Remove several stored values at once, all or nothing.
+
+        One transaction, because these belong together: a connector whose address was
+        forgotten and whose key was not is neither configured nor gone, and its key
+        would still be sitting in the table.
+        """
+        for name in names:
+            self._definition(name)
+            if name in self._overrides:
+                raise SettingLockedError(name)
         async with write_transaction(self._engine) as connection:
-            await connection.execute(delete(settings_table).where(settings_table.c.name == name))
+            await connection.execute(
+                delete(settings_table).where(settings_table.c.name.in_(list(names)))
+            )
 
     def _row(self, name: str, value: object) -> dict[str, object]:
         """Return the row to store for ``name``, encrypting a secret setting."""

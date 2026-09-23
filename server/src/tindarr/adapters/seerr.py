@@ -182,10 +182,10 @@ class SeerrBackend:
         """
         try:
             async with self._session() as session:
-                response = await session.request("GET", f"{API_PREFIX}/status")
+                response = await session.request_bounded("GET", f"{API_PREFIX}/status")
                 payload = read_mapping(self._expect_ok(response))
                 version = as_text(payload.get("version"))
-                users = await session.request(
+                users = await session.request_bounded(
                     "GET", f"{API_PREFIX}/user", params={"take": "1", "skip": "0"}
                 )
         except RemoteCallError as failure:
@@ -225,7 +225,7 @@ class SeerrBackend:
         return None
 
     async def _user_page(self, session: HttpSession, page: int) -> list[Mapping[str, Any]]:
-        response = await session.request(
+        response = await session.request_bounded(
             "GET",
             f"{API_PREFIX}/user",
             params={"take": str(USER_PAGE_SIZE), "skip": str(page * USER_PAGE_SIZE)},
@@ -256,7 +256,7 @@ class SeerrBackend:
         """File a request as ``on_behalf_of``, with their permissions and their quota."""
         try:
             async with self._session() as session:
-                response = await session.request(
+                response = await session.request_bounded(
                     "POST",
                     f"{API_PREFIX}/request",
                     json_body=self.request_body(title),
@@ -329,7 +329,9 @@ class SeerrBackend:
 
     async def _availability(self, session: HttpSession, title: TitleRef) -> Availability:
         try:
-            response = await session.request("GET", f"{API_PREFIX}/{title.kind}/{title.tmdb_id}")
+            response = await session.request_bounded(
+                "GET", f"{API_PREFIX}/{title.kind}/{title.tmdb_id}"
+            )
             payload = read_mapping(self._expect_ok(response))
         except RemoteCallError as failure:
             logger.info(

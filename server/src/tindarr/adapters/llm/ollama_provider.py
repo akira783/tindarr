@@ -28,7 +28,12 @@ from tindarr.adapters.http import (
     read_mapping,
 )
 from tindarr.adapters.llm.base import RawAnswer, StructuredProvider
-from tindarr.adapters.llm.structured import json_schema_of, messages_of, problem_for
+from tindarr.adapters.llm.structured import (
+    json_schema_of,
+    messages_of,
+    model_ids,
+    problem_for,
+)
 from tindarr.ports import problems
 from tindarr.ports.llm import (
     LlmCapabilities,
@@ -76,17 +81,16 @@ class OllamaProvider(StructuredProvider):
         """Return the models this Ollama has pulled (``GET /api/tags``)."""
         try:
             async with self._session(DEFAULT_TIMEOUT_S) as session:
-                response = await session.request("GET", TAGS_PATH)
+                response = await session.request_bounded("GET", TAGS_PATH)
                 if response.status_code != HTTPStatus.OK:
                     raise problem_for(response.status_code)
                 payload = read_mapping(response)
         except RemoteCallError as failure:
             raise self._failure(failure) from None
-        names = [
+        return model_ids(
             as_text(row.get("model")) or as_text(row.get("name"))
             for row in as_object_list(payload.get("models"))
-        ]
-        return sorted({name for name in names if name})
+        )
 
     async def complete(
         self, prompt: Prompt, schema: type[Any], retry_hint: str | None
@@ -107,7 +111,7 @@ class OllamaProvider(StructuredProvider):
         }
         try:
             async with self._session(COMPLETION_TIMEOUT_S) as session:
-                response = await session.request("POST", CHAT_PATH, json_body=body)
+                response = await session.request_bounded("POST", CHAT_PATH, json_body=body)
                 if response.status_code != HTTPStatus.OK:
                     raise problem_for(response.status_code)
                 payload = read_mapping(response)

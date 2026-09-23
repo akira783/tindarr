@@ -115,7 +115,7 @@ class PlexServer:
         """Read the server's own ``machineIdentifier`` from ``GET /identity``."""
         try:
             async with self._session() as session:
-                response = await session.request("GET", _IDENTITY_PATH)
+                response = await session.request_bounded("GET", _IDENTITY_PATH)
                 container = self._container(read_mapping(_expect_ok(response)))
         except RemoteCallError as failure:
             raise self._unreachable("identify", failure) from None
@@ -158,7 +158,7 @@ class PlexServer:
     async def _check_server_token(self) -> ConnectorHealth:
         try:
             async with self._session(token=self._connection.secret) as session:
-                response = await session.request("GET", "/")
+                response = await session.request_bounded("GET", "/")
         except RemoteCallError:
             return "unreachable"
         if response.status_code in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN):
@@ -243,6 +243,9 @@ class PlexServer:
         viewings only (see the module docstring and ADR 0012).
         """
         token, client_id = self._connection.secret, self._connection.device_id
+        # Also what fills the machine identifier a deep link needs, so an engagement
+        # read leaves ``deep_link`` usable exactly as a library read does.
+        await self.identify()
         try:
             owner = as_media_user(await self._plex_tv.account(token, client_id), admin=True)
         except RateLimitedError:
@@ -259,7 +262,7 @@ class PlexServer:
         return WatchHistory(history).engagements(library, self._clock.now())
 
     async def _section_keys(self, session: HttpSession) -> list[str]:
-        response = await session.request("GET", _SECTIONS_PATH)
+        response = await session.request_bounded("GET", _SECTIONS_PATH)
         container = self._container(read_mapping(_expect_ok(response)))
         directories = container.get("Directory")
         if not isinstance(directories, list):
@@ -298,7 +301,7 @@ class PlexServer:
         """
         collected: list[Mapping[str, Any]] = []
         for page in range(max_pages):
-            response = await session.request(
+            response = await session.request_bounded(
                 "GET",
                 path,
                 params=dict(params)
@@ -322,8 +325,9 @@ class PlexServer:
         """Return the app.plex.tv URL for an item, once the server's identifier is known.
 
         Plex addresses an item by server **and** metadata key, so the link cannot be
-        built before ``identify`` has run; ``library_ids`` always runs it first, which is
-        what every caller of this does.
+        built before ``identify`` has run. ``library_ids`` and ``engagement`` both run
+        it, which is how every item this could be asked about was obtained; an adapter
+        that has read neither answers ``None`` rather than guessing an identifier.
         """
         if self._machine_id is None:
             return None

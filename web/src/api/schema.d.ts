@@ -927,7 +927,13 @@ export interface paths {
          *     counts as part of the address, and for `requests` so does `verify_tls`,
          *     since turning it off would otherwise replay the stored key over a
          *     connection nobody checks. TMDb and OMDb have one host each, written into
-         *     Tindarr, so their key has no address to be moved to and is always reused. Fields locked by an
+         *     Tindarr, so their key has no address to be moved to and is always reused.
+         *
+         *     A secret set by an environment variable obeys the same rule: it cannot be
+         *     sent again by an administrator, so once the connector has an address, that
+         *     address is fixed with it (`code` = `setting_locked`). Change it in the
+         *     environment, or unset the variable. Such a connector cannot be removed
+         *     either, since an unconfigured connector accepts any first address. Fields locked by an
          *     environment variable cannot be given another value (`code` =
          *     `setting_locked`).
          *
@@ -951,7 +957,10 @@ export interface paths {
          * @description Only the optional connectors can be removed. `media_server` is not one of
          *     them: a Tindarr without a media server signs nobody in, so it is repointed
          *     with `PUT` instead (`409` `media_server_required`). Removing a connector
-         *     that was never configured succeeds and changes nothing.
+         *     that was never configured succeeds and changes nothing. A connector whose
+         *     API key an environment variable sets cannot be removed (`409`
+         *     `setting_locked`): forgetting its address would let a new one be chosen for
+         *     a key the administrator may not change.
          */
         delete: operations["deleteConnector"];
         options?: never;
@@ -971,10 +980,13 @@ export interface paths {
         /**
          * Test a connector without saving
          * @description Returns a coarse result only, never the remote response body. Omitted
-         *     secrets fall back to the stored ones only when the URL is unchanged
-         *     (`code` = `secret_required` otherwise). For a Plex media server,
-         *     `plex_pin_id` is an `owner_token` PIN of this session, which the test does
-         *     not consume. Limited to 10 tests per minute per session.
+         *     secrets fall back to the stored ones only when the address is unchanged
+         *     (`code` = `secret_required` otherwise). A secret an environment variable
+         *     sets follows the same rule and cannot be sent again, so once the connector
+         *     has an address that address is fixed too (`code` = `setting_locked`). For a
+         *     Plex media server, `plex_pin_id` is an `owner_token` PIN of this session,
+         *     which the test does not consume. Limited to 10 tests per minute per
+         *     session.
          */
         post: operations["testConnector"];
         delete?: never;
@@ -3827,15 +3839,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description `not_found`: no such connector kind. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["Problem"];
-                };
-            };
             /** @description `setting_locked`, `secret_required` or `plex_pin_pending`. */
             409: {
                 headers: {
@@ -3887,15 +3890,6 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["AdminForbidden"];
-            /** @description `not_found`: no such connector kind. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["Problem"];
-                };
-            };
             /** @description `setting_locked` (the connector is set by environment variables) or `media_server_required` (the media server connector cannot be removed). */
             409: {
                 headers: {
@@ -3942,16 +3936,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description `not_found`: no such connector kind. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["Problem"];
-                };
-            };
-            /** @description `secret_required` or `plex_pin_pending`. */
+            /** @description `setting_locked`, `secret_required` or `plex_pin_pending`. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -3999,7 +3984,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["AdminForbidden"];
-            /** @description `secret_required`. */
+            /** @description `secret_required` or `setting_locked`. */
             409: {
                 headers: {
                     [name: string]: unknown;

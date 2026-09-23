@@ -25,7 +25,12 @@ import httpx2
 
 from tindarr.adapters.http import DEFAULT_TIMEOUT_S
 from tindarr.adapters.llm.base import RawAnswer, StructuredProvider
-from tindarr.adapters.llm.structured import json_schema_of, messages_of, problem_for
+from tindarr.adapters.llm.structured import (
+    json_schema_of,
+    messages_of,
+    model_ids,
+    problem_for,
+)
 from tindarr.ports import problems
 from tindarr.ports.llm import (
     LlmCapabilities,
@@ -85,7 +90,7 @@ class AnthropicProvider(StructuredProvider):
             raise problem_for(None, connection=True) from None
         finally:
             await client.close()
-        return sorted({model.id for model in page.data if model.id})
+        return model_ids(model.id for model in page.data)
 
     async def complete(
         self, prompt: Prompt, schema: type[Any], retry_hint: str | None

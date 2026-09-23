@@ -42,7 +42,11 @@ from tindarr.ports.request_backend import (
     RequestBackendConnection,
     SeasonPolicy,
 )
-from tindarr.storage.settings import SettingLockedError, SettingsStore
+from tindarr.storage.settings import (
+    SecretPinnedToItsAddressError,
+    SettingLockedError,
+    SettingsStore,
+)
 
 #: The connectors this service owns. ``media_server`` is not one of them.
 type OptionalConnectorKind = Literal["tmdb", "omdb", "requests", "llm"]
@@ -247,6 +251,19 @@ class ConnectorService:
             model=provider.model or None,
         )
 
+    def locked_values(self, kind: OptionalConnectorKind) -> dict[str, object]:
+        """Return what an environment variable forces, among the fields the console shows.
+
+        The API key is deliberately absent: a pinned secret is shown as pinned, never
+        returned. The rest has to be shown, because a console that cannot display a
+        pinned address cannot let anybody finish configuring that connector either.
+        """
+        return {
+            name: self._settings.locked_value(setting)
+            for name, setting in SETTING_FOR_FIELD[kind].items()
+            if name != "api_key" and self._settings.is_locked(setting)
+        }
+
     def locked_fields(self, kind: OptionalConnectorKind) -> list[str]:
         """Contract fields an environment variable sets, and so refuses to change."""
         return [
@@ -313,12 +330,25 @@ class ConnectorService:
         return await provider.list_models()
 
     async def remove(self, kind: OptionalConnectorKind) -> None:
-        """Forget a connector, refusing the fields an environment variable sets."""
-        for setting in SETTING_FOR_FIELD[kind].values():
-            if self._settings.is_locked(setting):
-                raise _locked(setting)
-        for setting in SETTING_FOR_FIELD[kind].values():
-            await self._settings.delete(setting)
+        """Forget a connector, in one write, leaving what the environment sets.
+
+        A connector whose **key** an environment variable pins cannot be removed. Not
+        out of tidiness: forgetting its address would leave it unconfigured, and an
+        unconfigured connector with a pinned key is the one case where ``_secret_for``
+        lets a new address through. Removal would otherwise be the way around the rule
+        it enforces.
+
+        A locked field that is neither the key nor part of the address — the seasons a
+        series is requested with, say — stops nothing: the rest is forgotten and the
+        environment keeps saying what it says.
+        """
+        fields = SETTING_FOR_FIELD[kind]
+        if self._settings.is_locked(fields["api_key"]):
+            raise _locked(fields["api_key"])
+        removable = [
+            setting for setting in fields.values() if not self._settings.is_locked(setting)
+        ]
+        await self._settings.delete_many(removable)
         logger.info("connector removed", extra={"connector": kind})
 
     # --- the rules ------------------------------------------------------------------
@@ -351,14 +381,32 @@ class ConnectorService:
         value = self._settings.locked_value(setting)
         return value if self._settings.is_locked(setting) and isinstance(value, str) else None
 
-    @staticmethod
-    def _kept(request: ConnectorInput, stored: str | None, *, same_address: bool) -> str:
-        """Resolve the secret: the one sent, or the stored one for the same address.
+    def _secret_for(
+        self, request: ConnectorInput, stored: str | None, *, same_address: bool
+    ) -> str:
+        """Resolve the secret, and refuse to let it follow the connector elsewhere.
 
-        This is the security model's section 7 in three lines. A request that omits the
-        key and moves the address gets ``secret_required``, so the stored key is never
-        sent anywhere it was not stored for.
+        This is the security model's section 7. A request that omits the key and moves
+        the address gets ``secret_required``: the stored key is never sent anywhere it
+        was not stored for.
+
+        A key an environment variable pins obeys the **same** rule, and that is the part
+        that is easy to get backwards. It is tempting to treat a pinned key as always
+        available — it cannot be changed, so what is there to protect? — but a pinned key
+        is a stored key, and an administrator cannot "send it again", because they are
+        not allowed to set it at all. So once the connector has an address, the address
+        is pinned with it, and moving it says which variable to change instead.
+        Otherwise a stolen console session could point the connector at a collector and
+        read the operator's key out of the request Tindarr obligingly sent.
+
+        One case is left open: a connector nothing is stored for yet. The first address
+        has to come from somewhere and there is none to protect; the save pins it.
         """
+        locked = self._locked_secret(request)
+        if locked is not None:
+            if stored is not None and not same_address:
+                raise SecretPinnedToItsAddressError(SETTING_FOR_FIELD[request.kind]["api_key"])
+            return locked
         if request.api_key:
             return request.api_key
         if stored and same_address:
@@ -369,13 +417,10 @@ class ConnectorService:
 
     async def _resolved_metadata(self, request: ConnectorInput) -> MetadataSettings:
         stored = await (self.tmdb() if request.kind == "tmdb" else self.omdb())
-        locked = self._locked_secret(request)
-        if locked is not None:
-            return MetadataSettings(locked)
         # TMDb and OMDb each have exactly one host, written into their adapter: there is
         # no address an administrator could move the key to, so it is always reusable.
         return MetadataSettings(
-            self._kept(request, stored.api_key if stored else None, same_address=True)
+            self._secret_for(request, stored.api_key if stored else None, same_address=True)
         )
 
     async def _resolved_requests(self, request: ConnectorInput) -> RequestsSettings:
@@ -389,12 +434,11 @@ class ConnectorService:
         # would replay the stored key over a connection nobody checks, which is all an
         # on-path attacker needs.
         same = stored is not None and stored.url == url and stored.verify_tls == bool(verify_tls)
-        locked = self._locked_secret(request)
         return RequestsSettings(
             url=url,
-            api_key=locked
-            if locked is not None
-            else self._kept(request, stored.api_key if stored else None, same_address=same),
+            api_key=self._secret_for(
+                request, stored.api_key if stored else None, same_address=same
+            ),
             verify_tls=bool(verify_tls),
             tv_seasons="first" if seasons == "first" else "all",
         )
@@ -418,8 +462,7 @@ class ConnectorService:
             and stored.provider == provider
             and stored.base_url == (base_url if isinstance(base_url, str) else None)
         )
-        locked = self._locked_secret(request)
-        key = locked if locked is not None else self._llm_key(request, stored, provider, same=same)
+        key = self._llm_key(request, stored, provider, same=same)
         return LlmSettings(
             provider=provider,
             api_key=key,
@@ -439,7 +482,7 @@ class ConnectorService:
         if provider in _KEYLESS_PROVIDERS:
             # Ollama has no accounts; asking for a key would be asking for nothing.
             return request.api_key or ""
-        return self._kept(request, stored.api_key if stored else None, same_address=same)
+        return self._secret_for(request, stored.api_key if stored else None, same_address=same)
 
     # --- building the adapter a request describes ------------------------------------
 

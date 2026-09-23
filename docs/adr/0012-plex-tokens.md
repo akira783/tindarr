@@ -135,6 +135,24 @@ title watched nine times is watched, not loved (see
 `tindarr.ports.media_server.Engagement`). The history is used to answer "did this
 happen?", never "how often?".
 
+**Two assumptions in the history path that whoever implements this should check.**
+They are the adapter's today, not the decision's, but they are invisible from the
+outside and both fail quietly rather than loudly.
+
+- `tindarr.adapters.plex.PlexServer._history` filters with
+  `accountID=<the plex.tv account id>`. That is the id Tindarr keys users by
+  ([the authentication reference](../auth.md#4-sign-in-through-the-media-server)), and
+  it is the right one for a shared account. **Plex Home / managed users are numbered
+  differently**, and a mismatch does not fail: the server returns an empty container,
+  and that household member simply appears never to have watched anything. If option A
+  is accepted, per-user tokens make this moot; if option B is, it has to be confirmed
+  against a real Home setup.
+- The history is read `viewedAt:desc` and capped at `HISTORY_LIMIT` (5 000 viewings, ten
+  pages). A household past that loses its oldest rows first, which undercounts a long
+  series somebody finished years ago and can tip it from "watched" to "abandoned". The
+  cap exists so one user's read cannot be unbounded; raising it is cheap, and paging by
+  date rather than by count would be better still.
+
 ## Alternatives considered
 
 - **Ask each user for their own Plex token.** It is the cleanest credential — each user

@@ -23,6 +23,7 @@ Two attempts, then ``llm_invalid_output``.
 import json
 import logging
 import re
+from collections.abc import Iterable
 from http import HTTPStatus
 from typing import Any, Final, cast
 
@@ -41,6 +42,11 @@ RETRY_INSTRUCTION: Final = (
 )
 #: How much of an answer is written to a debug log; never more, and never above debug.
 _PREVIEW: Final = 200
+#: How many model ids one provider may put in front of an administrator, and how long
+#: each may be. A catalogue is a few dozen short strings; an endpoint somebody typed
+#: answering with a hundred thousand of them is not a catalogue.
+MAX_MODELS: Final = 500
+MAX_MODEL_ID: Final = 128
 #: ``"Title" (1982)`` -> ``"Title (1982)"``.
 _QUALIFIER: Final = re.compile(r'"([^"]*?)"\s+(\([^)]*?\))')
 
@@ -157,6 +163,25 @@ def _log_bad_answer(message: str, content: str, reason: str) -> None:
     logger.warning(message, extra={"llm": "invalid_output", "reason": reason[:_PREVIEW]})
     # The answer itself is user-facing content and untrusted text; debug only.
     logger.debug("the model answered", extra={"preview": content[:_PREVIEW].replace("\n", " ")})
+
+
+def model_ids(names: Iterable[str | None]) -> list[str]:
+    """Return a provider's model ids, reduced to what a list of ids can be.
+
+    The console shows these and an administrator picks one, so what comes back from an
+    address they typed is treated like every other remote answer: printable characters
+    only, a length a model id can plausibly have, no duplicates, and a bound on how many
+    (the security model, section 7 — a model listing returns ids, not a way of reading
+    something else back out).
+    """
+    kept: set[str] = set()
+    for name in names:
+        if name is None:
+            continue
+        cleaned = "".join(character for character in name.strip() if character.isprintable())
+        if cleaned and len(cleaned) <= MAX_MODEL_ID:
+            kept.add(cleaned)
+    return sorted(kept)[:MAX_MODELS]
 
 
 def json_schema_of(schema: type[BaseModel]) -> dict[str, Any]:

@@ -151,6 +151,10 @@ def _owner_engagements(rows: Sequence[Mapping[str, Any]], now: datetime) -> Iter
 def _owner_film(
     item: LibraryItem, row: Mapping[str, Any], moment: datetime | None, now: datetime
 ) -> Engagement | None:
+    # The one place in Tindarr that reads a play count, and only ever as a boolean:
+    # Plex has no "played" flag, so "viewed at least once" is the only way to ask the
+    # question every other server answers with one. How *many* times is not read here
+    # and is not read anywhere (``tindarr.ports.media_server.Engagement``).
     played = _count(row.get("viewCount")) > 0
     offset, duration = _number(row.get("viewOffset")) or 0.0, _number(row.get("duration")) or 0.0
     progress = min(offset / duration, 1.0) if duration > 0 else 0.0
@@ -192,8 +196,9 @@ class WatchHistory:
     """
 
     def __init__(self, rows: Sequence[Mapping[str, Any]]) -> None:
-        self._films: dict[str, datetime | None] = {}
+        self._films: set[str] = set()
         self._episodes: dict[str, set[str]] = {}
+        #: The most recent viewing per title; ``_films`` only answers "at all?".
         self._last: dict[str, datetime] = {}
         for row in rows:
             self._add(row)
@@ -202,7 +207,7 @@ class WatchHistory:
         kind, rating_key = as_text(row.get("type")), as_text(row.get("ratingKey"))
         moment = moment_of(row.get("viewedAt"))
         if kind == "movie" and rating_key is not None:
-            self._films[rating_key] = moment
+            self._films.add(rating_key)
             self._remember(rating_key, moment)
             return
         series_key = as_text(row.get("grandparentRatingKey"))

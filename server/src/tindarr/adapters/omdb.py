@@ -124,7 +124,7 @@ class OmdbRatings:
         """Check the key by asking for one film every OMDb key can read."""
         try:
             async with self._session() as session:
-                response = await session.request(
+                response = await session.request_bounded(
                     "GET", "/", params={"apikey": self._api_key, "i": _PROBE_IMDB_ID}
                 )
         except RemoteCallError as failure:
@@ -153,7 +153,7 @@ class OmdbRatings:
             return None
         try:
             async with self._session() as session:
-                response = await session.request(
+                response = await session.request_bounded(
                     "GET", "/", params={"apikey": self._api_key, "i": imdb_id}
                 )
                 payload = read_mapping(_expect_ok(response))

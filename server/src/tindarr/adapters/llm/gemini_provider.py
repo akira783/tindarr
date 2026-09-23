@@ -22,7 +22,7 @@ from google.genai import types
 
 from tindarr.adapters.http import DEFAULT_TIMEOUT_S
 from tindarr.adapters.llm.base import RawAnswer, StructuredProvider
-from tindarr.adapters.llm.structured import messages_of, problem_for
+from tindarr.adapters.llm.structured import messages_of, model_ids, problem_for
 from tindarr.ports import problems
 from tindarr.ports.llm import (
     LlmCapabilities,
@@ -74,23 +74,28 @@ class GeminiProvider(StructuredProvider):
         )
 
     async def list_models(self) -> list[str]:
-        """Return the model ids that can generate content, without their prefix."""
+        """Return the model ids that can generate content, without their prefix.
+
+        The pager is iterated with ``async for``: it has ``__aiter__`` but no
+        ``__iter__``, so a plain ``for`` silently falls back to indexing the *current*
+        page and a catalogue longer than one page comes back truncated with no error.
+        """
         client = self._client(DEFAULT_TIMEOUT_S)
-        found: set[str] = set()
+        found: list[str | None] = []
         try:
             page = await client.aio.models.list()
-            for model in page:
+            async for model in page:
                 actions = model.supported_actions
                 if actions is not None and _GENERATE not in actions:
                     continue
-                name = (model.name or "").removeprefix(_MODEL_PREFIX)
-                if name:
-                    found.add(name)
+                found.append((model.name or "").removeprefix(_MODEL_PREFIX) or None)
         except genai_errors.APIError as failure:
             raise problem_for(failure.code) from None
         except httpx.HTTPError:
             raise problem_for(None, connection=True) from None
-        return sorted(found)
+        finally:
+            await client.aio.aclose()
+        return model_ids(found)
 
     async def complete(
         self, prompt: Prompt, schema: type[Any], retry_hint: str | None
@@ -110,6 +115,10 @@ class GeminiProvider(StructuredProvider):
             raise problem_for(failure.code) from None
         except httpx.HTTPError:
             raise problem_for(None, connection=True) from None
+        finally:
+            # A fresh client per call means a fresh connection pool per call; the other
+            # three adapters close theirs, and ``__del__`` is not a close.
+            await client.aio.aclose()
         return _answer_of(response)
 
 
