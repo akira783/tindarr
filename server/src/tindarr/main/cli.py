@@ -171,6 +171,15 @@ def _add_session(session: argparse.ArgumentParser) -> None:
         action="store_true",
         help="ask TMDb where each card streams in the region (one more request per card)",
     )
+    session.add_argument(
+        "--seed-from",
+        dest="seed_from",
+        default=None,
+        metavar="FIXTURE",
+        help="an existing vote set (a name under fixtures/eval, or a path) whose votes "
+        "are history before the first batch, so a session measures a profile instead of "
+        "calibration",
+    )
     session.add_argument("--yes", action="store_true", help="answer the live-run question")
 
 
@@ -275,6 +284,7 @@ def _session_options(args: argparse.Namespace) -> SessionOptions:
         language=args.language,
         region=args.region,
         providers=args.providers,
+        seed_from=args.seed_from,
     )
 
 

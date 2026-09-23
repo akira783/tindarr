@@ -28,6 +28,7 @@ from tindarr.main.evaluation import (
     live_plan,
     popular_baseline,
     rehost,
+    resolve_fixture_dir,
 )
 from tindarr.swipe.evaluation import Baseline, ReplayOptions, load_dataset
 from tindarr.swipe.evaluation.synthetic import build_synthetic_dataset
@@ -224,6 +225,16 @@ def test_the_replay_options_reach_the_run(capsys: pytest.CaptureFixture[str]) ->
 def test_an_unknown_strategy_is_refused() -> None:
     with pytest.raises(SystemExit):
         main(["eval", "run", "--strategy", "clairvoyant"])
+
+
+def test_a_bare_fixture_name_resolves_under_fixtures_eval() -> None:
+    assert resolve_fixture_dir("akira-99") == Path("fixtures/eval/akira-99")
+
+
+def test_a_fixture_path_is_used_as_given(tmp_path: Path) -> None:
+    nested = tmp_path / "private" / "session"
+    nested.mkdir(parents=True)
+    assert resolve_fixture_dir(str(nested)) == nested
 
 
 def test_a_missing_vote_set_is_reported(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

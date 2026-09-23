@@ -121,6 +121,7 @@ class SessionStore:
         language: str,
         region: str,
         novelty: Novelty,
+        seed_source: str | None = None,
     ) -> Self:
         """Open the vote set at ``path``, or start one if there is nothing there yet.
 
@@ -128,14 +129,23 @@ class SessionStore:
         batch is built from, which is what "resumable" means here. Its stored settings
         win over the ones passed in, so a second session cannot quietly change what the
         first one measured — the command says so and the caller can point somewhere else.
+
+        ``seed_source`` names the fixture, if any, a session was started with
+        ``--seed-from``. It is recorded in a brand-new dataset's ``source`` line so that
+        the report this session prints, and anyone reading the file later, can see what
+        the history was seeded from; it is never written into an existing one, for the
+        same reason its other settings are not.
         """
         if path.is_file():
             return cls(path=path, dataset=load_dataset(path))
+        source = "a live swipe session, answered by one person at a terminal"
+        if seed_source:
+            source = f"{source}, seeded from '{seed_source}'"
         return cls(
             path=path,
             dataset=EvalDataset(
                 name=name,
-                source="a live swipe session, answered by one person at a terminal",
+                source=source,
                 language=language,
                 region=region,
                 users=(EvalUser(id=user_id, novelty=novelty),),

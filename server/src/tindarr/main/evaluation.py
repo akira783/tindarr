@@ -84,6 +84,7 @@ __all__ = [
     "random_baseline",
     "record_cassette",
     "rehost",
+    "resolve_fixture_dir",
     "run_evaluation",
     "write_fixtures",
 ]
@@ -220,6 +221,21 @@ class EvalPaths:
 
 class EvalError(RuntimeError):
     """Something the operator can fix, reported as one line and exit code 2."""
+
+
+def resolve_fixture_dir(value: str) -> Path:
+    """Return the fixture directory ``value`` names, the way ``--fixtures`` would.
+
+    A bare name (``akira-99``) is read under ``fixtures/eval``, exactly where the
+    committed vote sets live, so a session can be seeded with ``--seed-from akira-99``
+    rather than the whole path. Anything that names a path — more than one segment, or a
+    directory that already exists — is used as given, so a seed can also point at a
+    private fixture nobody committed.
+    """
+    candidate = Path(value)
+    if candidate.is_dir() or len(candidate.parts) > 1:
+        return candidate
+    return FIXTURES_ROOT / value
 
 
 # --- running -------------------------------------------------------------------------

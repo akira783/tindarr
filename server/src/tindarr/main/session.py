@@ -44,6 +44,7 @@ from tindarr.main.evaluation import (
     live_key,
     llm_connection,
     private_path,
+    resolve_fixture_dir,
 )
 from tindarr.ports.metadata import Metadata, Title
 from tindarr.ports.titles import TitleRef
@@ -56,6 +57,7 @@ from tindarr.swipe.evaluation import (
     EvaluationReport,
     PoolWatcher,
     ReplayOptions,
+    load_dataset,
     summarize,
 )
 from tindarr.swipe.evaluation.dataset import CatalogEntry
@@ -70,7 +72,8 @@ from tindarr.swipe.evaluation.session import (
 )
 from tindarr.swipe.hybrid import HybridStrategy
 from tindarr.swipe.retrieval import POOL_SIZE, CandidatePool, Retrieval
-from tindarr.swipe.strategy import Candidate, Novelty, StrategyContext
+from tindarr.swipe.strategy import CALIBRATION_TARGET, Candidate, Novelty, StrategyContext
+from tindarr.swipe.votes import Vote
 
 __all__ = ["SESSION_FIXTURES", "SessionOptions", "read_key", "run_session", "session_plan"]
 
@@ -103,6 +106,11 @@ class SessionOptions:
     #: yours": the harness opens no instance database, so it has no idea what the
     #: household subscribes to.
     providers: bool = False
+    #: An existing vote set (a fixture name under ``fixtures/eval``, or a path to one)
+    #: whose votes are handed to the strategy as history before the first batch. A first
+    #: session starts from nothing and so measures calibration, not the engine working
+    #: from a profile; seeding it from real votes is how it measures the latter instead.
+    seed_from: str | None = None
 
     @property
     def cards(self) -> int:
@@ -110,7 +118,39 @@ class SessionOptions:
         return self.batches * self.batch_size
 
 
-def session_plan(options: SessionOptions, resumed: int) -> str:
+@dataclass(frozen=True, slots=True)
+class _Seed:
+    """An existing vote set, read once and handed to the strategy as prior history.
+
+    Its votes count for exclusion — a seeded title must never be proposed again — and
+    for anything the strategy derives from ``StrategyContext.history``, calibration
+    included. They are never written into this session's own file and never scored in
+    its own table: both of those stay exactly what this session's own votes describe.
+    """
+
+    name: str
+    votes: tuple[Vote, ...]
+
+
+def _load_seed(seed_from: str | None) -> _Seed | None:
+    """Read the vote set named by ``--seed-from``, or ``None`` when nothing was asked.
+
+    Failures are reported the way every other fixture read in this harness is: one line,
+    naming the path, and ``EvalError`` — never a traceback over somebody's typo.
+    """
+    if seed_from is None:
+        return None
+    path = resolve_fixture_dir(seed_from) / "votes.json"
+    try:
+        dataset = load_dataset(path)
+    except DatasetError as failure:
+        raise EvalError(f"{path}: {failure}") from None
+    if not dataset.users:
+        raise EvalError(f"{path}: the vote set has no users to seed a session from")
+    return _Seed(name=dataset.name, votes=dataset.users[0].ordered_votes)
+
+
+def session_plan(options: SessionOptions, resumed: int, seed: _Seed | None = None) -> str:
     """Say what a session will call, and what it will write, before it does either."""
     import os  # noqa: PLC0415 - read at the moment of use, never cached in a module
 
@@ -137,7 +177,31 @@ def session_plan(options: SessionOptions, resumed: int) -> str:
             f"{resumed} vote(s) are already in it. They are the history this session "
             "builds on, and the titles they are about will not come back."
         )
+    if seed is not None:
+        lines.append(
+            f"{len(seed.votes)} vote(s) seeded from '{seed.name}' are added as history "
+            "before the first card: their titles will not come back, and — like this "
+            "session's own resumed votes — they will not appear in this session's own table."
+        )
+        lines.append(_mode_line(resumed + len(seed.votes), options))
     return "\n".join(lines) + "\n"
+
+
+def _mode_line(history: int, options: SessionOptions) -> str:
+    """Say which mode the first batch will use, from the same rule the batch itself reads.
+
+    ``StrategyContext.calibrating`` decides it from ``len(history)`` alone, so this says
+    nothing the code does not already enforce; it only says it before the call is made.
+    """
+    if history < CALIBRATION_TARGET:
+        return (
+            f"With {history} vote(s) of history, the first batch still calibrates "
+            f"(fewer than {CALIBRATION_TARGET})."
+        )
+    return (
+        f"With {history} vote(s) of history, the first batch is past calibration and "
+        f"uses the '{options.novelty}' band you asked for."
+    )
 
 
 def read_key(stream: TextIO) -> str:
@@ -177,9 +241,18 @@ class _Deck:
     store: SessionStore
     meter: CostMeter
     watcher: PoolWatcher
+    #: Votes seeded from another vote set (``--seed-from``), oldest first. Prepended to
+    #: the store's own history for every batch, so they count for exclusion and for
+    #: whatever a strategy derives from votes; never written here and never scored.
+    seed: tuple[Vote, ...] = ()
     #: Every card shown so far, as the vote set describes it. The diversity metrics are
     #: computed over it, so they read the catalogue and not what the strategy claimed.
     catalog: dict[TitleRef, CatalogEntry] = field(default_factory=dict[TitleRef, CatalogEntry])
+
+    @property
+    def history(self) -> tuple[Vote, ...]:
+        """The seeded votes, then this session's own, oldest first throughout."""
+        return (*self.seed, *self.store.history)
 
 
 async def run_session(
@@ -198,8 +271,9 @@ async def run_session(
     card anybody would answer honestly twice.
     """
     target = private_path(options.out)
-    store = _store(target, options)
-    out.write(session_plan(options, len(store.user.votes)))
+    seed = _load_seed(options.seed_from)
+    store = _store(target, options, seed)
+    out.write(session_plan(options, len(store.user.votes), seed))
     confirm(confirmed=confirmed)
     connection = llm_connection(live=True)
     meter = CostMeter()
@@ -208,9 +282,10 @@ async def run_session(
     llm = CountingLlmProvider(llm_provider_factory(wire)(connection), meter)
     watcher = PoolWatcher()
     strategy = HybridStrategy(watcher.watching(Retrieval(metadata, POOL_SIZE)), metadata, llm)
+    deck = _Deck(store, meter, watcher, seed=seed.votes if seed is not None else ())
     outcomes: list[BatchOutcome] = []
     try:
-        outcomes = await _deal(strategy, metadata, _Deck(store, meter, watcher), options, out, keys)
+        outcomes = await _deal(strategy, metadata, deck, options, out, keys)
     finally:
         if transport is None:
             await wire.aclose()
@@ -226,7 +301,7 @@ async def run_session(
     return report
 
 
-def _store(target: Path, options: SessionOptions) -> SessionStore:
+def _store(target: Path, options: SessionOptions, seed: _Seed | None) -> SessionStore:
     try:
         return SessionStore.open(
             target,
@@ -235,6 +310,7 @@ def _store(target: Path, options: SessionOptions) -> SessionStore:
             language=options.language,
             region=options.region,
             novelty=options.novelty,
+            seed_source=seed.name if seed is not None else None,
         )
     except DatasetError as failure:
         raise EvalError(f"{target}: {failure}") from None
@@ -295,7 +371,7 @@ async def _batch(
         novelty=options.novelty,
         language=options.language,
         region=options.region,
-        history=deck.store.history,
+        history=deck.history,
         served=deck.store.voted,
         batch_index=index,
         seed=index,

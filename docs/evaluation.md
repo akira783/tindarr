@@ -389,6 +389,30 @@ shape as the committed fixtures — so the harness can replay it, and so it coul
 merged into a committed fixture **if, and only if, the person whose history it is says
 so**.
 
+**A first session starts from an empty history**, so its early batches calibrate — the
+model deliberately proposes famous titles to find out what you have already watched —
+rather than measuring what the engine does once it knows you. `--seed-from
+<fixture-dir-or-name>` loads an existing vote set's votes and hands them to the strategy
+as history before the first batch, exactly as the replay does when it reveals a prefix:
+a bare name (`akira-99`) is read under `fixtures/eval`, and a path is read as given, so a
+private vote set works too. The seeded votes count for exclusion — a seeded title is
+never proposed again — and for whatever the strategy derives from votes, calibration
+included: the same rule that ends calibration at fifteen votes sees them, so a seed
+above that count starts a session past calibration rather than forcing the mode by hand.
+They are never written into this session's own file and never counted in its own table,
+which stays exactly the cards this session judged; the file's `source` line records
+which vote set seeded it, and the confirmation screen says how many votes were seeded
+and which mode the first batch will therefore use.
+
+```bash
+cd server
+TINDARR_EVAL_TMDB_API_KEY="$(cat ~/tindarr-import/.tmdb_key)" \
+  TINDARR_EVAL_LLM_BASE_URL=http://172.23.0.2:8000/v1 \
+  TINDARR_EVAL_LLM_MODEL=gpt-5.6-luna \
+  uv run tindarr eval session --batches 3 --language fr --region FR --providers \
+  --seed-from akira-99
+```
+
 To replay one past the floors, record the TMDb answers it needs once:
 
 ```bash

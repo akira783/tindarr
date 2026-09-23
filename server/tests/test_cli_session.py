@@ -17,6 +17,7 @@ import httpx2
 import pytest
 
 from tests.support.ai import COMPATIBLE_URL, body_of
+from tindarr.main.cli import main
 from tindarr.main.evaluation import EvalError, catalog_service
 from tindarr.main.session import (
     SessionOptions,
@@ -24,9 +25,10 @@ from tindarr.main.session import (
     run_session,
     session_plan,
 )
-from tindarr.swipe.evaluation import load_dataset
+from tindarr.swipe.evaluation import EvalDataset, EvalUser, FixtureVote, load_dataset
 from tindarr.swipe.evaluation.session import ANSWERS, SessionStore, answered
 from tindarr.swipe.evaluation.synthetic import build_synthetic_dataset
+from tindarr.swipe.strategy import CALIBRATION_TARGET
 
 pytestmark = pytest.mark.anyio
 
@@ -120,6 +122,26 @@ def options(tmp_path: Path, **rest: Any) -> SessionOptions:
 def keystrokes(*keys: str) -> io.StringIO:
     """The keys somebody would press, one per line."""
     return io.StringIO("".join(f"{key}\n" for key in keys))
+
+
+def seed_fixture(
+    tmp_path: Path, count: int, *, name: str = "seed-fixture"
+) -> tuple[Path, list[int]]:
+    """Write a vote set of ``count`` votes on the synthetic catalogue's own titles.
+
+    Drawn from the same catalogue ``outside`` answers from, so a strategy that reached
+    past the exclusion would otherwise find these titles in its own pool.
+    """
+    entries = sorted(build_synthetic_dataset(SEED).catalog, key=lambda entry: entry.ref)[:count]
+    votes = tuple(
+        FixtureVote(seq=index, tmdb_id=entry.tmdb_id, kind=entry.kind, vote="seen_liked")
+        for index, entry in enumerate(entries)
+    )
+    user = EvalUser(id="them", votes=votes)
+    seed = EvalDataset(name=name, source="a fixture written for a test", users=(user,))
+    directory = tmp_path / name
+    seed.write(directory / "votes.json")
+    return directory, [entry.tmdb_id for entry in entries]
 
 
 async def test_a_session_writes_every_answer_where_the_repository_cannot_see_it(
@@ -245,6 +267,145 @@ async def test_a_session_names_the_services_that_carry_a_card_when_tmdb_knows(
     )
 
     assert "included in US: A Service" in out.getvalue()
+
+
+async def test_seeded_titles_are_never_proposed_again(tmp_path: Path, outside: _Outside) -> None:
+    directory, seeded_ids = seed_fixture(tmp_path, 5)
+
+    await run_session(
+        options(tmp_path, seed_from=str(directory)),
+        confirmed=True,
+        out=io.StringIO(),
+        keys=keystrokes("l", "l", "l"),
+        transport=outside,
+    )
+
+    assert outside.prompts
+    for prompt in outside.prompts:
+        for seeded_id in seeded_ids:
+            assert f"- {seeded_id} |" not in prompt
+
+
+async def test_seeded_votes_are_not_counted_in_the_sessions_own_metrics(
+    tmp_path: Path, outside: _Outside
+) -> None:
+    directory, seeded_ids = seed_fixture(tmp_path, 5)
+
+    report = await run_session(
+        options(tmp_path, seed_from=str(directory)),
+        confirmed=True,
+        out=io.StringIO(),
+        keys=keystrokes("l", "d", "s"),
+        transport=outside,
+    )
+
+    assert report.counts.scored == 3
+    stored = load_dataset(options(tmp_path).out)
+    assert len(stored.users[0].votes) == 3
+    assert {row.tmdb_id for row in stored.users[0].votes}.isdisjoint(seeded_ids)
+    assert f"seeded from '{directory.name}'" in stored.source
+
+
+async def test_the_first_batchs_mode_follows_the_seeded_vote_count(
+    tmp_path: Path, outside: _Outside
+) -> None:
+    below, _ = seed_fixture(tmp_path, CALIBRATION_TARGET - 1, name="below-threshold")
+    still_calibrating = io.StringIO()
+
+    await run_session(
+        options(tmp_path, seed_from=str(below)),
+        confirmed=True,
+        out=still_calibrating,
+        keys=keystrokes("l", "l", "l"),
+        transport=outside,
+    )
+
+    assert f"{CALIBRATION_TARGET - 1} vote(s) of history, the first batch still calibrates" in (
+        still_calibrating.getvalue()
+    )
+    assert any('pick_type to "calibration"' in prompt for prompt in outside.prompts)
+
+    outside.prompts.clear()
+    above, _ = seed_fixture(tmp_path, CALIBRATION_TARGET, name="at-threshold")
+    past_calibration = io.StringIO()
+
+    await run_session(
+        options(tmp_path, out=tmp_path / "private" / "second" / "votes.json", seed_from=str(above)),
+        confirmed=True,
+        out=past_calibration,
+        keys=keystrokes("l", "l", "l"),
+        transport=outside,
+    )
+
+    assert (
+        f"{CALIBRATION_TARGET} vote(s) of history, the first batch is past calibration"
+        in past_calibration.getvalue()
+    )
+    assert not any('pick_type to "calibration"' in prompt for prompt in outside.prompts)
+
+
+def test_a_missing_seed_fixture_fails_with_a_clear_one_line_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = main(
+        [
+            "eval",
+            "session",
+            "--out",
+            str(tmp_path / "private" / "votes.json"),
+            "--seed-from",
+            str(tmp_path / "nowhere"),
+        ]
+    )
+
+    assert code == 2
+    assert "cannot read the vote set" in capsys.readouterr().out
+    assert not (tmp_path / "private" / "votes.json").exists()
+
+
+def test_a_seed_fixture_with_no_users_fails_with_a_clear_one_line_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    empty = tmp_path / "empty"
+    EvalDataset(name="empty", source="a fixture written for a test").write(empty / "votes.json")
+
+    code = main(
+        [
+            "eval",
+            "session",
+            "--out",
+            str(tmp_path / "private" / "votes.json"),
+            "--seed-from",
+            str(empty),
+        ]
+    )
+
+    assert code == 2
+    assert "no users to seed a session from" in capsys.readouterr().out
+    assert not (tmp_path / "private" / "votes.json").exists()
+
+
+def test_a_malformed_seed_fixture_fails_with_a_clear_one_line_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    (broken / "votes.json").write_text("{not json", encoding="utf-8")
+
+    code = main(
+        [
+            "eval",
+            "session",
+            "--out",
+            str(tmp_path / "private" / "votes.json"),
+            "--seed-from",
+            str(broken),
+        ]
+    )
+
+    assert code == 2
+    assert "votes.json" in capsys.readouterr().out
+    assert not (tmp_path / "private" / "votes.json").exists()
 
 
 async def test_a_private_vote_set_nobody_can_read_stops_the_session(
