@@ -45,14 +45,14 @@ _SOURCE: Final = (
 #: Invented identifiers. TMDb's own ids are nowhere near this range, so a fixture id can
 #: never be mistaken for a real title, and nothing here is scraped from anybody's API.
 _FIRST_ID: Final = 900_001
-_TITLES: Final = 200
+_TITLES: Final = 120
 _LIBRARY_PER_USER: Final = 5
 #: Votes the fork labels 'calibration' before it knows anything about a person.
 _CALIBRATION_VOTES: Final = 15
 #: Every title above this popularity is "famous" — the pool the already-seen votes are
 #: drawn from, because that is where ADR 0013 found them: one card in the 1980s, eight
 #: in the 1990s, and the rest among the hits of the last twenty years.
-_FAMOUS_POPULARITY: Final = 50.0
+_FAMOUS_POPULARITY: Final = 70.0
 
 _GENRES: Final[tuple[str, ...]] = (
     "Action",
@@ -190,8 +190,9 @@ def build_synthetic_dataset(seed: int = 20260923) -> EvalDataset:
     """
     draw = random.Random(seed)  # noqa: S311 - a fixture, not a secret
     catalog = _catalog(draw)
-    taken: set[int] = set()
-    users = [_user(plan, catalog, taken, draw) for plan in _USERS]
+    # One household, one shelf: the three of them can have voted on the same title, as
+    # three people sharing a media server do.
+    users = [_user(plan, catalog, draw) for plan in _USERS]
     return EvalDataset(
         name=SYNTHETIC_NAME,
         source=_SOURCE,
@@ -234,11 +235,11 @@ def _catalog(draw: random.Random) -> list[CatalogEntry]:
     return entries
 
 
-def _user(
-    plan: _UserPlan, catalog: Sequence[CatalogEntry], taken: set[int], draw: random.Random
-) -> EvalUser:
+def _user(plan: _UserPlan, catalog: Sequence[CatalogEntry], draw: random.Random) -> EvalUser:
+    # Nobody votes on the same title twice, so the bookkeeping is per person.
+    taken: set[int] = set()
     loves, avoids = set(plan.loves), set(plan.avoids)
-    free = [entry for entry in catalog if entry.tmdb_id not in taken]
+    free = list(catalog)
     in_taste = [entry for entry in free if loves & set(entry.genres)]
     off_taste = [entry for entry in free if avoids & set(entry.genres)]
     neutral = [entry for entry in free if entry not in in_taste and entry not in off_taste]

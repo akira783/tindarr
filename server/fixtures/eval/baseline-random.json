@@ -1,0 +1,46 @@
+{
+  "counts": {
+    "batches": 9,
+    "scored": 14,
+    "usable": 90
+  },
+  "dataset": "synthetic-99",
+  "metrics": {
+    "agreement": 0.857143,
+    "already_seen_rate": 0.571429,
+    "coverage": 0.155556,
+    "fill_rate": 1.0,
+    "franchise_repeat_rate": 0.333333,
+    "genre_diversity": 0.922222,
+    "like_rate": 0.285714,
+    "llm_calls_per_batch": 0.0,
+    "llm_tokens_per_card": 0.0,
+    "new_like_rate": 0.666667,
+    "skip_rate": 0.022222,
+    "tmdb_calls_per_batch": 10.0,
+    "usable_per_batch": 10.0,
+    "waste_rate": 0.0
+  },
+  "options": {
+    "batch_size": 10,
+    "max_batches": null,
+    "seed": 1,
+    "warm_up": 10
+  },
+  "strategy": "random",
+  "tolerances": {
+    "already_seen_rate": 0.02,
+    "fill_rate": 0.02,
+    "franchise_repeat_rate": 0.02,
+    "genre_diversity": 0.05,
+    "like_rate": 0.02,
+    "llm_calls_per_batch": 0.25,
+    "llm_tokens_per_card": 50.0,
+    "new_like_rate": 0.02,
+    "skip_rate": 0.02,
+    "tmdb_calls_per_batch": 1.0,
+    "usable_per_batch": 0.25,
+    "waste_rate": 0.02
+  },
+  "version": 1
+}

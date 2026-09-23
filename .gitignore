@@ -34,6 +34,10 @@ setup-code
 web/dist/
 web/coverage/
 
+# Vote sets imported from a real instance (tindarr eval import). Real viewing
+# history: it is replayed locally and never committed.
+server/fixtures/eval/private/
+
 # End-to-end runs (.github/scripts/e2e-stack.sh)
 .e2e-state/
 e2e-logs/

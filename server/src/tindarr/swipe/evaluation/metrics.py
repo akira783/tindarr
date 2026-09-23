@@ -39,18 +39,25 @@ type Direction = Literal["higher", "lower", "flat"]
 #: Whether a number was counted or guessed.
 type Kind = Literal["measured", "estimated"]
 
-#: Read this as the harness's opinion, stated once. ``flat`` means "watch it, do not
-#: grade it": a run that suddenly covers half as many cards is suspicious in either
-#: direction, and the gate handles those through the counts instead.
+#: Read this as the harness's opinion, stated once.
+#:
+#: ``flat`` means "print it, do not grade it", and two metrics are deliberately there.
+#: **Coverage** measures how much of a strategy's output this fixture happens to have an
+#: opinion on; a strategy that reaches past the recorded history lowers it, and that is
+#: not a fault. **Agreement** counts ``seen_liked`` as a hit, which it is — the user did
+#: like the film — so the strategy ADR 0013 asks for, the one that stops serving titles
+#: people have already watched, will *lower* it. Grading either would make the gate
+#: punish the improvement it exists to protect. The denominators are guarded by the
+#: counts instead (``tindarr.swipe.evaluation.gate``).
 DIRECTIONS: Final[Mapping[str, Direction]] = {
     "fill_rate": "higher",
     "usable_per_batch": "higher",
     "waste_rate": "lower",
-    "coverage": "higher",
+    "coverage": "flat",
     "already_seen_rate": "lower",
     "like_rate": "higher",
     "new_like_rate": "higher",
-    "agreement": "higher",
+    "agreement": "flat",
     "skip_rate": "lower",
     "genre_diversity": "higher",
     "franchise_repeat_rate": "lower",
@@ -68,11 +75,11 @@ MEANINGS: Final[Mapping[str, str]] = {
     "fill_rate": "cards returned, over cards asked for",
     "usable_per_batch": "cards per batch that could really have been shown",
     "waste_rate": "proposed cards the strategy had been told to avoid",
-    "coverage": "usable cards the fixture has an opinion on",
+    "coverage": "usable cards the fixture has an opinion on (context, not a score)",
     "already_seen_rate": "scored cards the user had already watched (ADR 0013: 47 %)",
     "like_rate": "scored cards the user wanted, and had not seen",
     "new_like_rate": "likes among the cards that were new to them (ADR 0013: 63 %)",
-    "agreement": "scored cards the user reacted well to, seen or not",
+    "agreement": "scored cards the user liked, already seen or not (read with the row above)",
     "skip_rate": "usable cards the user had no opinion on at all",
     "genre_diversity": "distinct genres per catalogued card in a batch",
     "franchise_repeat_rate": "batches serving the same franchise twice",
