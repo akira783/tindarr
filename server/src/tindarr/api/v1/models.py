@@ -182,6 +182,18 @@ class TokenPairResponse(BaseModel):
         )
 
 
+#: Longest remote product name or version shown in the console.
+MAX_REMOTE_LABEL: Final = 64
+
+
+def _short(value: str | None) -> str | None:
+    """Cut a remote service's own words to a length a product name can plausibly be."""
+    if value is None:
+        return None
+    trimmed = value.strip()
+    return trimmed[:MAX_REMOTE_LABEL] or None
+
+
 class ConnectorStatusResponse(BaseModel):
     """Contract schema ``ConnectorStatus``: coarse health, never a response body.
 
@@ -198,11 +210,18 @@ class ConnectorStatusResponse(BaseModel):
 
     @classmethod
     def of(cls, check: ConnectionCheck, checked_at: datetime) -> "ConnectorStatusResponse":
-        """Build the response for a connection test."""
+        """Build the response for a connection test.
+
+        The name and the version are the two things a remote service is allowed to put
+        in this answer (the security model, section 7), and they are the only two that
+        are not Tindarr's own words. They are therefore cut to a length a product name
+        can plausibly be: a service that answers with a kilobyte of prose gets a
+        kilobyte fewer characters in somebody's console.
+        """
         return cls(
             health=check.health,
-            server_name=check.server_name,
-            server_version=check.server_version,
+            server_name=_short(check.server_name),
+            server_version=_short(check.server_version),
             checked_at=checked_at,
         )
 

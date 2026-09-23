@@ -29,6 +29,7 @@ near-miss, which is what stops "Dune" (1984) being served for a 2021 suggestion.
 """
 
 import logging
+import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -76,6 +77,14 @@ OFFER_BUCKETS: Final[tuple[tuple[str, OfferKind], ...]] = (
 _TRAILER_TYPES: Final = ("Trailer", "Teaser")
 #: The only video host Tindarr will point the app at.
 _YOUTUBE: Final = "YouTube"
+#: A YouTube video id, as the contract's ``Trailer.key`` defines it. A key that does
+#: not look like one is dropped rather than passed on: the app turns it into a
+#: ``youtube-nocookie.com`` URL, so it is a value that becomes part of a link.
+_YOUTUBE_KEY: Final = re.compile(r"[A-Za-z0-9_-]{6,20}")
+#: An image path as TMDb writes them: a leading slash and a plain file name. Anything
+#: else is dropped, because the API turns a path into a URL under TMDb's image host and
+#: a path with ``..`` or a scheme in it would not stay under it.
+_IMAGE_PATH: Final = re.compile(r"/[A-Za-z0-9._-]{1,128}")
 #: A v4 read access token is a JWT; a v3 key is not.
 _BEARER_PREFIX: Final = "eyJ"
 _JWT_PARTS: Final = 3
@@ -100,6 +109,17 @@ def normalize_title(value: str) -> str:
     if len(words) > 1 and words[-1].isdigit() and len(words[-1]) == _YEAR_DIGITS:
         words = words[:-1]
     return " ".join(words)
+
+
+def image_path(value: object) -> str | None:
+    """Return a TMDb image path, or ``None`` when it is not one.
+
+    The API prefixes these with TMDb's allow-listed image base (the security model,
+    section 6), so what is stored has to be a path and nothing else: an absolute URL or
+    a ``..`` here would walk straight out of that base.
+    """
+    text = as_text(value)
+    return text if text is not None and _IMAGE_PATH.fullmatch(text) else None
 
 
 def _int(value: object) -> int | None:
@@ -151,7 +171,7 @@ def title_of(row: Mapping[str, Any], kind: MediaKind) -> Title | None:
         ),
         year=_year_of(date),
         overview=as_text(row.get("overview")),
-        poster_path=as_text(row.get("poster_path")),
+        poster_path=image_path(row.get("poster_path")),
         original_language=as_text(row.get("original_language")),
         popularity=_float(row.get("popularity")) or 0.0,
         vote_average=_float(row.get("vote_average")),
@@ -499,8 +519,8 @@ def _details_of(payload: Mapping[str, Any], ref: TitleRef) -> TitleDetails:
         runtime_minutes=runtime,
         seasons=_int(payload.get("number_of_seasons")),
         episodes=_int(payload.get("number_of_episodes")),
-        poster_path=as_text(payload.get("poster_path")),
-        backdrop_path=as_text(payload.get("backdrop_path")),
+        poster_path=image_path(payload.get("poster_path")),
+        backdrop_path=image_path(payload.get("backdrop_path")),
         original_language=as_text(payload.get("original_language")),
         vote_average=_float(payload.get("vote_average")),
         vote_count=_int(payload.get("vote_count")) or 0,
@@ -523,7 +543,7 @@ def _provider_of(row: Mapping[str, Any], offer: OfferKind) -> Provider | None:
         provider_id=provider_id,
         name=name,
         offer=offer,
-        logo_path=as_text(row.get("logo_path")),
+        logo_path=image_path(row.get("logo_path")),
     )
 
 
@@ -547,7 +567,9 @@ def _best_trailer(rows: Sequence[Mapping[str, Any]], iso: str) -> Trailer | None
     for row in rows:
         key = as_text(row.get("key"))
         kind = as_text(row.get("type"))
-        if as_text(row.get("site")) != _YOUTUBE or key is None or kind not in _TRAILER_TYPES:
+        if as_text(row.get("site")) != _YOUTUBE or kind not in _TRAILER_TYPES:
+            continue
+        if key is None or not _YOUTUBE_KEY.fullmatch(key):
             continue
         language = as_text(row.get("iso_639_1"))
         rank = (

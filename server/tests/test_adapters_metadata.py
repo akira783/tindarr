@@ -509,6 +509,48 @@ async def test_a_title_with_no_youtube_video_has_no_trailer(tmdb: FakeTmdb) -> N
     assert await metadata(tmdb).trailer(ARRIVAL, "en") is None
 
 
+@pytest.mark.parametrize(
+    "key", ["../../evil", "abc", "a" * 40, "key with space", "https://evil.test/v"]
+)
+async def test_a_video_key_that_is_not_a_youtube_id_is_dropped(tmdb: FakeTmdb, key: str) -> None:
+    # The app turns this into a youtube-nocookie.com URL, so it becomes part of a link.
+    tmdb.videos[("movie", 329865)] = [
+        {"site": "YouTube", "key": key, "type": "Trailer", "official": True}
+    ]
+    assert await metadata(tmdb).trailer(ARRIVAL, "en") is None
+
+
+@pytest.mark.parametrize(
+    "path", ["../../etc/passwd", "https://evil.test/a.jpg", "no-leading-slash.jpg", "/"]
+)
+async def test_an_image_path_that_would_leave_tmdbs_host_is_dropped(
+    tmdb: FakeTmdb, path: str
+) -> None:
+    tmdb.add_search("movie", "odd", movie_result(9, "Odd", poster_path=path))
+
+    found = await metadata(tmdb).search(SearchQuery(title="Odd", kind="movie"))
+
+    assert found[0].poster_path is None
+
+
+async def test_a_real_image_path_is_kept(tmdb: FakeTmdb) -> None:
+    tmdb.add_search("movie", "fine", movie_result(9, "Fine", poster_path="/a1b2.jpg"))
+    found = await metadata(tmdb).search(SearchQuery(title="Fine", kind="movie"))
+    assert found[0].poster_path == "/a1b2.jpg"
+
+
+async def test_a_provider_logo_is_a_path_too(tmdb: FakeTmdb) -> None:
+    tmdb.providers[("movie", 329865)] = {
+        "FR": {
+            "flatrate": [
+                {"provider_id": 8, "provider_name": "Netflix", "logo_path": "//evil.test/x"}
+            ]
+        }
+    }
+    found = await metadata(tmdb).watch_providers(ARRIVAL, "FR")
+    assert found[0].logo_path is None
+
+
 async def test_a_failing_video_call_is_a_metadata_problem(tmdb: FakeTmdb) -> None:
     tmdb.fails["/movie/329865/videos"] = 503
     with pytest.raises(ProblemError):

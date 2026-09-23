@@ -202,6 +202,20 @@ def test_a_test_saves_nothing(app: FastAPI) -> None:
     assert listed["tmdb"]["configured"] is False
 
 
+def test_a_services_own_words_are_cut_to_a_plausible_length(
+    app: FastAPI, outside: FakeOutside
+) -> None:
+    outside.seerr.version = "2.7.3" + "!" * 5000
+
+    with console_client(app) as client:
+        csrf = set_up_server(client, app)
+        response = check_one(client, csrf, "requests", requests_body())
+
+    version = response.json()["server_version"]
+    assert version is not None
+    assert len(version) == 64
+
+
 def test_a_test_never_reflects_what_the_service_said(app: FastAPI) -> None:
     with console_client(app) as client:
         csrf = set_up_server(client, app)
