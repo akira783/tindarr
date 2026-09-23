@@ -265,21 +265,29 @@ def test_handle_creation_is_limited_over_time(app: FastAPI, clock: FakeClock) ->
     assert_is_problem(response, 429, "rate_limited")
 
 
-def test_the_global_cap_refuses_rather_than_growing(app: FastAPI) -> None:
+def test_the_global_cap_bounds_the_memory_without_locking_the_house_out(
+    app: FastAPI,
+) -> None:
+    """M2: two hundred outstanding handles is a memory bound, not a door.
+
+    Strangers can hold every slot — 40 addresses holding 5 outstanding each is within every
+    per-client limit — and on a Plex server the PIN is the only way to sign in. The
+    table still never grows past the cap; the slot is taken from whoever holds most.
+    """
     with console_client(app) as client:
         set_up_server(client, app)
         services: Any = app.state.services
-        # Two hundred outstanding handles is a memory bound, and the one global limit
-        # that refuses instead of slowing down (docs/auth.md, section 8).
         for index in range(MAX_TOTAL - services.handles.outstanding):
             services.handles.create(
                 "quick_connect",
                 "sign_in",
                 Binding.session(f"session-{index}"),
-                client_key=f"10.0.{index // 250}.{index % 250}",
+                client_key=f"203.0.113.{index // 5}",
             )
-        response = start_quick_connect(client)
-    assert_is_problem(response, 429, "rate_limited")
+        assert services.handles.outstanding == MAX_TOTAL
+        # The console is on the local network: it gets in, and nothing grew.
+        assert start_quick_connect(client).status_code == 201
+        assert services.handles.outstanding == MAX_TOTAL
 
 
 # --- Plex --------------------------------------------------------------------------------------

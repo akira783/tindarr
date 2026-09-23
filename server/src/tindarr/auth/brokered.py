@@ -95,7 +95,11 @@ class PlexPinFlow:
         # The slot is taken first: a refused caller must not still make plex.tv issue a
         # PIN, and this endpoint needs no credential at all for an app sign-in.
         with self._handles.reserving(
-            "plex_pin", purpose, binding, client_key=caller.client_key
+            "plex_pin",
+            purpose,
+            binding,
+            client_key=caller.client_key,
+            client_is_private=caller.client_is_private,
         ) as handle:
             pin = await self._plex_tv.create_pin(client_id, f"Tindarr ({name})")
             handle.attach(pin=pin, upstream_expiry=pin.expires_at)
@@ -207,7 +211,11 @@ class QuickConnectFlow:
         # The slot first: a Quick Connect request created for a caller who is then
         # refused would be an orphan no sweep could ever find.
         with self._handles.reserving(
-            "quick_connect", purpose, binding, client_key=caller.client_key
+            "quick_connect",
+            purpose,
+            binding,
+            client_key=caller.client_key,
+            client_is_private=caller.client_is_private,
         ) as handle:
             try:
                 started = await adapter.quick_connect_start()

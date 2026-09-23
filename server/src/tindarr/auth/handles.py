@@ -17,13 +17,15 @@ Three things make a handle usable, and all three are checked on every call:
 
 Handles live **in memory only**, so a restart forgets them and clients simply start
 again. Two caps bound that memory: five outstanding per client address and two hundred
-in all. The global one is the only limit in Tindarr that refuses rather than slows
-down, because it protects a fixed resource (docs/auth.md, section 8).
+in all. The per-client cap refuses. The global one does not, because on a Plex server
+the PIN is the only way in and a full table would be a household-wide lockout: it
+takes the slot from whichever client holds the most outstanding handles, and never
+from a client on the local network to serve one that is not (docs/auth.md, section 5).
 """
 
 import base64
 import hashlib
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -105,6 +107,9 @@ class Handle:
     purpose: HandlePurpose
     binding: Binding
     client_key: str
+    #: Whether that address is on the local network: a household sign-in is never
+    #: dropped to make room for one coming from outside (docs/auth.md, section 5).
+    client_is_private: bool
     expires_at: datetime
     #: The upstream credential: a plex.tv PIN, or a Jellyfin Quick Connect secret.
     pin: PlexPin | None = None
@@ -164,7 +169,13 @@ class HandleRegistry:
 
     @contextmanager
     def reserving(
-        self, kind: HandleKind, purpose: HandlePurpose, binding: Binding, *, client_key: str
+        self,
+        kind: HandleKind,
+        purpose: HandlePurpose,
+        binding: Binding,
+        *,
+        client_key: str,
+        client_is_private: bool = False,
     ) -> Generator[Handle]:
         """Take the slot **before** the upstream call, and give it back if that fails.
 
@@ -176,13 +187,14 @@ class HandleRegistry:
         now = self._clock.now()
         self._forget_expired(now)
         self._creation_limit.hit(client_key)
-        self._check_caps(client_key)
+        self._check_caps(client_key, client_is_private=client_is_private)
         handle = Handle(
             id=new_id(),
             kind=kind,
             purpose=purpose,
             binding=binding,
             client_key=client_key,
+            client_is_private=client_is_private,
             expires_at=now + MAX_LIFETIME[kind],
         )
         self._handles[handle.id] = handle
@@ -200,21 +212,59 @@ class HandleRegistry:
         binding: Binding,
         *,
         client_key: str,
+        client_is_private: bool = False,
         upstream_expiry: datetime | None = None,
         pin: PlexPin | None = None,
         secret: str | None = None,
     ) -> Handle:
         """Reserve and fill a handle in one go, for a credential already in hand."""
-        with self.reserving(kind, purpose, binding, client_key=client_key) as handle:
+        with self.reserving(
+            kind, purpose, binding, client_key=client_key, client_is_private=client_is_private
+        ) as handle:
             handle.attach(pin=pin, secret=secret, upstream_expiry=upstream_expiry)
         return handle
 
-    def _check_caps(self, client_key: str) -> None:
-        if len(self._handles) >= self._max_total:
-            raise self._too_many("global")
+    def _check_caps(self, client_key: str, *, client_is_private: bool) -> None:
         mine = sum(1 for handle in self._handles.values() if handle.client_key == client_key)
         if mine >= self._max_per_client:
             raise self._too_many("per_client")
+        if len(self._handles) >= self._max_total and not self._evict_for(
+            client_key, client_is_private=client_is_private
+        ):
+            raise self._too_many("global")
+
+    def _evict_for(self, client_key: str, *, client_is_private: bool) -> bool:
+        """Free one slot by dropping the greediest other client's oldest handle.
+
+        The global cap is a memory bound, and a bound that refuses is a lockout: on a
+        Plex server the PIN is the only way in, so 200 handles held by strangers would
+        close the door on the whole household (docs/auth.md, sections 5 and 8). The
+        cap is kept — the table never grows — but the slot is taken from whoever holds
+        the most, so nobody can hoard it. A client on the local network is never the
+        one sacrificed for a client that is not, and the caller's own handles are never
+        touched (the per-client cap already limits those).
+        """
+        counts: Counter[str] = Counter()
+        private: dict[str, bool] = {}
+        for handle in self._handles.values():
+            if handle.client_key == client_key:
+                continue
+            counts[handle.client_key] += 1
+            private[handle.client_key] = private.get(handle.client_key, False) or (
+                handle.client_is_private
+            )
+        candidates = [key for key in counts if client_is_private or not private[key]]
+        if not candidates:
+            return False
+        # Ties go to the client whose oldest handle came first: `counts` follows the
+        # insertion order of the registry.
+        greediest = max(candidates, key=lambda key: counts[key])
+        for handle_id, handle in self._handles.items():
+            if handle.client_key == greediest:
+                security_event("handle_evicted", scope="global")
+                self._discard(handle_id, handle)
+                return True
+        return False  # pragma: no cover - `greediest` came from the table itself
 
     @staticmethod
     def _too_many(scope: str) -> RateLimitedError:
@@ -294,13 +344,20 @@ class HandleRegistry:
 
     def _forget_expired(self, now: datetime) -> None:
         for handle_id, handle in list(self._handles.items()):
-            if not handle.expired(now):
-                continue
-            del self._handles[handle_id]
-            if handle.kind == "quick_connect" and not handle.collected:
-                self._to_sweep.append(handle)
+            if handle.expired(now):
+                self._discard(handle_id, handle)
         # The sweep runs every 30 seconds; this only bounds the list if it ever stops.
         del self._to_sweep[: -self._max_total]
+
+    def _discard(self, handle_id: str, handle: Handle) -> None:
+        """Remove a handle that was not used, keeping what the sweep still has to close.
+
+        A Quick Connect request the user approved created a session on Jellyfin the
+        moment they approved it, whether or not anyone collected it.
+        """
+        del self._handles[handle_id]
+        if handle.kind == "quick_connect" and not handle.collected:
+            self._to_sweep.append(handle)
 
     @property
     def outstanding(self) -> int:

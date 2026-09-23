@@ -41,6 +41,7 @@ def start(registry: HandleRegistry, **fields: object) -> str:
         purpose,  # type: ignore[arg-type]
         binding,
         client_key=str(fields.pop("client_key", CLIENT)),
+        client_is_private=bool(fields.pop("client_is_private", False)),
         secret="qc-secret",
     ).id
 
@@ -156,6 +157,54 @@ def test_the_global_cap_is_checked_first(clock: FakeClock) -> None:
     start(registry)
     with pytest.raises(RateLimitedError):
         start(registry)
+
+
+def test_the_global_cap_takes_the_slot_from_the_greediest_client(clock: FakeClock) -> None:
+    """M2: a full table must not be a household-wide lockout.
+
+    On a Plex server the PIN is the only way in, so strangers holding every slot would
+    deny every sign-in in the house. The cap still holds — the table never grows — but
+    the slot comes from whoever hoards the most.
+    """
+    limit = SlidingWindow(Limit("handle_creation", 1000, timedelta(minutes=15)), clock)
+    registry = HandleRegistry(clock, limit, max_total=10)
+    greedy = [start(registry, client_key="203.0.113.7") for _ in range(5)]
+    for index in range(5):
+        start(registry, client_key=f"198.51.100.{index}")
+    assert registry.outstanding == 10
+
+    mine = start(registry, client_key="192.168.1.30", client_is_private=True)
+
+    assert registry.outstanding == 10  # the memory bound is untouched
+    registry.use(mine, "quick_connect", "sign_in", Binding.verifier(VERIFIER))
+    with pytest.raises(ProblemError):  # the greediest client lost its oldest, only it
+        registry.use(greedy[0], "quick_connect", "sign_in", Binding.verifier(VERIFIER))
+    registry.use(greedy[1], "quick_connect", "sign_in", Binding.verifier(VERIFIER))
+
+
+def test_a_stranger_never_takes_the_slot_of_a_client_on_the_local_network(
+    clock: FakeClock,
+) -> None:
+    limit = SlidingWindow(Limit("handle_creation", 1000, timedelta(minutes=15)), clock)
+    registry = HandleRegistry(clock, limit, max_total=4)
+    household = [
+        start(registry, client_key=f"192.168.1.{index}", client_is_private=True)
+        for index in range(4)
+    ]
+    with pytest.raises(RateLimitedError):
+        start(registry, client_key="203.0.113.7")
+    assert registry.outstanding == 4
+    for handle_id in household:
+        registry.use(handle_id, "quick_connect", "sign_in", Binding.verifier(VERIFIER))
+
+
+def test_an_evicted_quick_connect_handle_still_reaches_the_sweep(clock: FakeClock) -> None:
+    # It may already hold a Jellyfin session: the sweep is what closes it.
+    limit = SlidingWindow(Limit("handle_creation", 1000, timedelta(minutes=15)), clock)
+    registry = HandleRegistry(clock, limit, max_total=1)
+    evicted = start(registry, client_key="203.0.113.7")
+    start(registry, client_key="192.168.1.30", client_is_private=True)
+    assert [handle.id for handle in registry.sweep()] == [evicted]
 
 
 def test_creation_is_limited_over_a_window(registry: HandleRegistry, clock: FakeClock) -> None:

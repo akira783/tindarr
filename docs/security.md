@@ -90,8 +90,13 @@ The exact rules and numbers for this section are in
   preview, request and completion, token refresh and the setup claim are public, plus
   the console's static files. `server/info` returns no user data and no internal URLs.
   Every public endpoint is rate-limited per client IP. Global thresholds only slow
-  requests down, so an attacker cannot block legitimate use; the only global refusal is
-  a memory cap on outstanding sign-in handles.
+  requests down, so an attacker cannot block legitimate use. The memory cap on
+  outstanding sign-in handles is the one fixed resource: it is held by taking the slot
+  from whichever client holds the most, never by refusing the household — on a Plex
+  server the PIN is the only way in, so a full table had to stop being a lockout. The
+  per-username password cap is the one limit that does refuse a name it has no room
+  for, deliberately: it protects the media server's own lockout counter, and a live
+  bucket is never evicted to make space.
 - **Plex PIN and Quick Connect hijacking.** The `pin_id` or `handle` a client polls
   with is a random server-side handle (128 bits), not the plex.tv PIN id or the
   Jellyfin Quick Connect secret. It is bound to its purpose (sign-in, re-authentication

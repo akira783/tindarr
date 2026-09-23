@@ -570,7 +570,7 @@ at a time.
 | Pairing completion polls | client IP | 90 per min | `429` |
 | Every pairing call | global | 300 per min | slowdown |
 | Handle creation (Plex PIN, Quick Connect) | client IP | 10 per 15 min, 5 outstanding | `429` |
-| Outstanding handles | global | 200 | `429` (memory bound) |
+| Outstanding handles | global | 200 | the slot is taken from whichever client holds the most, so the table never grows; `429` only when the only handles left belong to the local network and the caller does not |
 | Handle polling | handle | one upstream call per second | `202` with `retry_after_ms` |
 | Token refresh | client IP | 30 per min | `429` |
 | Other public endpoints (`server/info`) | client IP | 60 per min | `429` |
