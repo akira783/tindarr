@@ -50,8 +50,8 @@ is not a hit and not a miss. It is counted as the gap in coverage that it is.
 | `waste_rate` | lower | pool-free | measured | proposed cards the strategy had been told to avoid |
 | `liked_recall` | higher | pool-free | measured | titles the user liked that the strategy found at all |
 | `liked_recall_top` | higher | pool-free | measured | the same, counting only the first three cards of a batch |
-| `seen_per_batch` | lower | pool-free | measured | cards per batch the user had already watched |
-| `disliked_per_batch` | lower | pool-free | measured | cards per batch the user turned down |
+| `seen_per_batch` | lower | bound | measured | cards per batch the user had already watched |
+| `disliked_per_batch` | lower | bound | measured | cards per batch the user turned down |
 | `coverage` | — | pool-free | measured | usable cards the fixture has an opinion on |
 | `catalogue_coverage` | — | pool-free | measured | usable cards the fixture can describe |
 | `already_seen_rate` | lower | votes | measured | scored cards the user had already watched (**the fork: 47 %**) |
@@ -79,8 +79,11 @@ So each metric declares what it needs:
 
 - **`pool-free`** — meaningful whatever the pool was. Either it divides by what the
   strategy was *asked* for (`fill_rate`, `waste_rate`, the cost rows) or by a
-  denominator the vote set fixes before the run (the two recalls), or it is a count
-  rather than a rate (`seen_per_batch`, `disliked_per_batch`).
+  denominator the vote set fixes before the run (the two recalls).
+- **`bound`** — a **lower bound**: a count of faults, which can only count the ones the
+  fixture recognises. Every fault it reports is real; the ones it misses are invisible.
+  So it is honest to print and unsafe to compare between two runs of different depth,
+  and it is held to the same card count as a rate.
 - **`votes`** — divides by the proposed cards the fixture voted on.
 - **`catalogue`** — needs the fixture to *describe* the proposed cards; with an open
   pool it usually cannot.
@@ -92,10 +95,18 @@ one card is worth more than eight points, and the gate's tolerance is two. The b
 says which comparisons it declined, every time — a gate nobody knows is switched off is
 worse than no gate.
 
-Shrinking the denominator to escape a comparison does not help, and that is the point.
-The pool-free metrics go on being graded: a strategy proposing titles nobody voted on
-scores nothing on `liked_recall`, and `seen_per_batch` keeps counting the cards it
-wasted.
+**Shrinking the denominator does buy an escape, for everything but recall**, and it is
+worth being exact about that rather than claiming otherwise. A strategy proposing titles
+nobody voted on drives `scored` down, takes the `votes` and `bound` rows below twelve
+cards, and stops being compared on them. The escape is left open because the alternative
+— comparing "no faults out of two recognisable cards" with "five out of seven" — is not
+a comparison either.
+
+What closes it is `liked_recall`, whose denominator no strategy can move: the escape
+costs the strategy every confirmable like it gave up, and `fill_rate` and
+`usable_per_batch` stop it shrinking the batch instead. That only bites on a vote set
+that confirms enough likes for recall to discriminate — `synthetic-99` does,
+`akira-99` with an open pool does not, and the CI gate runs both.
 
 ### Recall and avoidance: the two that an open pool cannot dilute
 
@@ -115,13 +126,15 @@ a find, it is the fault below.
 **`seen_per_batch`** and **`disliked_per_batch`** are counts, deliberately. Serving a
 title the user had already watched, or one they turned down, costs a swipe whether or
 not the nine cards beside it happened to be scoreable — dividing that fault by a
-denominator an open pool empties is exactly how it disappears. ADR 0013's 47 % is 4.7
-already-seen cards in a batch of ten; this is that number, in cards.
+denominator an open pool empties is how it disappears entirely. ADR 0013's 47 % is 4.7
+already-seen cards in a batch of ten; this is that number, in cards. It is a **lower
+bound**, marked `bound` in the table: it counts the faults the fixture can confirm and
+is blind to the rest, so "zero already-seen cards" means "none this fixture can prove".
 
-**They hold each other up.** Recall alone is beaten by proposing everything in sight;
-the avoidance counts alone are beaten by proposing obscure titles nobody has an opinion
-on — which scores zero recall. And `fill_rate` and `usable_per_batch` are graded too, so
-a strategy cannot make the counts small by shrinking the batch.
+**Recall holds them up.** The avoidance counts alone are beaten by proposing obscure
+titles nobody has an opinion on — which scores zero recall. `fill_rate` and
+`usable_per_batch` are graded too, so a strategy cannot make the counts small by
+shrinking the batch.
 
 Everything is counted against the fixture except one thing, and the table says which:
 token counts are **measured** when the AI provider reports them and **estimated** at four
@@ -159,17 +172,17 @@ Every rate is printed with its denominator, and the gate reads the denominators 
   sharpest form of the point above, and it is the reason a high recall on `akira-99` is
   not on its own evidence of a better deck.
 - **A model is not deterministic, and at these coverages one card is worth points.**
-  `akira-99` confirms six to nine of ninety proposed cards, so one title found or missed
-  moves `liked_recall` by 3.3 points — more than the gate's tolerance. The committed
+  `akira-99` confirms two to seven of ninety proposed cards, so one title found or
+  missed moves `liked_recall` by 3.3 points — more than the gate's tolerance. The committed
   numbers are exact, because the replay reads a recorded answer; what they are not is
   *repeatable under a new recording*. Two configurations that differ by one or two cards
   on this vote set have not been told apart.
 - **A vote cast later is used as the opinion at this point.** Tastes move. Over a few
   months of votes this is a small lie; over years it would not be.
 - **The rates rest on tens of cards, not thousands, and since lot 4b on fewer.** With a
-  TMDb pool, coverage is around 20 % on `synthetic-99` — whose "TMDb" is its own invented
-  catalogue — and around 2 % on `akira-99`, where the pool really is TMDb and the fixture
-  has an opinion on 99 titles out of it. The report says so in its notes, marks the
+  TMDb pool, coverage is 13–22 % on `synthetic-99` — whose "TMDb" is its own invented
+  catalogue — and 2–8 % on `akira-99`, where the pool really is TMDb and the fixture has
+  an opinion on 99 titles out of it. The report says so in its notes, marks the
   affected rows, and the gate stops comparing them. That is the trade lot 4b made
   deliberately: a strategy measured on a realistic pool, with fewer numbers that mean
   anything, rather than a strategy measured on a shortlist of titles somebody already
@@ -248,8 +261,11 @@ scoring is wrong, and the fix would then be in the scoring — never in the expe
 
 Published is the minimum a replay needs: the TMDb id, the media type, the verdict, the
 rank of the vote in the history, and which kind of pick produced the card. Not published:
-the account, every timestamp, the taste profile the engine had written, the household's
-library, and every word the model generated. The catalogue beside the votes — titles,
+the account, every timestamp, the taste profile the fork's engine had written, the
+household's library, and every word **that** engine generated. (`llm.json` beside it does
+hold model prose — the rationales this project's own hybrid wrote while being measured,
+about titles already in `votes.json`. Nothing there is a fact about the author that the
+vote set does not already carry.) The catalogue beside the votes — titles,
 years, genres, franchises, popularity — is TMDb's own data about public films and series,
 and says nothing about a person.
 
@@ -339,9 +355,12 @@ comes from `TINDARR_EVAL_LLM_BASE_URL` (`TINDARR_EVAL_LLM_MODEL`,
 harness is a development command, and a default that reaches a named vendor is a default
 that bills somebody by accident. The plan prints the address before anything is sent.
 
-`--record <dir>` **merges** what came back into that directory's cassettes — one live run
-per strategy, each adding the pages and the details it asked for, so a second run does
-not throw away the first one's answers. Delete the file to record from nothing.
+`--record <dir>` **extends** that directory's cassettes. A live run reads the committed
+answers first and only calls out for what is missing, so recording a second strategy
+cannot move the ground under the first one's numbers — TMDb's "most popular" changes
+hour to hour, and a discovery page that moved would leave an earlier strategy's recorded
+model answers no longer matching the prompt an offline replay builds from that page.
+Delete the file to record from nothing.
 
 The credential is stripped before a request becomes a cassette key, so a recording is
 safe to keep and survives a key rotation. A model recording goes one step further: the
@@ -438,48 +457,67 @@ so every number below reproduces exactly. Read the `pool-free` rows first; the r
 marked `?` in the report wherever fewer than twelve cards went into them, and the gate
 does not compare those.
 
-**`synthetic-99`** (coverage 13–22 %, so the rates still mean something):
+**`synthetic-99`** (coverage 14–23 %, so the rates still mean something — the hybrid's
+thirteen scored cards are barely over the twelve-card comparability threshold, so two
+confirmable cards fewer and half this table stops being compared):
 
 | | `popular` | `random` | **`hybrid`** |
 |---|---|---|---|
-| `liked_recall` | 8.7 % | **21.7 %** | 17.4 % |
-| `liked_recall_top` | 0.0 % | **4.3 %** | **4.3 %** |
-| `seen_per_batch` | 1.67 | 0.89 | **0.78** |
-| `disliked_per_batch` | 0.22 | **0.11** | **0.11** |
-| `fill_rate` | 96.7 % | 96.7 % | **100 %** |
-| `already_seen_rate` | 78.9 % | **57.1 %** | 58.3 % |
-| `like_rate` | 10.5 % | **35.7 %** | 33.3 % |
-| `genre_diversity` | 0.91 | 0.88 | **1.02** |
-| `franchise_repeat_rate` | 33.3 % | 44.4 % | **22.2 %** |
-| `tmdb_calls_per_batch` | **18.1** | **18.1** | 19.8 |
-| `llm_tokens_per_card` | **0** | **0** | 299 |
+| `liked_recall` | 4.3 % | **17.4 %** | 13.0 % |
+| `liked_recall_top` | 0.0 % | 0.0 % | 0.0 % |
+| `seen_per_batch` | 2.00 | **1.00** | 1.11 |
+| `disliked_per_batch` | 0.22 | 0.11 | **0.00** |
+| `already_seen_rate` | 85.7 % | **64.3 %** | 76.9 % |
+| `like_rate` | 4.8 % | **28.6 %** | 23.1 % |
+| `skip_rate` | 4.5 % | 6.7 % | **0.0 %** |
+| `genre_diversity` | 0.89 | 0.88 | **1.07** |
+| `franchise_repeat_rate` | 33.3 % | 44.4 % | **0.0 %** |
+| `fill_rate` / `usable_per_batch` | 100 % / 10.0 | 100 % / 10.0 | 100 % / 10.0 |
+| `tmdb_calls_per_batch` | **19.4** | **19.4** | **19.4** |
+| `llm_tokens_per_card` | **0** | **0** | 294 |
 
-**`akira-99`** (coverage 2–8 %: only the four `pool-free` rows are compared):
+**`akira-99`** (coverage 2–9 %: the compared rows are the six `pool-free` ones — the
+four below plus `complete_rate` and `usable_per_batch`, 100 % and 10.0 for all three —
+and nothing else):
 
 | | `popular` | `random` | **`hybrid`** |
 |---|---|---|---|
-| `liked_recall` | **6.7 %** (2/30) | 0.0 % (0/30) | 3.3 % (1/30) |
-| `liked_recall_top` | 0.0 % | 0.0 % | **3.3 %** |
-| `seen_per_batch` | 0.00 | 0.22 | 0.56 |
+| `liked_recall` | 0.0 % (0/30) | **6.7 %** (2/30) | 3.3 % (1/30) |
+| `liked_recall_top` | 0.0 % | 0.0 % | 0.0 % |
 | `fill_rate` | 100 % | 100 % | 100 % |
-| `tmdb_calls_per_batch` | **16.9** | **16.9** | 17.3 |
+| `tmdb_calls_per_batch` | **17.2** | **17.2** | **17.2** |
+| *not compared* `seen_per_batch` | **0.22** | 0.33 | 0.67 |
+| *not compared* `disliked_per_batch` | **0.00** | **0.00** | 0.11 |
+| *not compared* `already_seen_rate` | 100 % | **60.0 %** | 75.0 % |
+| *not compared* `coverage` | 2.2 % | 5.6 % | 8.9 % |
 
-**What that says, and what it does not.** On the generated set the hybrid beats
-`popular` on every graded metric except what it spends — a model call and about two more
-TMDb requests a batch — and loses to `random` on recall and the like rate by about one
-card. It clears `popular` whole, which is what the gate asks. On the author's
-real votes nothing is settled: seven of its ninety cards carry a vote, so `liked_recall`
-moves 3.3 points per title found, `seen_per_batch` counts only faults the fixture can
-confirm, and the strategy that scores best on recall there is the one that behaves most
-like the engine that produced the votes. Its one clear win on that set is
-`liked_recall_top`: the single liked title it found, it put in the first three cards.
+**The generated set.** The hybrid clears `popular` whole — better on recall, on both
+avoidance counts, on the like rate, on diversity, on franchise repeats, on skips — and
+loses to `random` on recall (13.0 % against 17.4 %, one liked title), on the
+already-seen rate and on the like rate. It costs one model call and 294 tokens a card
+that neither floor costs, and the same TMDb calls, because all three share the pool.
+Neither floor is dominated, which is why the gate asks for *one* whole floor.
 
-**The already-seen number ADR 0013 is about is not answered yet.** The fork served 4.7
-already-seen cards a batch; the hybrid serves 0.78 on the generated set and 0.56 on the
-real one — but the fork's figure was measured against a person answering, and these are
-measured against a fixture that can only recognise 99 titles. They are not the same
-measurement and should not be quoted as one. What would make them comparable is a deck
-in front of a person (step 5) or a second, larger vote set.
+**The author's real votes settle nothing, and the hybrid is not the best of the three
+there.** It finds one liked title where `random` finds two and `popular` finds none, and
+it is worse than both floors on the avoidance counts: 0.67 already-seen cards a batch
+against 0.22 and 0.33, and 0.11 turned down against 0.00. It clears `popular` whole and
+that is how it passes.
+
+Those avoidance rows are printed and not compared, because with two, five and eight
+confirmable cards the three runs did not measure the same thing: the hybrid trips over
+more faults partly because it puts four times as many recognisable titles in front of
+the fixture. That is an explanation, not a defence — the number a household would feel
+is the one the harness cannot see here.
+
+**The already-seen number ADR 0013 is about is not answered.** The fork served 4.7
+already-seen cards a batch; the hybrid serves 1.11 on the generated set and 0.67 on the
+real one — and on that real set a strategy that knows nothing about taste served 0.22.
+The fork's figure was measured against a person answering; these are measured against a
+fixture that can recognise 99 titles, and neither the fork's number nor the floors' is
+comparable with them. What would settle it is a deck in front of a person (step 5) or a
+second, larger vote set — which is also what would give `akira-99`'s floor comparison
+more than the four rows it has today.
 
 ## The strategy port
 
@@ -546,7 +584,7 @@ setting, the lower the popularity a candidate may have. It is here, together wit
 **vote-count window** — how many people ever had an opinion about a title, which is a
 far steadier number than TMDb's rolling `popularity` and a better proxy for "they have
 probably already seen it". Its bottom end keeps listings and home videos out of a deck;
-its top end, at `bold`, is what pushes back on ADR 0013's 47 %. The discovery pages do
+its top end, at `bold`, is meant to push back on ADR 0013's 47 %. The discovery pages do
 the rest: page one of "most popular" *is* the wall of blockbusters, and reaching past it
 is most of what novelty means.
 
@@ -564,8 +602,18 @@ the noise at these coverages. An unmeasured mechanism in a recommender is a mech
 nobody can remove later, so it went. The numbers that refused it are in the commit that
 removed it.
 
-A calibration batch reverses all of it: it is trying to find out what somebody has
-*already* watched, so it reads the familiar band, sorted by vote count.
+**`bold`'s ceiling of 4 000 votes is not measured**, and that is worth saying next to the
+paragraph above it. Neither vote set isolates it: the author's is `balanced`, which has no
+ceiling, and one of the generated set's three users is `bold`. It is kept because ADR
+0013's own measurement argues for it, and it is flagged because keeping an unmeasured
+mechanism quietly is how a recommender becomes impossible to change — the same objection
+that removed the fame cut.
+
+A calibration batch — the first fifteen votes — reverses all of it: it is trying to find
+out what somebody has *already* watched, so it reads the familiar band, sorted by vote
+count. **The context decides that, not the strategy.** While the hybrid decided it for
+itself, the floors quietly drew from a different pool on every calibration batch, and the
+comparison this whole lot rests on was not one.
 
 **Every exclusion is applied to the pool**, never to the model's answer: voted on,
 already served, owned, wrong media type, adult, before `min_year`, an excluded original

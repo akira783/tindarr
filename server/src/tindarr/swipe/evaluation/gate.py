@@ -5,7 +5,7 @@ nobody reads, so the harness's numbers on the committed vote set are themselves
 committed, and a run that comes out worse than them by more than a stated margin fails
 the build.
 
-Four things make the gate hard to walk past:
+Five things make the gate hard to walk past:
 
 - **The run has to be the same run.** A baseline records the vote set, the strategy and
   the replay options. Comparing a report walked with a different batch size, or produced
@@ -20,11 +20,11 @@ Four things make the gate hard to walk past:
 - **A comparison that would be noise is refused, out loud.** A rate divided by the
   proposed cards the fixture happens to have an opinion on collapses the moment a
   strategy retrieves from the whole of TMDb rather than from the fixture's own titles.
-  With fewer than ``MEANINGFUL_BASIS`` cards behind it, such a metric is printed and
-  not compared, and
-  ``uncomparable`` names every comparison that was skipped — a gate nobody knows is off
-  is worse than no gate. What still carries the comparison is the pool-free half of the
-  table: recall of what the user liked, the avoidance counts, waste, diversity and cost.
+  With fewer than ``MEANINGFUL_BASIS`` cards behind it, such a metric is printed and not
+  compared, and ``uncomparable`` names every comparison that was skipped — a gate nobody
+  knows is off is worse than no gate. What still carries the comparison is the pool-free
+  half of the table: recall of what the user liked, the fill and waste rates, and
+  whether the cards can be rendered at all.
 - **A new strategy does not write its own floor.** Its first baseline would otherwise be
   whatever it happened to score, so a strategy worse than doing nothing clever could
   certify itself. ``check_floor`` holds any strategy that is not one of the reference
@@ -38,9 +38,9 @@ the file so a reader can see them, and ignored when checking: a gate whose thres
 live inside the thing it guards is switched off by a one-token diff that looks like a
 number rather than like a policy.
 
-Updating a baseline is meant to be a deliberate act with a diff: ``tindarr eval baseline
---write`` regenerates it, the diff shows every number that moved, and the reason belongs
-in the commit message.
+Updating a baseline is meant to be a deliberate act with a diff: ``tindarr eval run
+--update-baseline`` regenerates it, the diff shows every number that moved, and the
+reason belongs in the commit message.
 """
 
 import json

@@ -43,7 +43,14 @@ from dataclasses import dataclass, field
 from typing import Final, Protocol
 
 from tindarr.core.errors import ProblemError
-from tindarr.ports.metadata import DiscoverOrder, DiscoverQuery, Metadata, Title, TitleFilters
+from tindarr.ports.metadata import (
+    DiscoverOrder,
+    DiscoverQuery,
+    Metadata,
+    Title,
+    TitleDetails,
+    TitleFilters,
+)
 from tindarr.ports.titles import MediaKind, TitleRef
 from tindarr.swipe.strategy import Novelty, PickKind, StrategyContext
 
@@ -54,6 +61,8 @@ __all__ = [
     "CandidatePool",
     "PoolSource",
     "Retrieval",
+    "card_details",
+    "passes_filters",
 ]
 
 logger = logging.getLogger(__name__)
@@ -170,7 +179,7 @@ class PoolSource(Protocol):
     and the retrieval layer's tests must be able to drive it without a strategy.
     """
 
-    async def pool(self, context: StrategyContext, *, calibration: bool = False) -> CandidatePool:
+    async def pool(self, context: StrategyContext) -> CandidatePool:
         """Return the candidates this user could be shown next, best first."""
         ...
 
@@ -194,7 +203,7 @@ class Retrieval:
         self._excluded_genres: frozenset[int] | None = None
         self._names: dict[int, str] | None = None
 
-    async def pool(self, context: StrategyContext, *, calibration: bool = False) -> CandidatePool:
+    async def pool(self, context: StrategyContext) -> CandidatePool:
         """Return the candidates this user could be shown next, best first.
 
         The order is deterministic and is the one a strategy that does no thinking of
@@ -202,13 +211,17 @@ class Retrieval:
         recently, interleaved with filtered discovery in the proportion the novelty
         level asks for.
 
-        ``calibration`` asks the opposite question of the pool. A calibration batch is
-        trying to find out what somebody has *already* watched, so it wants the famous
-        titles every other batch is trying to avoid: the familiar band, and the most
-        voted-on titles rather than the ones popular this week.
+        A **calibration** batch asks the opposite question of the pool, and the context
+        decides it, not the caller: a calibration batch is trying to find out what
+        somebody has *already* watched, so it wants the famous titles every other batch
+        avoids — the familiar band, sorted by vote count rather than by what is popular
+        this week. Deciding it here is what keeps the floors and the candidate on one
+        shortlist; when the strategy decided, the floors quietly got a different pool
+        for every calibration batch and the comparison was not one.
         """
-        band = NOVELTY_BANDS["familiar" if calibration else context.novelty]
-        order: DiscoverOrder = "votes" if calibration else "popularity"
+        calibrating = context.calibrating
+        band = NOVELTY_BANDS["familiar" if calibrating else context.novelty]
+        order: DiscoverOrder = "votes" if calibrating else "popularity"
         excluded_genres = await self._genre_ids(context.filters)
         seeded = await self._seeded(context)
         found = await self._discovery(context, band, excluded_genres, order)
@@ -315,15 +328,20 @@ class Retrieval:
         return found
 
     async def _genre_ids(self, filters: TitleFilters) -> frozenset[int]:
+        """Resolve the household's excluded genres, or refuse to build a pool.
+
+        **This one fails closed**, unlike every other TMDb call here. A candidate only
+        carries genre *ids*, so a household that excluded a genre by name has no filter
+        at all until TMDb's list has been read: returning an empty set would not be "the
+        filter is a little coarser today", it would be the filter switched off, on every
+        card, silently. A household that asked not to be shown horror gets an error and
+        an empty deck instead, and the failure is not cached, so the next batch tries
+        again.
+        """
+        if not filters.excluded_genres:
+            return frozenset()
         if self._excluded_genres is None:
-            try:
-                self._excluded_genres = await self._metadata.excluded_genre_ids(filters)
-            except ProblemError:
-                # A filter that cannot be resolved must not become a filter that is not
-                # applied: the names are still checked against each candidate's genres
-                # by the household's own list, and only the server-side hint is lost.
-                logger.info("TMDb did not answer with its genre list")
-                self._excluded_genres = frozenset()
+            self._excluded_genres = await self._metadata.excluded_genre_ids(filters)
         return self._excluded_genres
 
 
@@ -352,10 +370,47 @@ def _discover_key(query: DiscoverQuery) -> tuple[str, ...]:
     )
 
 
+async def card_details(metadata: Metadata, ref: TitleRef, language: str) -> TitleDetails | None:
+    """Read one card's details, or ``None`` when TMDb will not answer for it.
+
+    Nine good cards beat a batch that died on the tenth. A title TMDb has just deleted,
+    or a request that timed out, costs that card — the harness's ``complete_rate``
+    counts what came back with its details, so the loss is visible rather than fatal.
+    """
+    try:
+        return await metadata.details(ref, language)
+    except ProblemError as failure:
+        logger.info(
+            "TMDb would not describe a chosen card; it is dropped from the batch",
+            extra={"kind": ref.kind, "reason": failure.code},
+        )
+        return None
+
+
+def passes_filters(title: Title, filters: TitleFilters, excluded_genres: frozenset[int]) -> bool:
+    """Whether a candidate survives the household's content filters.
+
+    The one implementation the domain uses — the baselines call it too, so the floors
+    and the candidate cannot be handed different shortlists the day somebody sets
+    ``min_year``. It is deliberately identical to ``tindarr.adapters.tmdb.passes``,
+    which the adapter applies when it resolves a search, and a test holds the two to
+    each other. A missing year or language passes, as it does there: refusing what TMDb
+    simply did not fill in would quietly empty a deck.
+    """
+    if filters.exclude_adult and title.adult:
+        return False
+    if filters.min_year is not None and title.year is not None and title.year < filters.min_year:
+        return False
+    language = (title.original_language or "").casefold()
+    if language and language in {value.casefold() for value in filters.excluded_original_languages}:
+        return False
+    return not (excluded_genres and excluded_genres.intersection(title.genre_ids))
+
+
 class _Keeper:
     """Every exclusion, applied to the pool rather than to the model's answer."""
 
-    __slots__ = ("_band", "_excluded", "_genres", "_kinds", "_languages", "_min_year", "_no_adult")
+    __slots__ = ("_band", "_excluded", "_filters", "_genres", "_kinds")
 
     def __init__(
         self, context: StrategyContext, band: Band, excluded_genres: frozenset[int]
@@ -364,10 +419,7 @@ class _Keeper:
         self._kinds = _kinds(context.media_kind)
         self._band = band
         self._genres = excluded_genres
-        filters = context.filters
-        self._no_adult = filters.exclude_adult
-        self._min_year = filters.min_year
-        self._languages = {value.casefold() for value in filters.excluded_original_languages}
+        self._filters = context.filters
 
     def __call__(self, titles: Iterable[Title]) -> list[Title]:
         """Return the candidates that survive, in the order they arrived, once each."""
@@ -383,14 +435,7 @@ class _Keeper:
     def _keeps(self, title: Title) -> bool:
         if title.ref in self._excluded or title.ref.kind not in self._kinds:
             return False
-        if self._no_adult and title.adult:
-            return False
-        if self._min_year is not None and title.year is not None and title.year < self._min_year:
-            return False
-        language = (title.original_language or "").casefold()
-        if language and language in self._languages:
-            return False
-        if self._genres and self._genres.intersection(title.genre_ids):
+        if not passes_filters(title, self._filters, self._genres):
             return False
         return self._in_band(title)
 

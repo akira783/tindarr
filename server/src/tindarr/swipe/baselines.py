@@ -25,9 +25,9 @@ should have dropped is a floor that cannot catch a retrieval bug.
 import random
 from collections.abc import Sequence
 
-from tindarr.ports.metadata import Metadata, Title, TitleFilters
+from tindarr.ports.metadata import Metadata, Title
 from tindarr.ports.titles import MediaKind
-from tindarr.swipe.retrieval import PoolSource
+from tindarr.swipe.retrieval import PoolSource, card_details, passes_filters
 from tindarr.swipe.strategy import Candidate, StrategyContext
 
 __all__ = ["PopularBaseline", "RandomBaseline", "eligible"]
@@ -38,10 +38,12 @@ def eligible(pool: Sequence[Title], context: StrategyContext) -> list[Title]:
 
     Three things are dropped: what the context says is excluded (voted on, served,
     owned), what the media type asks against, and what the household's content filters
-    refuse. The filters applied here are the ones a title carries on its own —
-    ``exclude_adult``, ``min_year``, ``excluded_original_languages``. Genres are not:
-    TMDb spells them as ids that only the adapter can resolve, and resolving them is
-    the retrieval layer's job, not a baseline's.
+    refuse — through ``passes_filters``, the same predicate the retrieval layer applies,
+    so the floors and the candidate cannot end up with different shortlists.
+
+    Genres are the one thing this cannot re-check: a ``Title`` carries ids and only the
+    retrieval layer has resolved the household's names to them. It has already dropped
+    what they exclude.
     """
     excluded = context.excluded
     filters = context.filters
@@ -50,7 +52,7 @@ def eligible(pool: Sequence[Title], context: StrategyContext) -> list[Title]:
         for title in pool
         if title.ref not in excluded
         and _wanted_kind(title.ref.kind, context.media_kind)
-        and _passes(title, filters)
+        and passes_filters(title, filters, frozenset())
     ]
     # A stable order before anything ranks it: two runs must see the same pool.
     kept.sort(key=lambda title: title.ref)
@@ -59,15 +61,6 @@ def eligible(pool: Sequence[Title], context: StrategyContext) -> list[Title]:
 
 def _wanted_kind(kind: MediaKind, wanted: MediaKind | None) -> bool:
     return wanted is None or kind == wanted
-
-
-def _passes(title: Title, filters: TitleFilters) -> bool:
-    if filters.exclude_adult and title.adult:
-        return False
-    if filters.min_year is not None and (title.year is None or title.year < filters.min_year):
-        return False
-    language = title.original_language
-    return not (language is not None and language in filters.excluded_original_languages)
 
 
 class PopularBaseline:
@@ -94,7 +87,7 @@ class PopularBaseline:
         return [await self._card(title, context) for title in candidates[:size]]
 
     async def _card(self, title: Title, context: StrategyContext) -> Candidate:
-        details = await self._metadata.details(title.ref, context.language)
+        details = await card_details(self._metadata, title.ref, context.language)
         return Candidate(ref=title.ref, pick="safe", details=details)
 
 
@@ -122,7 +115,7 @@ class RandomBaseline:
             Candidate(
                 ref=title.ref,
                 pick="explore",
-                details=await self._metadata.details(title.ref, context.language),
+                details=await card_details(self._metadata, title.ref, context.language),
             )
             for title in candidates[:size]
         ]

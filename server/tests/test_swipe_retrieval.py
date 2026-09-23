@@ -17,7 +17,7 @@ from tindarr.ports.media_server import LibraryIndex, LibraryItem
 from tindarr.ports.metadata import DiscoverQuery, Title, TitleFilters
 from tindarr.ports.titles import MediaKind, TitleRef
 from tindarr.swipe.retrieval import MAX_SEEDS, NOVELTY_BANDS, Retrieval
-from tindarr.swipe.strategy import StrategyContext
+from tindarr.swipe.strategy import CALIBRATION_TARGET, StrategyContext
 from tindarr.swipe.votes import Vote, VoteValue
 
 pytestmark = pytest.mark.anyio
@@ -182,16 +182,28 @@ async def test_the_same_page_is_not_paid_for_twice_in_one_user_s_run() -> None:
 
 
 async def test_a_calibration_pool_asks_for_fame_rather_than_for_novelty() -> None:
-    """A calibration batch is trying to find out what somebody has already watched."""
-    metadata = InMemoryMetadata(pages={("movie", page): [known(1)] for page in (1, 2, 3)})
-    context = StrategyContext(user_id="u1", media_kind="movie", novelty="bold")
+    """A calibration batch is trying to find out what somebody has already watched.
 
-    await Retrieval(metadata).pool(context, calibration=True)
+    The **context** decides it, not the caller: a floor that did not know would be
+    drawing from a different shortlist than the candidate it is there to measure.
+    """
+    metadata = InMemoryMetadata(pages={("movie", page): [known(1)] for page in (1, 2, 3)})
+    new_user = StrategyContext(user_id="u1", media_kind="movie", novelty="bold")
+    warmed = StrategyContext(
+        user_id="u1",
+        media_kind="movie",
+        novelty="bold",
+        history=tuple(vote(500 + index, "like", index) for index in range(CALIBRATION_TARGET)),
+    )
+
+    await Retrieval(metadata).pool(new_user)
     calibrating = [call for call in metadata.calls if call.startswith("discover:")]
     metadata.calls.clear()
-    await Retrieval(metadata).pool(context)
+    await Retrieval(metadata).pool(warmed)
     bold = [call for call in metadata.calls if call.startswith("discover:")]
 
+    assert new_user.calibrating
+    assert not warmed.calibrating
     # The familiar band reads pages 1-2; bold reads 2-4.
     assert calibrating == ["discover:movie:1", "discover:movie:2"]
     assert bold == ["discover:movie:2", "discover:movie:3", "discover:movie:4"]
@@ -278,3 +290,32 @@ async def test_a_genre_list_tmdb_refuses_costs_the_names_and_not_the_pool() -> N
 
     assert len(pool) == 1
     assert pool.genre_names(pool.titles[0]) == ()
+
+
+async def test_the_genre_filter_is_the_one_call_that_fails_closed() -> None:
+    """A filter that cannot be resolved must not become a filter that is not applied.
+
+    Every other TMDb failure here costs a few candidates. This one would cost the
+    household's content filter on every card, silently, because a candidate carries
+    genre ids and nothing has resolved the names they excluded.
+    """
+
+    class Grumpy(InMemoryMetadata):
+        async def excluded_genre_ids(self, filters: TitleFilters) -> frozenset[int]:
+            raise ProblemError(502, "metadata_unreachable", "no")
+
+    metadata = Grumpy(pages={("movie", page): [known(1)] for page in (1, 2, 3)})
+    context = StrategyContext(
+        user_id="u1", media_kind="movie", filters=TitleFilters(excluded_genres=frozenset({"27"}))
+    )
+
+    with pytest.raises(ProblemError):
+        await Retrieval(metadata).pool(context)
+
+
+async def test_a_household_that_excludes_nothing_pays_for_no_genre_lookup() -> None:
+    metadata = InMemoryMetadata(pages={("movie", page): [known(1)] for page in (1, 2, 3)})
+
+    await Retrieval(metadata).pool(StrategyContext(user_id="u1", media_kind="movie"))
+
+    assert "genres" not in metadata.calls

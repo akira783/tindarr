@@ -103,16 +103,21 @@ DIRECTIONS: Final[Mapping[str, Direction]] = {
 #: serving a title the user had already watched, or one they turned down, is a fault
 #: that is worth the same whether the other nine cards were scoreable or not.
 #:
-#: They also hold each other up. Recall alone is beaten by proposing everything in
-#: sight; the avoidance counts alone are beaten by proposing obscure titles nobody has
-#: an opinion on — which scores zero recall. Neither can be gamed without the other
-#: saying so, and ``fill_rate`` and ``usable_per_batch`` stop a strategy shrinking the
-#: batch to make the counts small.
+#: **``liked_recall`` is the one that cannot be escaped**, and it is worth being exact
+#: about why the others can. Its denominator is every liked title the replay withheld,
+#: which the fixture knows in full and no strategy can move. The avoidance counts have
+#: no such guarantee: their numerator can only count faults the fixture recognises, so
+#: a strategy proposing titles nobody voted on drives ``scored`` down, takes them below
+#: ``MEANINGFUL_BASIS``, and stops being compared on them at all. That escape is real
+#: and it is deliberately left open, because the alternative — comparing "no faults out
+#: of two recognisable cards" with "five out of seven" — is not a comparison either.
 #:
-#: Only ``liked_recall`` and ``liked_recall_top`` are fully ``pool-free``, and the
-#: reason is worth keeping in view: their denominator is every liked title the replay
-#: withheld, which the fixture knows in full. The avoidance counts have no such
-#: guarantee in their numerator, so they are marked ``bound``.
+#: What closes it is recall, on a vote set that confirms enough likes for recall to
+#: discriminate. The escape costs the strategy every confirmable like it gave up, and
+#: ``fill_rate`` and ``usable_per_batch`` stop it shrinking the batch instead. On a vote
+#: set where even recall rests on one or two titles — ``akira-99``, with an open pool —
+#: the floor comparison is thin, and ``docs/evaluation.md`` says so rather than the gate
+#: pretending otherwise.
 BASIS: Final[Mapping[str, Basis]] = {
     "fill_rate": "pool-free",
     "usable_per_batch": "pool-free",
@@ -153,10 +158,14 @@ MEANINGFUL_BASIS: Final = 12
 #: front, so recall in the first three cards is a different claim from recall anywhere.
 TOP_RANKS: Final = 3
 
-#: Which count each metric that needs one actually divides by, named so a baseline can
-#: carry it. Not one count per *basis*: ``new_like_rate`` divides by the cards that were
-#: new to the user, which on an open pool is a handful when ``scored`` is a dozen, and a
-#: metric held to somebody else's denominator is a metric nobody is checking.
+#: The count each metric that needs one rests on, named so a baseline can carry it.
+#:
+#: Usually the denominator: ``new_like_rate`` divides by the cards that were new to the
+#: user, which on an open pool is a handful when ``scored`` is a dozen, and a metric
+#: held to somebody else's denominator is a metric nobody is checking. For the two
+#: ``bound`` metrics it is the **numerator's** ceiling instead — they divide by
+#: ``batches``, but they can only count faults among the ``scored`` cards, so that is
+#: what says whether two runs measured the same thing.
 BASIS_COUNT: Final[Mapping[str, str]] = {
     "seen_per_batch": "scored",
     "disliked_per_batch": "scored",

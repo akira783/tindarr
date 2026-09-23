@@ -181,8 +181,8 @@ class FixedPool:
     seeded: frozenset[TitleRef] = field(default_factory=frozenset[TitleRef])
     calls: list[bool] = field(default_factory=list[bool])
 
-    async def pool(self, context: StrategyContext, *, calibration: bool = False) -> CandidatePool:
-        self.calls.append(calibration)
+    async def pool(self, context: StrategyContext) -> CandidatePool:
+        self.calls.append(context.calibrating)
         # The real one filters; this one does too, so a test that forgets an exclusion
         # does not pass here and fail in production.
         kept = [title for title in self.titles if title.ref not in context.excluded]

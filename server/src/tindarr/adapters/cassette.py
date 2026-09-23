@@ -37,6 +37,7 @@ __all__ = [
     "CassetteMissError",
     "Interaction",
     "RecordingTransport",
+    "TopUpTransport",
     "request_key",
 ]
 
@@ -231,6 +232,39 @@ def _interaction_of(row: object) -> Interaction:
     if content_type is None:
         raise CassetteFormatError(f"the content type of {key} is not text")
     return Interaction(key=key, status=status, body=body, content_type=content_type)
+
+
+class TopUpTransport(httpx2.AsyncBaseTransport):
+    """Answers from a cassette where it can, and only dials out for what is missing.
+
+    What a "live" run is for is **extending** a fixture, not replacing it. Without this,
+    recording one strategy and then another gives the second one fresher answers than
+    the first was measured on — TMDb's "most popular" moves hour to hour — and the first
+    strategy's recorded model answers stop matching the prompt an offline replay builds,
+    because the pool underneath them changed. The fixture then cannot be replayed at all.
+
+    So a live run reads the committed answers first. It sees exactly what the offline
+    replay will see for everything already recorded, adds only what is new, and costs
+    the provider only the requests nobody has made before. Deleting the cassette is how
+    a recording starts from nothing.
+    """
+
+    def __init__(self, cassette: Cassette, inner: httpx2.AsyncBaseTransport) -> None:
+        self._cassette = cassette
+        self._inner = inner
+
+    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
+        """Return the recorded answer, or make the call for real."""
+        found = self._cassette.find(request_key(request))
+        return (
+            found.response()
+            if found is not None
+            else await self._inner.handle_async_request(request)
+        )
+
+    async def aclose(self) -> None:
+        """Close the transport underneath."""
+        await self._inner.aclose()
 
 
 class RecordingTransport(httpx2.AsyncBaseTransport):

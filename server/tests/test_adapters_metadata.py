@@ -25,6 +25,7 @@ from tindarr.adapters.tmdb import TmdbMetadata, normalize_title, passes
 from tindarr.core.errors import ProblemError
 from tindarr.ports.metadata import SearchQuery, Title, TitleFilters
 from tindarr.ports.titles import TitleRef
+from tindarr.swipe.retrieval import passes_filters
 
 pytestmark = pytest.mark.anyio
 
@@ -679,3 +680,32 @@ def test_the_last_rotten_tomatoes_entry_wins() -> None:
     )
     assert found is not None
     assert found.rotten_tomatoes == 94
+
+
+def test_the_domain_and_the_adapter_filter_a_title_the_same_way() -> None:
+    """Two implementations of "what the household refuses" would drift, so they agree.
+
+    The adapter applies its own when it resolves a search; the retrieval layer and the
+    baselines apply ``passes_filters`` to the candidate pool. A title that survives one
+    and not the other means the floors and the candidate are being handed different
+    shortlists, which is exactly the confound lot 4b removed.
+    """
+    filters = TitleFilters(
+        exclude_adult=True,
+        min_year=2000,
+        excluded_original_languages=frozenset({"RU"}),
+    )
+    excluded = frozenset({27})
+    cases = [
+        Title(ref=TitleRef("movie", 1), title="Plain"),
+        Title(ref=TitleRef("movie", 2), title="Adult", adult=True),
+        Title(ref=TitleRef("movie", 3), title="Old", year=1974),
+        Title(ref=TitleRef("movie", 4), title="Recent", year=2020),
+        Title(ref=TitleRef("movie", 5), title="Russian", year=2020, original_language="ru"),
+        Title(ref=TitleRef("movie", 6), title="Horror", year=2020, genre_ids=(27,)),
+        Title(ref=TitleRef("movie", 7), title="No year at all", original_language=None),
+    ]
+
+    assert [passes(title, filters, excluded) for title in cases] == [
+        passes_filters(title, filters, excluded) for title in cases
+    ]

@@ -8,6 +8,7 @@ three cards instead of ten, would happily wave through the engine ADR 0013 rejec
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel
 
 from tests.support.evaluation import (
     FixedPool,
@@ -15,6 +16,10 @@ from tests.support.evaluation import (
     RecordedEngine,
     ScriptedStrategy,
 )
+from tindarr.core.errors import ProblemError
+from tindarr.ports import problems
+from tindarr.ports.connectors import ConnectionCheck
+from tindarr.ports.llm import Generation, LlmCapabilities, LlmProviderKind, Prompt
 from tindarr.ports.titles import TitleRef
 from tindarr.swipe.baselines import PopularBaseline
 from tindarr.swipe.evaluation import (
@@ -22,6 +27,7 @@ from tindarr.swipe.evaluation import (
     BatchCost,
     BatchOutcome,
     CostMeter,
+    CountingLlmProvider,
     CountingMetadata,
     Counts,
     DatasetError,
@@ -41,6 +47,13 @@ from tindarr.swipe.evaluation.synthetic import build_synthetic_dataset
 from tindarr.swipe.strategy import Candidate, StrategyContext
 
 pytestmark = pytest.mark.anyio
+
+
+class Counts2(BaseModel):
+    """A throwaway schema, for the calls that never get as far as validating one."""
+
+    value: str = ""
+
 
 FULL = ReplayOptions(batch_size=10, warm_up=0)
 #: The author's own votes, as committed. Read here rather than through the CLI: this is
@@ -741,3 +754,30 @@ def test_the_floor_is_not_applied_to_a_metric_neither_run_can_support() -> None:
     assert "already_seen_rate: not compared" in skipped
     # What still carries the gate is the pool-free half.
     assert "floor:popular.liked_recall" in names
+
+
+async def test_a_model_call_that_never_validates_is_still_charged() -> None:
+    """Otherwise a broken model reads as a free one, on two 'lower is better' rows."""
+
+    class Broken:
+        kind: LlmProviderKind = "openai_compatible"
+        capabilities = LlmCapabilities()
+
+        async def test(self) -> ConnectionCheck:
+            return ConnectionCheck(health="ok")  # pragma: no cover - not reached here
+
+        async def list_models(self) -> list[str]:
+            return []  # pragma: no cover - not reached here
+
+        async def generate[T: BaseModel](self, prompt: Prompt, schema: type[T]) -> Generation[T]:
+            raise problems.llm_invalid_output()
+
+    meter = CostMeter()
+    counted = CountingLlmProvider(Broken(), meter)
+
+    with pytest.raises(ProblemError):
+        await counted.generate(Prompt(instructions="a" * 40, message="b" * 40), Counts2)
+
+    assert meter.llm_calls == 1
+    assert meter.llm_input_tokens == 20  # eighty characters, four to a token
+    assert meter.llm_calls_estimated == 1

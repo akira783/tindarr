@@ -11,6 +11,10 @@ some OpenAI-compatible endpoints report nothing; rather than print a zero that r
 like "free", the harness estimates from the prompt's own length and says, in the output,
 how many calls it had to estimate.
 
+**A call that failed is still a call.** An answer that never fits the schema was billed
+twice and returns nothing; charging only the successes would make a strategy whose model
+is broken look cheaper than one whose model works, on two metrics where lower is better.
+
 **The tally is read, never trusted to stay put.** A strategy is handed the wrapped ports,
 so it is handed a path to the counters; the harness therefore charges each batch the
 *difference* between two snapshots and refuses a run whose totals went backwards
@@ -24,6 +28,7 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
+from tindarr.core.errors import ProblemError
 from tindarr.ports.connectors import ConnectionCheck
 from tindarr.ports.llm import Generation, LlmCapabilities, LlmProvider, LlmProviderKind, Prompt
 from tindarr.ports.metadata import (
@@ -277,8 +282,22 @@ class CountingLlmProvider:
         return await self._inner.list_models()
 
     async def generate[T: BaseModel](self, prompt: Prompt, schema: type[T]) -> Generation[T]:
-        """Ask for one object, and record what it cost."""
-        generation = await self._inner.generate(prompt, schema)
+        """Ask for one object, and record what it cost — including when it fails.
+
+        A generation that never validates was paid for twice (the adapter retries once)
+        and returns nothing. Letting the exception carry the cost away with it would
+        make a strategy whose model is broken read as *cheaper* than one whose model
+        works, on two metrics where lower is better. So the failure is charged, from the
+        prompt's own length, and marked estimated — the provider said nothing about what
+        it billed, because it raised.
+        """
+        try:
+            generation = await self._inner.generate(prompt, schema)
+        except ProblemError:
+            self._meter.record_llm(
+                estimate_tokens((prompt.instructions, prompt.message)), 0, estimated=True
+            )
+            raise
         usage = generation.usage
         if usage.input_tokens or usage.output_tokens:
             self._meter.record_llm(usage.input_tokens, usage.output_tokens, estimated=False)

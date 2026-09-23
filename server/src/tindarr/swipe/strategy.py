@@ -24,7 +24,7 @@ needs to remember something within a user's run may keep it on the instance.
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Literal, Protocol
+from typing import Final, Literal, Protocol
 
 from tindarr.ports.media_server import Engagement, LibraryIndex
 from tindarr.ports.metadata import TitleDetails, TitleFilters
@@ -38,6 +38,12 @@ type PickKind = Literal["safe", "explore", "calibration"]
 type Novelty = Literal["familiar", "balanced", "bold"]
 
 NOVELTY_LEVELS: tuple[Novelty, ...] = ("familiar", "balanced", "bold")
+#: Votes before the deck stops calibrating, as the fork counts them. It lives here
+#: rather than in one strategy because the **pool** turns on it too: a calibration batch
+#: is looking for what somebody has already watched, which is the opposite of what every
+#: other batch wants, and a floor that did not know would be drawing from a different
+#: shortlist than the candidate it is meant to measure.
+CALIBRATION_TARGET: Final = 15
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +101,17 @@ class StrategyContext:
     #: A seed a strategy may use where it would otherwise call ``random``. Fixed by the
     #: caller, so two runs of the same strategy on the same inputs agree.
     seed: int = 0
+
+    @property
+    def calibrating(self) -> bool:
+        """Whether this batch is still finding out what the user has already watched.
+
+        Read by the retrieval layer as well as by the strategies, so every strategy is
+        handed the same pool for the same context. A strategy may still *say* something
+        different about a calibration batch — the fork's prompt does — but none of them
+        gets a different shortlist for it.
+        """
+        return len(self.history) < CALIBRATION_TARGET
 
     @property
     def voted(self) -> frozenset[TitleRef]:

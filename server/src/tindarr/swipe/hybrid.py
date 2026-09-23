@@ -43,19 +43,22 @@ from pydantic import BaseModel, ConfigDict
 
 from tindarr.core.errors import ProblemError
 from tindarr.ports.llm import LlmProvider, Prompt
-from tindarr.ports.media_server import Engagement
+from tindarr.ports.media_server import Engagement, LibraryItem
 from tindarr.ports.metadata import Metadata, Title
 from tindarr.ports.titles import TitleRef
-from tindarr.swipe.retrieval import NOVELTY_BANDS, CandidatePool, PoolSource
-from tindarr.swipe.strategy import Candidate, Novelty, PickKind, StrategyContext
+from tindarr.swipe.retrieval import CandidatePool, PoolSource, card_details
+from tindarr.swipe.strategy import (
+    Candidate,
+    Novelty,
+    PickKind,
+    StrategyContext,
+)
 from tindarr.swipe.votes import Vote
 
-__all__ = ["HybridStrategy", "SwipeSelection", "batch_prompt"]
+__all__ = ["HybridStrategy", "SwipeSelection", "batch_prompt", "series_of"]
 
 logger = logging.getLogger(__name__)
 
-#: Votes before the deck stops calibrating, as the fork counts them.
-CALIBRATION_TARGET: Final = 15
 #: Recent votes quoted to the model. Beyond thirty the prompt grows faster than it says
 #: anything new.
 PROMPT_VOTES: Final = 30
@@ -137,15 +140,18 @@ class HybridStrategy:
 
     async def propose(self, context: StrategyContext, size: int) -> Sequence[Candidate]:
         """Return up to ``size`` cards, best first, every one of them from the pool."""
-        calibrating = len(context.history) < CALIBRATION_TARGET
-        pool = await self._retrieval.pool(context, calibration=calibrating)
+        # The pool reads the same property, so every strategy gets the same shortlist
+        # for this batch; what changes here is only what the model is asked for.
+        calibrating = context.calibrating
+        pool = await self._retrieval.pool(context)
         if not pool:
             # Nothing to choose from is not a model's fault and not a model's problem:
             # asking one to pick from an empty list costs a call and answers nothing.
             logger.info("no candidate to propose", extra={"batch": context.batch_index})
             return ()
         chosen = await self._choose(context, pool, size, calibrating=calibrating)
-        return [await self._card(title, pick, reason, context) for title, pick, reason in chosen]
+        built = [await self._card(title, pick, reason, context) for title, pick, reason in chosen]
+        return [card for card in built if card is not None]
 
     async def _choose(
         self, context: StrategyContext, pool: CandidatePool, size: int, *, calibrating: bool
@@ -167,13 +173,21 @@ class HybridStrategy:
                 extra={"reason": failure.code, "batch": context.batch_index},
             )
             return _from_pool(pool, size, [], context.excluded)
-        return _from_pool(pool, size, _kept(selection.value, pool, context), context.excluded)
+        return _from_pool(
+            pool, size, _one_per_series(_kept(selection.value, pool, context)), context.excluded
+        )
 
     async def _card(
         self, title: Title, pick: PickKind, reason: str | None, context: StrategyContext
-    ) -> Candidate:
-        details = await self._metadata.details(title.ref, context.language)
-        return Candidate(ref=title.ref, pick=pick, reason=reason, details=details)
+    ) -> Candidate | None:
+        details = await card_details(self._metadata, title.ref, context.language)
+        # A card TMDb will not describe cannot be rendered, so it is dropped rather than
+        # served blank — and one of them must not take the other nine with it.
+        return (
+            None
+            if details is None
+            else Candidate(ref=title.ref, pick=pick, reason=reason, details=details)
+        )
 
 
 #: The one system line. It says what the answer is, and nothing a candidate title could
@@ -209,6 +223,44 @@ def _kept(
     return kept
 
 
+def _one_per_series(
+    chosen: Sequence[tuple[Title, PickKind, str | None]],
+) -> list[tuple[Title, PickKind, str | None]]:
+    """Keep one title per series in a batch, whatever the prompt asked for.
+
+    The prompt says not to serve two of the same franchise, and the harness measures how
+    often it happens anyway: often enough that asking is not a mechanism. A deck of ten
+    that is three sequels of one thing is a deck of eight.
+
+    The signal is the one a listing gives: a title before its colon. TMDb's list
+    endpoints carry no collection — only the detail endpoint does, and reading details
+    for sixty candidates to build one batch would cost more than the batch — so this
+    groups ``Dune: Part Two`` with ``Dune: Prophecy`` and leaves a title without a colon
+    alone. It can group two unrelated films whose names happen to start the same way;
+    the cost of that is one card swapped for the next in the pool.
+    """
+    kept: list[tuple[Title, PickKind, str | None]] = []
+    series: set[str] = set()
+    for entry in chosen:
+        name = series_of(entry[0].title)
+        if name is not None and name in series:
+            continue
+        if name is not None:
+            series.add(name)
+        kept.append(entry)
+    return kept
+
+
+#: Shorter than this, a prefix is a word like "The" and groups nothing meaningful.
+_SERIES_PREFIX: Final = 4
+
+
+def series_of(title: str) -> str | None:
+    """Return the part of a title before its colon, when it is worth grouping on."""
+    head = title.partition(":")[0].strip().casefold() if ":" in title else ""
+    return head if len(head) >= _SERIES_PREFIX else None
+
+
 def _sentence(text: str) -> str | None:
     """Return a rationale fit to show: one line, trimmed, bounded."""
     cleaned = " ".join(text.split())
@@ -230,16 +282,21 @@ def _from_pool(
 
     ``excluded`` is re-applied here as well as to the model's answer. It is the same
     belt-and-braces check, on the path that is *easiest* to forget: the fallback runs
-    when the model failed, which is the moment nobody is watching.
+    when the model failed, which is the moment nobody is watching. So is the one-per-
+    series rule: a fill that put the sequel back would undo it silently.
     """
     filled = list(chosen)
     taken = {title.ref for title, _, _ in filled}
+    series = {name for title, _, _ in filled if (name := series_of(title.title)) is not None}
     for title in pool.titles:
         if len(filled) >= size:
             break
-        if title.ref in taken or title.ref in excluded:
+        name = series_of(title.title)
+        if title.ref in taken or title.ref in excluded or (name is not None and name in series):
             continue
         taken.add(title.ref)
+        if name is not None:
+            series.add(name)
         filled.append((title, pool.origin.get(title.ref, "safe"), None))
     return filled[:size]
 
@@ -275,6 +332,15 @@ _OPENING: Final = (
 
 
 def _evidence(context: StrategyContext) -> str:
+    """Build the prompt's evidence sections, in a fixed order.
+
+    ``taste_profile`` goes in as it stands, newlines and all — it is three headed lists
+    of bullets and flattening it would destroy the shape the model is meant to read. It
+    is also the one section written by a *model* (and edited by the user), which means a
+    prompt this layer builds contains text an earlier prompt produced. Nothing downstream
+    trusts it: the answer is a set of ids checked against the pool, and the pool was
+    filtered before the model saw it.
+    """
     sections: list[str] = []
     if context.taste_profile:
         sections.append(
@@ -299,6 +365,15 @@ def _evidence(context: StrategyContext) -> str:
 
 
 def _vote_lines(history: Sequence[Vote]) -> str:
+    """Return the recent votes, by TMDb id and verdict.
+
+    **By id, because a ``Vote`` carries no title.** The fork wrote "Blade Runner (movie,
+    1982): LIKED" here, which a model can reason about; this writes "movie 78: LIKED",
+    which it mostly cannot. The titles exist — in the stored batch the card came from —
+    and serving them is roadmap 4.5's job, not this layer's: resolving thirty ids against
+    TMDb on every batch would cost more calls than the batch itself. Until then the taste
+    profile carries the burden of saying what this person likes, which is what it is for.
+    """
     recent = list(reversed(history))[:PROMPT_VOTES]
     return "\n".join(
         f"- {vote.ref.kind} {vote.ref.tmdb_id}: {_VOTE_LABELS.get(vote.value, vote.value)}"
@@ -309,11 +384,16 @@ def _vote_lines(history: Sequence[Vote]) -> str:
 def _engagement_lines(engagement: Sequence[Engagement]) -> str:
     rows = list(engagement)[:PROMPT_ENGAGEMENT]
     return "\n".join(
-        f"- {row.ref.kind} {row.ref.tmdb_id}: "
-        f"{_ENGAGEMENT_LABELS.get(row.state, row.state)}{_detail(row)}"
+        f"- {_named(row.item)}: {_ENGAGEMENT_LABELS.get(row.state, row.state)}{_detail(row)}"
         for row in rows
         if row.ref is not None
     )
+
+
+def _named(item: LibraryItem) -> str:
+    """One owned or watched title, as the fork wrote it: ``Dark (tv, 2017)``."""
+    year = f", {item.year}" if item.year else ""
+    return f"{item.name} ({item.kind}{year})"
 
 
 def _detail(row: Engagement) -> str:
@@ -325,8 +405,8 @@ def _detail(row: Engagement) -> str:
 
 
 def _library_lines(context: StrategyContext) -> str:
-    refs = sorted(context.library.refs)[:PROMPT_LIBRARY]
-    return "\n".join(f"- {ref.kind} {ref.tmdb_id}" for ref in refs)
+    owned = sorted(context.library.items, key=lambda item: (item.kind, item.name, item.item_id))
+    return "\n".join(f"- {_named(item)}" for item in owned[:PROMPT_LIBRARY])
 
 
 def _mood(mood: str | None) -> str | None:
@@ -379,8 +459,8 @@ def _novelty(novelty: Novelty, seen_ratio: float | None) -> str:
     """Return the fork's novelty sentence, kept word for word.
 
     They now sit beside a pool that has already been filtered to the same intent
-    (``NOVELTY_BANDS``), so the sentence steers the choice within a band rather than
-    being the whole of the setting, which is what it was in the fork.
+    (``tindarr.swipe.retrieval.NOVELTY_BANDS``), so the sentence steers the choice within
+    a band rather than being the whole of the setting, which is what it was in the fork.
     """
     if novelty == "familiar":
         return (
@@ -435,12 +515,23 @@ def _candidate_line(title: Title, genres: Sequence[str]) -> str:
     worth a card, and is it something everybody has seen" is read from.
     """
     year = f", {title.year}" if title.year else ""
-    named = f" [{', '.join(genres)}]" if genres else ""
+    named = f" [{', '.join(_line(genre) for genre in genres)}]" if genres else ""
     rating = f"{title.vote_average:.1f}" if title.vote_average is not None else "?"
     return (
-        f"- {title.ref.tmdb_id} | {title.title} ({title.ref.kind}{year})"
+        f"- {title.ref.tmdb_id} | {_line(title.title)} ({title.ref.kind}{year})"
         f"{named} {rating}/{title.vote_count}"
     )
+
+
+def _line(text: str) -> str:
+    """Flatten remote text to one line, so nothing TMDb carries can forge another.
+
+    TMDb's catalogue is community-edited, and a title holding a newline would otherwise
+    write its own ``- <id> | …`` entry, or its own ``Rules:`` block, into the prompt. An
+    id that was never in the pool is dropped a moment later whatever the prompt said, so
+    this is the second lock rather than the first — and it costs one call.
+    """
+    return " ".join(text.split())
 
 
 def _rules(context: StrategyContext, size: int) -> str:
@@ -458,13 +549,4 @@ def _rules(context: StrategyContext, size: int) -> str:
         "batch. Vary genres within the batch. Best card first.\n\n"
         'Return ONLY a JSON object: {"cards": [{"id": 27205, "media_type": "movie", '
         '"rationale": "...", "pick_type": "safe"}]}'
-    )
-
-
-def novelty_band_note() -> str:
-    """One line per novelty level, for a report or a log that wants the numbers."""
-    return "; ".join(
-        f"{name}: popularity>={band.popularity_floor:g}, votes {band.min_votes}"
-        f"-{band.max_votes if band.max_votes is not None else '∞'}, pages {band.pages}"
-        for name, band in NOVELTY_BANDS.items()
     )

@@ -249,7 +249,7 @@ def _eval_run(args: argparse.Namespace, out: "TextIO") -> int:
         write_report(report, args.json_path)
     if args.update_baseline:
         write_baseline(paths, report, out)
-    return compare_to_baseline(paths, report, out) if args.check else 0
+    return compare_to_baseline(paths, STRATEGIES[args.strategy], report, out) if args.check else 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

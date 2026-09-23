@@ -23,7 +23,13 @@ from typing import Any, Final, TextIO
 
 import httpx2
 
-from tindarr.adapters.cassette import Cassette, CassetteMissError, Interaction, RecordingTransport
+from tindarr.adapters.cassette import (
+    Cassette,
+    CassetteMissError,
+    Interaction,
+    RecordingTransport,
+    TopUpTransport,
+)
 from tindarr.adapters.llm.factory import llm_provider_factory
 from tindarr.adapters.tmdb import TmdbMetadata
 from tindarr.ports.llm import LlmConnection, LlmProvider
@@ -297,9 +303,19 @@ def _tmdb_transport(
 ) -> httpx2.AsyncBaseTransport:
     if not live:
         return _cassette(paths.cassette).transport()
-    recorder = RecordingTransport(httpx2.AsyncHTTPTransport(), provider="tmdb")
+    recorder = RecordingTransport(_topped_up(paths.cassette), provider="tmdb")
     recorders["tmdb"] = recorder
     return recorder
+
+
+def _topped_up(path: Path) -> httpx2.AsyncBaseTransport:
+    """Return the real service, with the committed answers in front of it.
+
+    A live run extends a fixture; it does not replace one. Reading what is already
+    recorded first is what makes a second strategy's recording safe for the first
+    strategy's numbers (``TopUpTransport``).
+    """
+    return TopUpTransport(_existing(path), httpx2.AsyncHTTPTransport())
 
 
 def _llm_connection(*, live: bool) -> LlmConnection:
@@ -342,7 +358,12 @@ def _llm_provider(
     if connection is None:
         return None
     if live:
-        recorder = RecordingTransport(httpx2.AsyncHTTPTransport(), provider="llm")
+        # The recorded model answers are keyed by a digest of the prompt, so a prompt
+        # that has not changed costs nothing to re-record and comes back identical.
+        stored = rehost(_existing(paths.llm_cassette), RECORDED_LLM_BASE, connection.base_url or "")
+        recorder = RecordingTransport(
+            TopUpTransport(stored, httpx2.AsyncHTTPTransport()), provider="llm"
+        )
         recorders["llm"] = recorder
         transport: httpx2.AsyncBaseTransport = recorder
     else:
@@ -411,18 +432,27 @@ def rehost(cassette: Cassette, was: str, now: str) -> Cassette:
     # Spelled the way ``request_key`` spells an address — scheme, host, path, and no
     # port — because that is what a recorded key holds, not what was typed.
     before, after = _key_address(was), _key_address(now)
-    return Cassette(
-        (
+    moved: list[Interaction] = []
+    for interaction in cassette.interactions:
+        key = _rehosted(interaction.key, before, after)
+        if key == interaction.key:
+            # A key nobody can rewrite is a key that would carry somebody's own host
+            # into a public repository, which is the one thing this function exists to
+            # prevent. It refuses rather than writing the file and hoping a reviewer
+            # notices the address.
+            raise EvalError(
+                f"a recorded answer is not filed under {before} and cannot be made "
+                "portable; nothing was written"
+            )
+        moved.append(
             Interaction(
-                key=_rehosted(interaction.key, before, after),
+                key=key,
                 status=interaction.status,
                 body=interaction.body,
                 content_type=interaction.content_type,
             )
-            for interaction in cassette.interactions
-        ),
-        provider=cassette.provider,
-    )
+        )
+    return Cassette(moved, provider=cassette.provider)
 
 
 def _key_address(base_url: str) -> str:
@@ -540,13 +570,19 @@ def _answered(*, confirmed: bool) -> None:
 # --- the gate ------------------------------------------------------------------------
 
 
-def compare_to_baseline(paths: EvalPaths, report: EvaluationReport, out: TextIO) -> int:
-    """Hold the report to its own baseline **and** to the reference floors.
+def compare_to_baseline(
+    paths: EvalPaths, spec: StrategySpec, report: EvaluationReport, out: TextIO
+) -> int:
+    """Hold the report to its own baseline, to the reference floors, and to its spec.
 
-    Two questions, because one of them is not enough. "Did this strategy get worse than
-    it was?" is answered by its own baseline. "Is it better than doing something stupid?"
-    is answered by the floors — and without it the first baseline a new strategy writes
-    is whatever it scored, which certifies anything.
+    Three questions, because two are not enough. "Did this strategy get worse than it
+    was?" is answered by its own baseline. "Is it better than doing something stupid?"
+    is answered by the floors — without it the first baseline a new strategy writes is
+    whatever it scored, which certifies anything. And "does it spend what it said it
+    would?" is answered by the ``StrategySpec``, which is the one cost bound a first
+    baseline cannot write for itself: the floors call no model, so the floor comparison
+    has to exempt cost, and a strategy's own first baseline is whatever it happened to
+    spend.
     """
     path = paths.baseline(report.strategy)
     try:
@@ -555,6 +591,7 @@ def compare_to_baseline(paths: EvalPaths, report: EvaluationReport, out: TextIO)
         regressions: list[Regression] = [
             *check(baseline, report),
             *check_floor(floors, report),
+            *_over_budget(spec, report),
         ]
         skipped = uncomparable(floors, report)
     except BaselineError as failure:
@@ -575,6 +612,26 @@ def compare_to_baseline(paths: EvalPaths, report: EvaluationReport, out: TextIO)
         f"{report.strategy} --update-baseline' and say why in the commit message.\n"
     )
     return 1
+
+
+#: How far a run may exceed the model cost its spec declares. A quarter of a call a
+#: batch: a retry that rescued one answer in nine is not a change of plan, a second call
+#: on every batch is.
+SPEC_CALL_TOLERANCE: Final = 0.25
+
+
+def _over_budget(spec: StrategySpec, report: EvaluationReport) -> list[Regression]:
+    """Hold a run to the model cost its own registration declares.
+
+    The number in ``STRATEGIES`` is what the live plan quotes to an operator before it
+    spends their money, so it is a promise already made. Measuring against it costs
+    nothing and closes the one gap the floor exemption opens.
+    """
+    spent = report.metrics.get("llm_calls_per_batch")
+    allowed = spec.llm_calls_per_batch + SPEC_CALL_TOLERANCE
+    if spent is None or spent <= allowed:
+        return []
+    return [Regression("spec.llm_calls_per_batch", float(spec.llm_calls_per_batch), spent, allowed)]
 
 
 def _floors(paths: EvalPaths) -> list[Baseline]:

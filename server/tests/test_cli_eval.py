@@ -9,14 +9,17 @@ import json
 import sqlite3
 from pathlib import Path
 
+import httpx2
 import pytest
 
-from tindarr.adapters.cassette import Cassette
+from tindarr.adapters.cassette import Cassette, Interaction, TopUpTransport
 from tindarr.main.cli import SYNTHETIC_SEED, main
 from tindarr.main.evaluation import (
     AUTHOR_FIXTURES,
+    RECORDED_LLM_BASE,
     STRATEGIES,
     SYNTHETIC_FIXTURES,
+    EvalError,
     EvalPaths,
     Parts,
     StrategySpec,
@@ -24,6 +27,7 @@ from tindarr.main.evaluation import (
     catalog_service,
     live_plan,
     popular_baseline,
+    rehost,
 )
 from tindarr.swipe.evaluation import Baseline, ReplayOptions, load_dataset
 from tindarr.swipe.evaluation.synthetic import build_synthetic_dataset
@@ -163,7 +167,7 @@ def test_a_worse_run_fails_the_build(tmp_path: Path, capsys: pytest.CaptureFixtu
 
     printed = capsys.readouterr().out
     assert code == 1
-    assert "already_seen_rate: 0.2 -> 0.789474" in printed
+    assert "already_seen_rate: 0.2 -> 0.857143" in printed
     assert "--update-baseline" in printed
 
 
@@ -656,3 +660,51 @@ def test_a_live_run_without_a_key_opens_no_connection_pool(
     assert main(["eval", "run", "--fixtures", str(FIXTURES), "--live", "--yes"]) == 2
     assert "a live run needs a TMDb key" in capsys.readouterr().out
     assert opened == []
+
+
+# --- the model cassette is portable, or it is not written -------------------------------
+
+
+def test_a_recorded_model_answer_is_filed_under_a_neutral_address() -> None:
+    """An OpenAI-compatible endpoint is somebody's own machine; its host is not ours."""
+    recorded = Cassette(
+        [Interaction(key="POST http://10.0.0.7/v1/chat/completions body:ab", status=200, body="{}")]
+    )
+
+    moved = rehost(recorded, "http://10.0.0.7:8000/v1", RECORDED_LLM_BASE)
+
+    assert [row.key for row in moved.interactions] == [
+        "POST http://recorded.invalid/v1/chat/completions body:ab"
+    ]
+
+
+def test_a_key_that_cannot_be_made_portable_stops_the_recording() -> None:
+    """Silently keeping it would put the address in the repository, which is the point."""
+    recorded = Cassette(
+        [Interaction(key="POST http://elsewhere.lan/v1/x body:ab", status=200, body="{}")]
+    )
+
+    with pytest.raises(EvalError):
+        rehost(recorded, "http://10.0.0.7:8000/v1", RECORDED_LLM_BASE)
+
+
+@pytest.mark.anyio
+async def test_a_live_run_answers_from_the_cassette_before_it_dials_out() -> None:
+    """A live run extends a fixture. Replacing one breaks every strategy measured on it."""
+    recorded = Cassette(
+        [Interaction(key="GET https://api.themoviedb.org/3/movie/7", status=200, body='{"id": 7}')]
+    )
+    called: list[str] = []
+
+    def refuse(request: httpx2.Request) -> httpx2.Response:
+        called.append(str(request.url))
+        return httpx2.Response(500, json={})
+
+    transport = TopUpTransport(recorded, httpx2.MockTransport(refuse))
+    async with httpx2.AsyncClient(transport=transport) as client:
+        stored = await client.get("https://api.themoviedb.org/3/movie/7")
+        fresh = await client.get("https://api.themoviedb.org/3/movie/8")
+
+    assert stored.json() == {"id": 7}
+    assert called == ["https://api.themoviedb.org/3/movie/8"]
+    assert fresh.status_code == 500
