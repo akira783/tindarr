@@ -10,6 +10,7 @@ from http import HTTPStatus
 from tindarr.core.errors import ProblemError, RateLimitedError
 from tindarr.ports.problems import (
     account_disabled,
+    connector_failed,
     invalid_credentials,
     media_server_changed,
     media_server_unreachable,
@@ -19,6 +20,7 @@ from tindarr.ports.problems import (
     plex_tv_unreachable,
     quick_connect_expired,
     quick_connect_unavailable,
+    secret_required,
     sign_in_method_unavailable,
 )
 
@@ -190,15 +192,6 @@ def setup_completed() -> ProblemError:
     )
 
 
-def secret_required() -> ProblemError:
-    """409: the stored secret cannot be reused because the URL or the kind changed."""
-    return ProblemError(
-        HTTPStatus.CONFLICT,
-        "secret_required",
-        "Send the API key again: it is never sent to an address it was not stored for.",
-    )
-
-
 def plex_pin_pending() -> ProblemError:
     """409: the owner-token PIN has not been approved on plex.tv yet."""
     return ProblemError(
@@ -250,21 +243,6 @@ def too_many_pairings(retry_after_ms: int) -> RateLimitedError:
 def pin_expired() -> ProblemError:
     """410: an unknown, used or expired PIN handle, or one of another purpose or session."""
     return ProblemError(HTTPStatus.GONE, "pin_expired", "Start a new Plex PIN.")
-
-
-def connector_failed(health: str) -> ProblemError:
-    """502: the connection test failed; the health value becomes the problem code."""
-    codes = {
-        "unauthorized": "connector_unauthorized",
-        "unreachable": "connector_unreachable",
-        "unexpected_response": "connector_unexpected_response",
-        "unsupported_version": "media_server_unsupported",
-    }
-    return ProblemError(
-        HTTPStatus.BAD_GATEWAY,
-        codes.get(health, "connector_unexpected_response"),
-        "The media server did not answer as expected; nothing was saved.",
-    )
 
 
 def setup_required() -> ProblemError:

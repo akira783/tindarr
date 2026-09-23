@@ -16,6 +16,7 @@ from tindarr.auth.ratelimit import RateLimits
 from tindarr.auth.sessions import SessionService
 from tindarr.auth.setup import SetupService
 from tindarr.auth.signin import SignInService
+from tindarr.connectors import ConnectorService
 from tindarr.core.clock import Clock
 from tindarr.core.config import ServerConfig
 from tindarr.storage.server_state import ServerStateRepository
@@ -35,6 +36,8 @@ class AppServices:
     sessions: SessionService
     setup: SetupService
     connector: MediaServerConnector
+    #: TMDb, OMDb, the request backend and the AI provider (step 3).
+    connectors: ConnectorService
     #: Every sign-in method, and the two brokered flows behind their handles.
     sign_in: SignInService
     plex_pins: PlexPinFlow

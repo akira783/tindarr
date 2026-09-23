@@ -279,7 +279,9 @@ class MediaServerConnector:
         settings = MediaServerSettings(request.kind, request.url, secret, request.verify_tls)
         check = await self._adapter(settings, install_id).test()
         if not check.ok:
-            raise errors.connector_failed(check.health)
+            raise errors.connector_failed(
+                check.health, "The media server did not answer as expected; nothing was saved."
+            )
         identity = await self._adapter(settings, install_id).identify()
         if identity.kind != request.kind:
             raise errors.media_server_unsupported(

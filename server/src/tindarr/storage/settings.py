@@ -40,7 +40,9 @@ from tindarr.core.crypto import SecretCipher
 from tindarr.core.errors import ProblemError
 from tindarr.core.logs import register_secret
 from tindarr.core.net import normalize_public_url
+from tindarr.ports.llm import LlmProviderKind, ReasoningEffort
 from tindarr.ports.media_server import MediaServerKind
+from tindarr.ports.request_backend import SeasonPolicy
 from tindarr.storage.db import write_transaction
 from tindarr.storage.tables import settings as settings_table
 
@@ -134,6 +136,19 @@ SETTINGS: Final[Mapping[str, SettingDefinition]] = {
         SettingDefinition("media_server_verify_tls", bool, default=True),
         SettingDefinition("public_url", PublicUrl | None),
         SettingDefinition("password_sign_in", PasswordSignIn, default="enabled"),
+        # The optional connectors (step 3). Each is absent until an administrator
+        # configures it, and each secret is encrypted like the media server's.
+        SettingDefinition("tmdb_api_key", str | None, secret=True),
+        SettingDefinition("omdb_api_key", str | None, secret=True),
+        SettingDefinition("requests_url", str | None),
+        SettingDefinition("requests_api_key", str | None, secret=True),
+        SettingDefinition("requests_verify_tls", bool, default=True),
+        SettingDefinition("requests_tv_seasons", SeasonPolicy, default="all"),
+        SettingDefinition("llm_provider", LlmProviderKind | None),
+        SettingDefinition("llm_api_key", str | None, secret=True),
+        SettingDefinition("llm_base_url", str | None),
+        SettingDefinition("llm_model", str | None),
+        SettingDefinition("llm_reasoning_effort", ReasoningEffort | None),
         # Stored from step 2, used by the swipe engine from step 4.
         SettingDefinition("language", str, default="en"),
         SettingDefinition("streaming_region", StreamingRegion | None),

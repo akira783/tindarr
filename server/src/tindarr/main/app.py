@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tindarr import __version__
-from tindarr.adapters.factory import media_server_factory
+from tindarr.adapters.factory import connector_factories, media_server_factory
 from tindarr.adapters.plextv import PlexTvClient
 from tindarr.adapters.publicurl import HttpPublicUrlProbe
 from tindarr.api import health, v1
@@ -35,6 +35,7 @@ from tindarr.auth.setup import SetupService
 from tindarr.auth.signin import SignInService
 from tindarr.auth.sync import UserSync
 from tindarr.auth.tokens import AccessTokens
+from tindarr.connectors import ConnectorService
 from tindarr.core.clock import Clock, SystemClock
 from tindarr.core.config import ServerConfig
 from tindarr.core.crypto import SecretCipher
@@ -47,6 +48,7 @@ from tindarr.jobs.media_server import (
 )
 from tindarr.jobs.publicurl import public_url_check_job
 from tindarr.jobs.purge import BackgroundJob, purge_job
+from tindarr.ports.factories import ConnectorFactories
 from tindarr.ports.media_server import MediaServerFactory
 from tindarr.ports.plextv import PlexTv
 from tindarr.ports.publicurl import PublicUrlProbe
@@ -73,6 +75,8 @@ class Wiring:
     plex_tv: PlexTv | None = None
     #: How the server calls its own public address to check ``public_url``.
     public_url_probe: PublicUrlProbe | None = None
+    #: Builds TMDb, OMDb, the request backend and the AI providers (step 3).
+    connectors: ConnectorFactories | None = None
 
 
 @dataclass(frozen=True)
@@ -136,6 +140,7 @@ async def start(
         handles,
         wiring.clock,
     )
+    connectors = ConnectorService(settings, wiring.connectors or connector_factories())
     setup = SetupService(engine, data_dir, wiring.clock, sessions, connector, settings, limits)
     sign_in = SignInService(
         engine,
@@ -172,6 +177,7 @@ async def start(
         sessions=sessions,
         setup=setup,
         connector=connector,
+        connectors=connectors,
         sign_in=sign_in,
         plex_pins=plex_pins,
         quick_connect=quick_connect,

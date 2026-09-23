@@ -140,13 +140,13 @@ def test_the_connector_needs_the_csrf_token(app: FastAPI) -> None:
     assert_is_problem(response, 403, "csrf_failed")
 
 
-def test_the_other_connector_kinds_do_not_exist_yet(app: FastAPI) -> None:
+def test_a_body_of_another_kind_than_the_path_is_refused(app: FastAPI) -> None:
     with console_client(app) as client:
         csrf = set_up_server(client, app)
         response = client.put(
             f"{API}/admin/connectors/tmdb", json=connector_body(), headers=console_headers(csrf)
         )
-    assert_is_problem(response, 404, "not_found")
+    assert_is_problem(response, 400, "validation_error")
 
 
 # --- what an identity change costs -------------------------------------------------------

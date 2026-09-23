@@ -16,6 +16,7 @@ from tindarr.core.errors import ProblemError
 
 __all__ = [
     "account_disabled",
+    "connector_failed",
     "invalid_credentials",
     "llm_auth_failed",
     "llm_invalid_output",
@@ -34,6 +35,7 @@ __all__ = [
     "quota_exceeded",
     "request_backend_error",
     "request_not_allowed",
+    "secret_required",
     "sign_in_method_unavailable",
 ]
 
@@ -122,6 +124,42 @@ def plex_tv_unreachable() -> ProblemError:
         HTTPStatus.SERVICE_UNAVAILABLE,
         "plex_tv_unreachable",
         "plex.tv did not answer; try again in a moment.",
+    )
+
+
+# --- every connector ----------------------------------------------------------------
+
+
+def secret_required() -> ProblemError:
+    """409: the stored secret cannot be reused because the address or the kind changed.
+
+    This is the rule of the security model's section 7: a stolen admin session cannot
+    make Tindarr send the keys it holds to a host of its choosing, because a new address
+    has to come with a new key.
+    """
+    return ProblemError(
+        HTTPStatus.CONFLICT,
+        "secret_required",
+        "Send the API key again: it is never sent to an address it was not stored for.",
+    )
+
+
+def connector_failed(health: str, detail: str | None = None) -> ProblemError:
+    """502: a connection test failed; the coarse health becomes the problem code.
+
+    Nothing else of the test crosses this line: no status code, no response body, no
+    message from the other side (the security model, section 7).
+    """
+    codes = {
+        "unauthorized": "connector_unauthorized",
+        "unreachable": "connector_unreachable",
+        "unexpected_response": "connector_unexpected_response",
+        "unsupported_version": "media_server_unsupported",
+    }
+    return ProblemError(
+        HTTPStatus.BAD_GATEWAY,
+        codes.get(health, "connector_unexpected_response"),
+        detail or "That service did not answer as expected; nothing was saved.",
     )
 
 

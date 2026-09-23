@@ -1691,7 +1691,11 @@ paths:
       summary: Configure a connector
       description: |
         Tested before saving. Omitted secret fields keep their stored value, unless
-        the URL changes (`code` = `secret_required`). Fields locked by an
+        the address changes (`code` = `secret_required`); for `llm` the provider
+        counts as part of the address, and for `requests` so does `verify_tls`,
+        since turning it off would otherwise replay the stored key over a
+        connection nobody checks. TMDb and OMDb have one host each, written into
+        Tindarr, so their key has no address to be moved to and is always reused. Fields locked by an
         environment variable cannot be given another value (`code` =
         `setting_locked`).
 
@@ -1731,7 +1735,7 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
         "404":
-          description: "`not_found`: a connector kind not implemented yet (step 2: every kind but `media_server`)."
+          description: "`not_found`: no such connector kind."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -1756,12 +1760,12 @@ paths:
       security:
         - cookieSession: []
           csrfToken: []
-      summary: Remove an optional connector (omdb, requests)
+      summary: Remove an optional connector (tmdb, omdb, requests, llm)
       description: |
         Only the optional connectors can be removed. `media_server` is not one of
         them: a Tindarr without a media server signs nobody in, so it is repointed
-        with `PUT` instead (`409` `media_server_required`). In step 2 the optional
-        connectors do not exist yet and answer `404`.
+        with `PUT` instead (`409` `media_server_required`). Removing a connector
+        that was never configured succeeds and changes nothing.
       operationId: deleteConnector
       parameters:
         - $ref: "#/components/parameters/ConnectorKind"
@@ -1771,7 +1775,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/AdminForbidden" }
         "404":
-          description: "`not_found`: a connector kind not implemented yet (step 2: every kind but `media_server`)."
+          description: "`not_found`: no such connector kind."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -1816,7 +1820,7 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
         "404":
-          description: "`not_found`: a connector kind not implemented yet (step 2: every kind but `media_server`)."
+          description: "`not_found`: no such connector kind."
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -1869,6 +1873,7 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "502": { $ref: "#/components/responses/Problem" }
 
   /api/v1/admin/settings:

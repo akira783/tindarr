@@ -133,6 +133,7 @@ layers = [
     "api",
     "jobs",
     "auth | swipe",
+    "connectors",
     "storage",
     "ports",
     "core",
@@ -149,6 +150,7 @@ source_modules = [
     "tindarr.jobs",
     "tindarr.auth",
     "tindarr.swipe",
+    "tindarr.connectors",
     "tindarr.storage",
     "tindarr.ports",
     "tindarr.core",
@@ -165,6 +167,7 @@ forbidden_modules = [
     "tindarr.jobs",
     "tindarr.auth",
     "tindarr.swipe",
+    "tindarr.connectors",
     "tindarr.storage",
 ]
 
@@ -175,6 +178,7 @@ source_modules = [
     "tindarr.swipe",
     "tindarr.auth",
     "tindarr.jobs",
+    "tindarr.connectors",
     "tindarr.storage",
     "tindarr.ports",
     "tindarr.core",

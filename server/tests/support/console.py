@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tests.support.fakes import FakeClock, FakeMediaServers, media_user
+from tests.support.outside import FakeOutside
 from tests.support.upstream import FakeInternet
 from tindarr.adapters.factory import media_server_factory
 from tindarr.adapters.plextv import PlexTvClient
@@ -43,13 +44,14 @@ def server_config(data_dir: Path, **overrides: Any) -> ServerConfig:
     return ServerConfig.model_validate(values | overrides)
 
 
-def build_app(
+def build_app(  # noqa: PLR0913 - one argument per fake the application may need
     data_dir: Path,
     *,
     clock: FakeClock | None = None,
     media_servers: FakeMediaServers | None = None,
     internet: FakeInternet | None = None,
     public_url_probe: PublicUrlProbe | None = None,
+    outside: FakeOutside | None = None,
     **overrides: Any,
 ) -> FastAPI:
     """Build the application with the test's clock and its media servers.
@@ -61,7 +63,7 @@ def build_app(
     """
     return create_app(
         server_config(data_dir, **overrides),
-        wiring(clock, media_servers, internet, public_url_probe),
+        wiring(clock, media_servers, internet, public_url_probe, outside),
     )
 
 
@@ -70,20 +72,30 @@ def wiring(
     media_servers: FakeMediaServers | None = None,
     internet: FakeInternet | None = None,
     public_url_probe: PublicUrlProbe | None = None,
+    outside: FakeOutside | None = None,
 ) -> Wiring:
-    """The ``Wiring`` for these fakes: real adapters over ``internet``, or stubs."""
+    """The ``Wiring`` for these fakes: real adapters over the fake services, or stubs.
+
+    ``outside`` wires the step-3 connectors to fake TMDb, OMDb, Seerr and AI providers.
+    Without it they are wired to the real ones, which answer nothing: no test reaches
+    the network, and one that tried would fail on a name that does not resolve.
+    """
+    ticking = clock or FakeClock()
+    connectors = outside.factories if outside is not None else None
     if internet is not None:
         plex_tv = PlexTvClient(internet.plex_tv.transport)
         return Wiring(
-            clock=clock or FakeClock(),
-            media_servers=media_server_factory(plex_tv, internet.transport),
+            clock=ticking,
+            media_servers=media_server_factory(plex_tv, internet.transport, ticking),
             plex_tv=plex_tv,
             public_url_probe=public_url_probe,
+            connectors=connectors,
         )
     return Wiring(
-        clock=clock or FakeClock(),
+        clock=ticking,
         media_servers=media_servers or FakeMediaServers(),
         public_url_probe=public_url_probe,
+        connectors=connectors,
     )
 
 

@@ -254,11 +254,16 @@ def test_the_media_server_connector_cannot_be_removed(app: FastAPI) -> None:
 
 
 @pytest.mark.parametrize("kind", ["requests", "tmdb", "omdb", "llm"])
-def test_the_other_connectors_arrive_in_a_later_step(app: FastAPI, kind: str) -> None:
+def test_removing_an_optional_connector_nobody_configured_is_not_an_error(
+    app: FastAPI, kind: str
+) -> None:
     with console_client(app) as client:
         csrf = set_up_server(client, app)
         response = client.delete(f"{CONNECTORS}/{kind}", headers=console_headers(csrf))
-        assert_is_problem(response, 404, "not_found")
+        assert response.status_code == 204, response.text
+        listed = {row["kind"]: row for row in client.get(CONNECTORS).json()["connectors"]}
+        assert listed[kind]["configured"] is False
+        assert listed[kind]["status"]["health"] == "not_configured"
 
 
 # --- users ------------------------------------------------------------------------------

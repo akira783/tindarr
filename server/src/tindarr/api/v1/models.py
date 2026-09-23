@@ -16,8 +16,11 @@ from tindarr.auth.methods import AuthMethod
 from tindarr.auth.pairing import POLL_INTERVAL_MS, NewPairing, confirmation_code
 from tindarr.auth.sessions import CookieGrant
 from tindarr.auth.sessions import TokenPair as TokenPairValue
+from tindarr.connectors import ConnectorInput
 from tindarr.core.net import normalize_public_url
+from tindarr.ports.llm import LlmProviderKind, ReasoningEffort
 from tindarr.ports.media_server import ConnectionCheck, ConnectorHealth, MediaServerKind
+from tindarr.ports.request_backend import SeasonPolicy
 from tindarr.storage.pairings import Pairing, PairingState
 from tindarr.storage.sessions import Device, Session
 from tindarr.storage.settings import (
@@ -277,6 +280,86 @@ class MediaServerConfigInput(BaseModel):
         return self
 
 
+class ApiKeyInput(BaseModel):
+    """Contract schema ``ApiKeyInput``: TMDb and OMDb, which are a key and nothing else."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    connector: Literal["tmdb", "omdb"]
+    api_key: Annotated[str | None, Field(default=None, min_length=1, max_length=512)] = None
+
+
+class RequestsInput(BaseModel):
+    """Contract schema ``RequestsInput``: Seerr, Jellyseerr or Overseerr."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    connector: Literal["requests"]
+    url: Annotated[str, Field(max_length=512, pattern=r"^https?://")]
+    api_key: Annotated[str | None, Field(default=None, min_length=1, max_length=512)] = None
+    verify_tls: bool = True
+    tv_seasons: SeasonPolicy = "all"
+
+
+class LlmSettingsInput(BaseModel):
+    """Contract schema ``LlmSettingsInput``: the AI provider and how to reach it."""
+
+    # ``model`` is a contract field name, and pydantic reserves the ``model_`` prefix
+    # for its own methods; the namespace is opened deliberately rather than renaming a
+    # field the app and the console already know.
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
+
+    connector: Literal["llm"]
+    provider: LlmProviderKind
+    api_key: Annotated[str | None, Field(default=None, min_length=1, max_length=512)] = None
+    base_url: Annotated[str | None, Field(default=None, max_length=512, pattern=r"^https?://")] = (
+        None
+    )
+    model: Annotated[str | None, Field(default=None, min_length=1, max_length=128)] = None
+    reasoning_effort: ReasoningEffort | None = None
+
+
+#: Contract schema ``ConnectorInput``: one body per connector kind, told apart by the
+#: ``connector`` field, which must also match the path.
+type ConnectorInputBody = Annotated[
+    MediaServerConfigInput | LlmSettingsInput | RequestsInput | ApiKeyInput,
+    Field(discriminator="connector"),
+]
+
+
+#: The four bodies this service owns; the media server keeps its own route.
+type OptionalConnectorBody = LlmSettingsInput | RequestsInput | ApiKeyInput
+
+
+def as_connector_input(payload: OptionalConnectorBody) -> ConnectorInput:
+    """Turn an optional connector's body into the values the service works with.
+
+    ``model_fields_set`` is what says which fields the request really carried, so an
+    omitted one keeps its stored value and is never checked against a lock.
+    """
+    given = frozenset(payload.model_fields_set) - {"connector"}
+    if isinstance(payload, ApiKeyInput):
+        return ConnectorInput(kind=payload.connector, api_key=payload.api_key, given=given)
+    if isinstance(payload, RequestsInput):
+        return ConnectorInput(
+            kind="requests",
+            url=payload.url,
+            api_key=payload.api_key,
+            verify_tls=payload.verify_tls,
+            tv_seasons=payload.tv_seasons,
+            given=given,
+        )
+    return ConnectorInput(
+        kind="llm",
+        provider=payload.provider,
+        api_key=payload.api_key,
+        base_url=payload.base_url,
+        model=payload.model,
+        reasoning_effort=payload.reasoning_effort,
+        given=given,
+    )
+
+
 class RefreshInput(BaseModel):
     """Body of ``POST /auth/refresh``."""
 
@@ -494,6 +577,12 @@ class SecretStateResponse(BaseModel):
     set: bool
     last4: str | None = None
     locked: bool = False
+
+
+class LlmModelsResponse(BaseModel):
+    """Answer of ``POST /admin/llm/models``: model ids only, never a provider's prose."""
+
+    models: list[str]
 
 
 class ConnectorListResponse(BaseModel):

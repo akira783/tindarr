@@ -1,48 +1,56 @@
-"""Administration endpoints. Step 2b implements the media server connector.
+"""Administration endpoints for the connectors.
 
-docs/auth.md, section 6. Repointing the media server is the most dangerous thing an
-administrator can do — a connector aimed at a server the attacker controls collects
-everyone's password at their next sign-in and makes its owner an administrator here — so
-it is the one action guarded three times over:
+Two very different things share these three routes, and the difference is worth keeping
+in mind while reading them.
 
-- the effective role must be ``admin`` (every endpoint tagged ``admin``);
-- **and** the caller must administer the media server itself: a promoted Tindarr admin
-  cannot repoint it (``media_server_admin_required``);
-- **and** they must have re-authenticated on the **currently configured** media server
-  in the last five minutes (``reauth_required``). Credentials are never sent to the new
-  address before it is saved.
+**The media server** (docs/auth.md, section 6) decides who can sign in and who is an
+administrator, so repointing it is the most dangerous thing an administrator can do — a
+connector aimed at a server the attacker controls collects everyone's password at their
+next sign-in and makes its owner an administrator here. It is therefore guarded three
+times over: the effective role must be ``admin``; the caller must administer the media
+server itself, so a promoted Tindarr admin cannot repoint it
+(``media_server_admin_required``); and they must have re-authenticated on the
+**currently configured** media server in the last five minutes (``reauth_required``).
+Credentials are never sent to the new address before it is saved, and a saved server
+that turns out not to be the one Tindarr was set up with costs every session and every
+user link in the same transaction.
 
-If the saved server turns out not to be the one Tindarr was set up with, the same
-transaction revokes every session — the caller's included, so this response clears their
-cookie — and unlinks every user. Everyone signs in again on the new server, and its
-administrators become administrators here as usual.
+**The four optional connectors** (TMDb, OMDb, the request backend, the AI provider)
+decide nothing about identity. Any administrator may add, test, change or remove them.
+What they share with the media server is the rule that a stored secret is never sent to
+an address it was not stored for (``secret_required``), which is what stops a stolen
+console session from using this server as a courier for the keys it holds.
 
-``GET /admin/connectors`` lists every kind the contract knows, so the console can show
-the page it will keep in steps 3 and 4; only ``media_server`` is configured in step 2
-and the others answer ``404`` to every other call until then. Listing never calls a
-remote service: a configured connector's health is ``unknown`` until the administrator
-presses "test".
+Neither kind is stored before its connection test passes, and no test answer carries
+more than a coarse health value and, at most, the remote product's own name and version
+(the security model, section 7).
 
-The media server connector cannot be **removed**: a Tindarr without one signs nobody
-in. It is repointed with ``PUT``, under the three guards above.
+``GET /admin/connectors`` never calls anything: a configured connector's health is
+``unknown`` until an administrator presses "test".
 """
 
 from typing import Annotated, Literal, get_args
 
-from fastapi import APIRouter, Depends, Path, Response, status
+from fastapi import APIRouter, Body, Path, Response, status
 
 from tindarr.api.cookies import clear_session_cookie
 from tindarr.api.deps import Services
 from tindarr.api.security import AdminSession, Transport
 from tindarr.api.v1.models import (
+    ConnectorInputBody,
     ConnectorListResponse,
     ConnectorResponse,
     ConnectorStatusResponse,
+    LlmModelsResponse,
+    LlmSettingsInput,
     MediaServerConfigInput,
+    OptionalConnectorBody,
     SecretStateResponse,
+    as_connector_input,
 )
 from tindarr.auth import access
 from tindarr.auth.mediaserver import MediaServerInput, MediaServerSettings
+from tindarr.connectors import ConnectorState, OptionalConnectorKind
 from tindarr.core.errors import ProblemError
 
 router = APIRouter(tags=["admin", "console"])
@@ -54,27 +62,34 @@ _LAST4 = 4
 #: And how long it has to be before showing them gives anything away.
 _MIN_SECRET_TO_HINT = 12
 
+ConnectorPath = Annotated[ConnectorKind, Path(description="Which connector.")]
+ConnectorBody = Annotated[ConnectorInputBody, Body()]
 
-def _not_implemented() -> ProblemError:
+
+def _mismatch(kind: ConnectorKind) -> ProblemError:
     return ProblemError(
-        status.HTTP_404_NOT_FOUND, "not_found", "This connector arrives in a later step."
+        status.HTTP_400_BAD_REQUEST,
+        "validation_error",
+        f"connector: this body is not a {kind} connector",
     )
 
 
-def media_server_only(
-    kind: Annotated[ConnectorKind, Path(description="Which connector.")],
-) -> ConnectorKind:
-    """Refuse every connector kind step 2 does not implement yet."""
-    if kind != "media_server":
-        raise _not_implemented()
-    return kind
+def media_server_body(payload: ConnectorInputBody, kind: ConnectorKind) -> MediaServerConfigInput:
+    """Return the body as the media server's, or refuse a body of another kind."""
+    if kind != "media_server" or not isinstance(payload, MediaServerConfigInput):
+        raise _mismatch(kind)
+    return payload
 
 
-ConnectorPath = Annotated[ConnectorKind, Depends(media_server_only)]
+def optional_body(payload: ConnectorInputBody, kind: ConnectorKind) -> OptionalConnectorBody:
+    """Return the body as an optional connector's, checked against the path."""
+    if isinstance(payload, MediaServerConfigInput) or payload.connector != kind:
+        raise _mismatch(kind)
+    return payload
 
 
 def as_input(payload: MediaServerConfigInput) -> MediaServerInput:
-    """Turn the contract body into the values the connector works with."""
+    """Turn the contract body into the values the media server connector works with."""
     return MediaServerInput(
         kind=payload.server_type,
         url=payload.url,
@@ -85,53 +100,82 @@ def as_input(payload: MediaServerConfigInput) -> MediaServerInput:
     )
 
 
-def secret_state(settings: MediaServerSettings, locked: list[str]) -> SecretStateResponse:
+def secret_state(secret: str, *, locked: bool, show_last4: bool = True) -> SecretStateResponse:
     """Say whether the secret is set, and show its last characters where that helps.
 
-    An API key is one of several an administrator may hold, and four characters are
-    what lets them tell "the key I just made" from "the old one". A Plex connector's
-    secret is not a key but the **account token** of the server's owner: there is only
-    ever one, so those four characters would identify nothing and only give away part
-    of a credential that opens the whole Plex account. It is masked entirely.
+    Four characters are what lets an administrator tell "the key I just made" from the
+    old one, and they are shown only when there is plenty left unshown: slicing a short
+    string returns all of it. A Plex connector's secret is masked entirely — it is not a
+    key but the **account token** of the server's owner, of which there is only ever
+    one, so those four characters would identify nothing and give away part of a
+    credential that opens a whole Plex account.
     """
-    shown = (
-        settings.kind != "plex"
-        # Slicing a short string returns all of it: four characters of a four-character
-        # key are the key. Nothing is shown unless there is plenty left unshown.
-        and len(settings.secret) >= _MIN_SECRET_TO_HINT
-    )
+    shown = show_last4 and len(secret) >= _MIN_SECRET_TO_HINT
     return SecretStateResponse(
-        set=bool(settings.secret),
-        last4=settings.secret[-_LAST4:] if shown else None,
-        locked="api_key" in locked,
+        set=bool(secret), last4=secret[-_LAST4:] if shown else None, locked=locked
     )
 
 
 def connector_body(
     settings: MediaServerSettings, status_body: ConnectorStatusResponse, locked: list[str]
 ) -> ConnectorResponse:
-    """Describe the saved connector, with the secret masked (the security model, §7)."""
+    """Describe the saved media server connector, with the secret masked."""
     return ConnectorResponse(
         kind="media_server",
         configured=True,
         provider=settings.kind,
         url=settings.url,
         verify_tls=settings.verify_tls,
-        secret=secret_state(settings, locked),
+        secret=secret_state(
+            settings.secret, locked="api_key" in locked, show_last4=settings.kind != "plex"
+        ),
         locked_fields=locked,
         status=status_body,
     )
 
 
-def unconfigured(kind: ConnectorKind) -> ConnectorResponse:
+def optional_connector_body(
+    state: ConnectorState, status_body: ConnectorStatusResponse, locked: list[str]
+) -> ConnectorResponse:
+    """Describe a saved optional connector, with the secret masked."""
+    return ConnectorResponse(
+        kind=state.kind,
+        configured=True,
+        provider=state.provider,
+        url=state.url,
+        verify_tls=state.verify_tls,
+        model=state.model,
+        tv_seasons=state.tv_seasons,
+        secret=secret_state(state.secret, locked="api_key" in locked),
+        locked_fields=locked,
+        status=status_body,
+    )
+
+
+def unconfigured(kind: ConnectorKind, locked: list[str]) -> ConnectorResponse:
     """Describe a connector nothing has been stored for."""
     return ConnectorResponse(
         kind=kind,
         configured=False,
-        secret=SecretStateResponse(set=False),
-        locked_fields=[],
+        secret=SecretStateResponse(set=False, locked="api_key" in locked),
+        locked_fields=locked,
         status=ConnectorStatusResponse.untested(configured=False),
     )
+
+
+async def _listed(services: Services, kind: ConnectorKind) -> ConnectorResponse:
+    if kind == "media_server":
+        settings = await services.connector.configured()
+        locked = services.connector.locked_fields()
+        if settings is None:
+            return unconfigured(kind, locked)
+        return connector_body(settings, ConnectorStatusResponse.untested(configured=True), locked)
+    optional: OptionalConnectorKind = kind
+    locked = services.connectors.locked_fields(optional)
+    state = await services.connectors.state(optional)
+    if state is None:
+        return unconfigured(kind, locked)
+    return optional_connector_body(state, ConnectorStatusResponse.untested(configured=True), locked)
 
 
 @router.get(
@@ -145,15 +189,9 @@ async def list_connectors(services: Services, session: AdminSession) -> Connecto
     A configured connector's health is ``unknown``: finding out costs a network call
     per connector, and the console asks for it explicitly with ``…/test``.
     """
-    settings = await services.connector.configured()
-    locked = services.connector.locked_fields()
-    connectors = [
-        unconfigured(kind)
-        if kind != "media_server" or settings is None
-        else connector_body(settings, ConnectorStatusResponse.untested(configured=True), locked)
-        for kind in CONNECTOR_KINDS
-    ]
-    return ConnectorListResponse(connectors=connectors)
+    return ConnectorListResponse(
+        connectors=[await _listed(services, kind) for kind in CONNECTOR_KINDS]
+    )
 
 
 @router.delete(
@@ -162,20 +200,16 @@ async def list_connectors(services: Services, session: AdminSession) -> Connecto
     summary="Remove an optional connector (omdb, requests)",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-async def delete_connector(
-    kind: Annotated[ConnectorKind, Path(description="Which connector.")],
-    services: Services,
-    session: AdminSession,
-) -> None:
-    """Refuse, in step 2: the media server is required and the rest do not exist yet."""
-    if kind != "media_server":
-        raise _not_implemented()
-    raise ProblemError(
-        status.HTTP_409_CONFLICT,
-        "media_server_required",
-        "Tindarr cannot sign anyone in without a media server; point it at another "
-        "one instead of removing it.",
-    )
+async def delete_connector(kind: ConnectorPath, services: Services, session: AdminSession) -> None:
+    """Forget an optional connector. The media server is not one of them."""
+    if kind == "media_server":
+        raise ProblemError(
+            status.HTTP_409_CONFLICT,
+            "media_server_required",
+            "Tindarr cannot sign anyone in without a media server; point it at another "
+            "one instead of removing it.",
+        )
+    await services.connectors.remove(kind)
 
 
 @router.put(
@@ -184,19 +218,30 @@ async def delete_connector(
     summary="Configure a connector",
 )
 async def save_connector(  # noqa: PLR0913, PLR0917 - one per dependency
-    payload: MediaServerConfigInput,
+    payload: ConnectorBody,
     kind: ConnectorPath,
     response: Response,
     services: Services,
     transport: Transport,
     session: AdminSession,
 ) -> ConnectorResponse:
-    """Test and save the media server, applying the identity-change rules."""
+    """Test the connector and save it; nothing is stored when the test fails."""
+    services.limits.connection_tests.hit(session.session.id)
+    if kind != "media_server":
+        request = as_connector_input(optional_body(payload, kind))
+        check = await services.connectors.save(request)
+        state = await services.connectors.state(request.kind)
+        if state is None:  # pragma: no cover - the save just wrote it
+            raise ProblemError(500, "internal_error")
+        return optional_connector_body(
+            state,
+            ConnectorStatusResponse.of(check, services.clock.now()),
+            services.connectors.locked_fields(request.kind),
+        )
     access.require_media_server_admin(session.signed_in_user)
     access.require_recent_reauth(session.session, services.clock.now())
-    services.limits.connection_tests.hit(session.session.id)
     saved = await services.connector.save(
-        as_input(payload),
+        as_input(media_server_body(payload, kind)),
         session_id=session.session.id,
         install_id=services.install_id,
         relink=True,
@@ -205,10 +250,13 @@ async def save_connector(  # noqa: PLR0913, PLR0917 - one per dependency
         # Every session went with the old server, this one too.
         clear_session_cookie(response, transport)
     settings = await services.connector.configured()
-    body = ConnectorStatusResponse.of(saved.check, services.clock.now())
     if settings is None:  # pragma: no cover - the save just wrote it
         raise ProblemError(500, "internal_error")
-    return connector_body(settings, body, services.connector.locked_fields())
+    return connector_body(
+        settings,
+        ConnectorStatusResponse.of(saved.check, services.clock.now()),
+        services.connector.locked_fields(),
+    )
 
 
 @router.post(
@@ -217,14 +265,35 @@ async def save_connector(  # noqa: PLR0913, PLR0917 - one per dependency
     summary="Test a connector without saving",
 )
 async def test_connector(
-    payload: MediaServerConfigInput,
-    kind: ConnectorPath,
-    services: Services,
-    session: AdminSession,
+    payload: ConnectorBody, kind: ConnectorPath, services: Services, session: AdminSession
 ) -> ConnectorStatusResponse:
     """Report a coarse health for the given settings; nothing is saved or consumed."""
     services.limits.connection_tests.hit(session.session.id)
-    check = await services.connector.check(
-        as_input(payload), session_id=session.session.id, install_id=services.install_id
-    )
+    if kind == "media_server":
+        check = await services.connector.check(
+            as_input(media_server_body(payload, kind)),
+            session_id=session.session.id,
+            install_id=services.install_id,
+        )
+    else:
+        check = await services.connectors.check(as_connector_input(optional_body(payload, kind)))
     return ConnectorStatusResponse.of(check, services.clock.now())
+
+
+@router.post(
+    "/llm/models",
+    operation_id="listLlmModels",
+    summary="List the models a provider offers",
+)
+async def list_llm_models(
+    payload: Annotated[LlmSettingsInput, Body()], services: Services, session: AdminSession
+) -> LlmModelsResponse:
+    """Ask the provider which models it serves, so no model id is ever hard-coded.
+
+    Only ids are returned, parsed from the provider's expected shape: like a connection
+    test, this must not become a way to read something else off an address the caller
+    chose (the security model, section 7).
+    """
+    services.limits.connection_tests.hit(session.session.id)
+    models = await services.connectors.list_models(as_connector_input(payload))
+    return LlmModelsResponse(models=models)
