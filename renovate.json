@@ -41,6 +41,16 @@
       ],
       "depNameTemplate": "astral-sh/uv",
       "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "Media server images pinned by digest in the end-to-end scripts",
+      "managerFilePatterns": [
+        "/^\\.github/scripts/e2e-.+\\.(sh|py)$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\n[A-Z_]+ ?= ?\"[^\":]+:(?<currentValue>[^\"@]+)@(?<currentDigest>sha256:[a-f0-9]{64})\""
+      ]
     }
   ],
   "packageRules": [

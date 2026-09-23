@@ -45,7 +45,7 @@ REPO = Path(__file__).resolve().parents[2]
 ENV_FILE = Path(os.environ.get("E2E_ENV_FILE", REPO / "e2e.env"))
 IMAGE = os.environ.get("E2E_IMAGE", "tindarr-server:e2e")
 # renovate: datasource=docker depName=plexinc/pms-docker versioning=loose
-PLEX_IMAGE = "plexinc/pms-docker:1.42.2.10156-f737b826c"
+PLEX_IMAGE = "plexinc/pms-docker:1.43.4.10903-e5521bd8c@sha256:e0ab27395614a8e1a4fdf84c6bc60ac664915cfdde70c52d030c7728a1c48e14"
 PLEX_CONTAINER = "tindarr-e2e-media-plex"
 TINDARR_CONTAINER = "tindarr-e2e-server-plex"
 PLEX_PORT = 32400
