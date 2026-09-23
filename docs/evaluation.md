@@ -365,7 +365,7 @@ re-measurement, not a refresh: the baseline moves with it, and the commit has to
 ## The CI gate
 
 `server.yml` runs `tindarr eval run --check` for every committed baseline — that is both
-vote sets times both strategies, four runs. A baseline holds the vote set it was measured
+vote sets times all three strategies, six runs. A baseline holds the vote set it was measured
 on, the strategy, the replay options, the metrics and the tolerances. `--check` asks two
 questions, because one is not enough: *did this strategy get worse than it was?* (its own
 baseline) and *is it better than doing nothing clever?* (the floors).
@@ -397,9 +397,9 @@ The check fails the build when:
   gated by the strategy's own baseline — a quarter of a model call, fifty tokens a card,
   one TMDb call a batch — and printed by the live plan before a run spends anything.
 
-The last two rules are the ones that matter. The cheapest way to improve every rate is to
-propose fewer cards — three confident picks instead of ten score beautifully — so the
-denominators are gated. And without the floor, the gate would only be a per-strategy
+The floor rule and the count rule are the ones that matter. The cheapest way to improve
+every rate is to propose fewer cards — three confident picks instead of ten score
+beautifully — so the denominators are gated. And without the floor, the gate would only be a per-strategy
 regression test: the first baseline a new strategy writes is whatever it happened to
 score, so a strategy worse than "show the most popular thing you have not voted on" could
 certify itself and stay green for ever.
