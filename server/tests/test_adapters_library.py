@@ -255,6 +255,32 @@ async def test_a_film_nobody_opened_produces_nothing(
     assert await engagement_of(media, clock) == {}
 
 
+async def test_a_play_count_says_the_title_was_opened_and_nothing_more(
+    media: FakeMediaBrowser, clock: FakeClock
+) -> None:
+    """A client that reports no percentage still leaves a play count behind."""
+    row = media.add_library_item("1", "Arrival", "Movie", tmdb_id="329865")
+    row.user_data[USER.id] = {"Played": False, "PlayCount": 2, "LastPlayedDate": when(clock, 200)}
+
+    found = (await engagement_of(media, clock))["1"]
+
+    # Opened, long ago, never finished: abandoned. Two plays make it no stronger.
+    assert found.state == "abandoned"
+    assert found.progress == 0.0
+
+
+async def test_a_series_with_only_a_play_count_is_still_seen(
+    media: FakeMediaBrowser, clock: FakeClock
+) -> None:
+    row = media.add_library_item("10", "Severance", "Series", tmdb_id="95396")
+    row.user_data[USER.id] = {"PlayCount": 1, "LastPlayedDate": when(clock, 5)}
+
+    found = (await engagement_of(media, clock))["10"]
+
+    assert found.state == "in_progress"
+    assert found.episodes_played == 0
+
+
 async def test_play_counts_are_never_a_signal(media: FakeMediaBrowser, clock: FakeClock) -> None:
     """A debrid setup reports nine plays for a film nobody finished; it stays abandoned."""
     media.add_library_item("1", "Arrival", "Movie", tmdb_id="329865")

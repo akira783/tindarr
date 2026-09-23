@@ -19,10 +19,12 @@ only one Jellyfin 12 has; ``GET /Users/{id}/Items`` is the old one and the only 
 has. The modern form is tried first and a ``404`` falls back once, per operation, which
 costs one wasted call on Emby and keeps one code path for both.
 
-**Play counts are never read.** ``UserData.PlayCount`` is in every one of these
-responses and is deliberately ignored: with remote or debrid playback each restart
-increments it, so it measures the network, not the viewer
-(``tindarr.ports.media_server.Engagement``).
+**Play counts answer one question and no other.** ``UserData.PlayCount`` is in every
+one of these responses, and it is used only to decide whether somebody ever opened a
+title at all. It never reaches the classification: with remote or debrid playback each
+restart increments it, so as a measure of *how much* was watched it measures the
+network, not the viewer (``tindarr.ports.media_server.Engagement``). The fork draws the
+line in the same place.
 """
 
 import logging
@@ -334,6 +336,17 @@ def _engagements(
             yield engagement
 
 
+def touched(user_data: Mapping[str, Any]) -> bool:
+    """Whether this user ever opened the title, by the one fact that always says so.
+
+    A play count above zero is that fact and nothing more: it tells the reader the title
+    was started, never how thoroughly. Dropping it here would lose every title somebody
+    played on a client that reports no percentage.
+    """
+    count = user_data.get("PlayCount")
+    return isinstance(count, int) and not isinstance(count, bool) and count > 0
+
+
 def _film(
     item: LibraryItem,
     user_data: Mapping[str, Any],
@@ -341,8 +354,10 @@ def _film(
     now: datetime,
 ) -> Engagement | None:
     played = as_flag(user_data.get("Played"), default=False)
+    # The resume list is capped by both products, so a long-abandoned film may only have
+    # its own ``PlayedPercentage`` left: the larger of the two is the honest number.
     progress = max(fraction(user_data.get("PlayedPercentage")), resume.progress(item.item_id))
-    if not played and progress <= 0.0:
+    if not played and progress <= 0.0 and not touched(user_data):
         return None
     moment = latest(
         parse_media_date(user_data.get("LastPlayedDate")), resume.last_played(item.item_id)
@@ -365,7 +380,7 @@ def _series(  # noqa: PLR0913, PLR0917 - one argument per listing this is built 
 ) -> Engagement | None:
     played = episodes.played(item.item_id)
     in_progress = item.item_id in resume
-    if played == 0 and not in_progress:
+    if played == 0 and not in_progress and not touched(user_data):
         return None
     unplayed = user_data.get("UnplayedItemCount")
     total = (
