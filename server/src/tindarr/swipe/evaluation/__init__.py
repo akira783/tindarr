@@ -34,8 +34,15 @@ from tindarr.swipe.evaluation.gate import (
     Regression,
     check,
     check_floor,
+    uncomparable,
 )
-from tindarr.swipe.evaluation.metrics import Counts, EvaluationReport, summarize
+from tindarr.swipe.evaluation.metrics import (
+    BASIS,
+    MEANINGFUL_BASIS,
+    Counts,
+    EvaluationReport,
+    summarize,
+)
 from tindarr.swipe.evaluation.replay import (
     BatchOutcome,
     CardOutcome,
@@ -46,6 +53,8 @@ from tindarr.swipe.evaluation.replay import (
 from tindarr.swipe.strategy import StrategyFactory
 
 __all__ = [
+    "BASIS",
+    "MEANINGFUL_BASIS",
     "Baseline",
     "BaselineError",
     "BatchCost",
@@ -70,6 +79,7 @@ __all__ = [
     "load_dataset",
     "replay",
     "summarize",
+    "uncomparable",
 ]
 
 

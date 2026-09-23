@@ -17,6 +17,14 @@ Four things make the gate hard to walk past:
 - **A metric that disappears is a regression.** A rate that becomes ``n/a`` because its
   denominator emptied is not an improvement, and neither is one that is simply missing
   from the report.
+- **A comparison that would be noise is refused, out loud.** A rate divided by the
+  proposed cards the fixture happens to have an opinion on collapses the moment a
+  strategy retrieves from the whole of TMDb rather than from the fixture's own titles.
+  With fewer than ``MEANINGFUL_BASIS`` cards behind it, such a metric is printed and
+  not compared, and
+  ``uncomparable`` names every comparison that was skipped — a gate nobody knows is off
+  is worse than no gate. What still carries the comparison is the pool-free half of the
+  table: recall of what the user liked, the avoidance counts, waste, diversity and cost.
 - **A new strategy does not write its own floor.** Its first baseline would otherwise be
   whatever it happened to score, so a strategy worse than doing nothing clever could
   certify itself. ``check_floor`` holds any strategy that is not one of the reference
@@ -38,16 +46,25 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, cast
 
-from tindarr.swipe.evaluation.metrics import DIRECTIONS, EvaluationReport
+from tindarr.swipe.evaluation.metrics import (
+    BASIS,
+    COUNT_OF_BASIS,
+    DIRECTIONS,
+    MEANINGFUL_BASIS,
+    EvaluationReport,
+    comparable,
+)
 
 __all__ = [
     "FLOOR_STRATEGIES",
     "GATED_COUNTS",
+    "RECORDED_COUNTS",
     "Baseline",
     "BaselineError",
     "Regression",
     "check",
     "check_floor",
+    "uncomparable",
 ]
 
 #: How far a metric may slide before the build fails. Rates are fractions, so 0.02 is
@@ -84,6 +101,9 @@ def tolerance_of(metric: str, baseline: float) -> float:
 #: hand-written number here.
 GATED_COUNTS: Final[tuple[str, ...]] = ("batches", "usable", "scored")
 COUNT_TOLERANCE: Final = 0.02
+#: Written into a baseline as well, and never gated: they are what says whether a
+#: comparison against this floor is worth making at all (``comparable``).
+RECORDED_COUNTS: Final[tuple[str, ...]] = ("catalogued",)
 
 
 class BaselineError(ValueError):
@@ -134,7 +154,9 @@ class Baseline:
             strategy=report.strategy,
             options=report.options.as_dict(),
             metrics=dict(report.metrics),
-            counts={name: getattr(report.counts, name) for name in GATED_COUNTS},
+            counts={
+                name: getattr(report.counts, name) for name in (*GATED_COUNTS, *RECORDED_COUNTS)
+            },
             tolerances={
                 key: tolerance_of(key, report.metrics.get(key) or 0.0)
                 for key in sorted(DIRECTIONS)
@@ -243,26 +265,64 @@ def check_floor(floors: Sequence[Baseline], report: EvaluationReport) -> Sequenc
     """
     if report.strategy in FLOOR_STRATEGIES:
         return []
-    comparable = [
-        floor
-        for floor in floors
-        if floor.dataset == report.dataset and dict(floor.options) == report.options.as_dict()
-    ]
-    if not comparable:
-        raise BaselineError(
-            "no reference floor was measured on this vote set with these options; "
-            f"run the {' and '.join(FLOOR_STRATEGIES)} baselines first"
-        )
+    usable = _usable(floors, report)
     found: list[Regression] = []
     for metric in sorted(DIRECTIONS):
-        if DIRECTIONS[metric] == "flat":
+        if DIRECTIONS[metric] == "flat" or not comparable(metric, report.basis_counts):
             continue
-        best = _best(metric, comparable)
+        # Only the floors whose own run supports this metric. Holding a rate measured on
+        # five scored cards to the same rate measured on sixty is not a comparison, and
+        # the pool-free metrics are there precisely so that something still is.
+        supported = [floor for floor in usable if comparable(metric, floor.counts)]
+        best = _best(metric, supported)
         if best is None:
             continue
         slid = _slid(metric, best, report.metrics.get(metric))
         if slid is not None:
             found.append(Regression(f"floor.{metric}", slid.baseline, slid.current, slid.tolerance))
+    return found
+
+
+def uncomparable(floors: Sequence[Baseline], report: EvaluationReport) -> Sequence[str]:
+    """Say which floor comparisons were **not** made, and why. Never silently skipped.
+
+    A gate that quietly stops checking a metric is a gate nobody knows is off, so every
+    comparison ``check_floor`` declined is named here and printed with the result.
+    """
+    if report.strategy in FLOOR_STRATEGIES:
+        return []
+    usable = _usable(floors, report)
+    lines: list[str] = []
+    for metric in sorted(DIRECTIONS):
+        if DIRECTIONS[metric] == "flat":
+            continue
+        if not comparable(metric, report.basis_counts):
+            lines.append(
+                f"{metric}: not compared, this run put fewer than {MEANINGFUL_BASIS} cards "
+                f"behind it ({COUNT_OF_BASIS[BASIS[metric]]} "
+                f"{report.basis_counts[COUNT_OF_BASIS[BASIS[metric]]]})"
+            )
+            continue
+        supported = [floor for floor in usable if comparable(metric, floor.counts)]
+        if not supported:
+            lines.append(f"{metric}: not compared, no floor's run supports it")
+        elif _best(metric, supported) is None:
+            lines.append(f"{metric}: not compared, no floor measured it")
+    return lines
+
+
+def _usable(floors: Sequence[Baseline], report: EvaluationReport) -> Sequence[Baseline]:
+    """Return the floors measured on this vote set with these options; refuse none."""
+    found = [
+        floor
+        for floor in floors
+        if floor.dataset == report.dataset and dict(floor.options) == report.options.as_dict()
+    ]
+    if not found:
+        raise BaselineError(
+            "no reference floor was measured on this vote set with these options; "
+            f"run the {' and '.join(FLOOR_STRATEGIES)} baselines first"
+        )
     return found
 
 

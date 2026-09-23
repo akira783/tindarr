@@ -12,6 +12,11 @@ What that buys, and what it does not:
 - **A card nobody ever voted on counts as nothing.** It is not a hit, not a miss; it is
   reported as the gap in coverage that it is. A strategy proposing obscure titles nobody
   in the fixture ever saw would otherwise look flawless.
+- **What stops that is recall.** Before the first batch, the replay counts the titles
+  this user liked among the votes it is withholding. That number is a property of the
+  vote set, not of what any strategy proposed, so it does not move when a strategy
+  reaches outside the fixture — which is what makes it the one score an open candidate
+  pool cannot dilute (``tindarr.swipe.evaluation.metrics``).
 - The votes were cast on **another engine's** cards. A candidate strategy proposing a
   title the user never saw cannot be scored, and the user's history does not change in
   response to what the candidate proposed. The replay is therefore a comparison of
@@ -116,6 +121,10 @@ class CardOutcome:
     ref: TitleRef
     status: CardStatus
     pick: PickKind
+    #: Where the card sat in the batch, counting from zero. A strategy returns its cards
+    #: best first, so a title the user liked at position 0 is worth more than the same
+    #: title at position 9, and ``liked_recall_top`` is computed from this.
+    rank: int = 0
     #: Whether the strategy handed back the title details a card is built from, for the
     #: title it says they are for. Without this, "no TMDb call" would be a perfect score
     #: on the cost axis for cards that cannot be rendered.
@@ -144,6 +153,11 @@ class BatchOutcome:
     #: Whether two cards of this batch belong to the same franchise; ``None`` when the
     #: catalogue knows fewer than two of them and there is nothing to compare.
     franchise_repeat: bool | None
+    #: How many titles this user liked, among the votes the replay withheld at the
+    #: start of their run. The same number on every batch of one user: it is the
+    #: denominator of recall, and it is deliberately a property of the **vote set**
+    #: rather than of what any strategy proposed, so no strategy can shrink it.
+    liked_available: int = 0
 
     @property
     def usable(self) -> tuple[CardOutcome, ...]:
@@ -192,6 +206,13 @@ async def _replay_user(  # noqa: PLR0913, PLR0917 - one call site; splitting it 
     if len(votes) <= options.warm_up:
         return []
     strategy = factory()
+    # The denominator of recall, fixed before the first batch and never touched again.
+    # A vote revealed as history can only come back as waste, so the titles this user
+    # liked *within the warm-up* were never findable and are not counted against
+    # anybody. Note the ones held back but revealed later are counted: a strategy has
+    # only the batches before that reveal to find them, which is the same handicap for
+    # every strategy and is what makes the number comparable.
+    liked_available = sum(1 for vote in votes[options.warm_up :] if vote.value == "like")
     # What the household owns, kept here. The index handed to a strategy is rebuilt for
     # every batch and scoring never consults it: an object a strategy holds is an object
     # a strategy can empty, and "owned" would then stop being waste.
@@ -236,7 +257,7 @@ async def _replay_user(  # noqa: PLR0913, PLR0917 - one call site; splitting it 
             )
         outcomes.append(
             _score(
-                _Scoring(user.id, index, options.batch_size, cost, owned),
+                _Scoring(user.id, index, options.batch_size, cost, owned, liked_available),
                 proposed,
                 context,
                 future,
@@ -266,6 +287,7 @@ class _Scoring:
     requested: int
     cost: BatchCost
     owned: frozenset[TitleRef]
+    liked_available: int
 
 
 def _score(
@@ -278,7 +300,7 @@ def _score(
     voted = context.voted
     seen_in_batch: set[TitleRef] = set()
     cards: list[CardOutcome] = []
-    for candidate in proposed:
+    for rank, candidate in enumerate(proposed):
         ref = candidate.ref
         status = _status(ref, voted, context.served, scoring.owned, seen_in_batch, future)
         seen_in_batch.add(ref)
@@ -288,6 +310,7 @@ def _score(
                 ref=ref,
                 status=status,
                 pick=candidate.pick,
+                rank=rank,
                 complete=details is not None and details.ref == ref,
             )
         )
@@ -301,6 +324,7 @@ def _score(
         known=spread.known,
         distinct_genres=spread.distinct_genres,
         franchise_repeat=spread.franchise_repeat,
+        liked_available=scoring.liked_available,
     )
 
 

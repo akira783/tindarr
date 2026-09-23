@@ -42,6 +42,7 @@ from tindarr.swipe.evaluation import (
     check_floor,
     evaluate,
     load_dataset,
+    uncomparable,
 )
 from tindarr.swipe.evaluation.dataset import CatalogEntry
 from tindarr.swipe.evaluation.gate import FLOOR_STRATEGIES
@@ -286,13 +287,20 @@ def compare_to_baseline(paths: EvalPaths, report: EvaluationReport, out: TextIO)
     """
     path = paths.baseline(report.strategy)
     try:
+        floors = _floors(paths)
         baseline = Baseline.load(path)
         regressions: list[Regression] = [
             *check(baseline, report),
-            *check_floor(_floors(paths), report),
+            *check_floor(floors, report),
         ]
+        skipped = uncomparable(floors, report)
     except BaselineError as failure:
         raise EvalError(f"{path}: {failure}") from None
+    if skipped:
+        # Said out loud, every time. A comparison nobody knows was skipped is a gate
+        # that has quietly switched itself off.
+        out.write("\nfloor comparisons not made:\n")
+        out.writelines(f"  {line}\n" for line in skipped)
     if not regressions:
         out.write(f"\nno regression against {path}, and no worse than the floors\n")
         return 0

@@ -39,23 +39,86 @@ Five are the user's own words (`like`, `dislike`, `seen_liked`, `seen_disliked`,
 `skip`), and the tenth is `unknown`: **this fixture never asked them.** An unknown card
 is not a hit and not a miss. It is counted as the gap in coverage that it is.
 
-| Metric | Better | Kind | What it is |
-|---|---|---|---|
-| `fill_rate` | higher | measured | cards returned over cards asked for |
-| `usable_per_batch` | higher | measured | cards per batch that could really have been shown |
-| `complete_rate` | higher | measured | usable cards handed back with the details a card is built from |
-| `waste_rate` | lower | measured | proposed cards the strategy had been told to avoid |
-| `coverage` | — | measured | usable cards the fixture has an opinion on |
-| `already_seen_rate` | lower | measured | scored cards the user had already watched (**the fork: 47 %**) |
-| `like_rate` | higher | measured | scored cards the user wanted, and had not seen |
-| `new_like_rate` | higher | measured | likes among the cards new to them (**the fork: 63 %**) |
-| `agreement` | — | measured | scored cards the user liked, already seen or not |
-| `skip_rate` | lower | measured | judged cards the user had no opinion on |
-| `genre_diversity` | higher | measured | distinct genres per card the batch was asked for |
-| `franchise_repeat_rate` | lower | measured | batches serving the same franchise twice |
-| `tmdb_calls_per_batch` | lower | measured | metadata calls a batch cost |
-| `llm_calls_per_batch` | lower | measured | model calls a batch cost |
-| `llm_tokens_per_card` | lower | **estimated** | tokens per usable card |
+| Metric | Better | Basis | Kind | What it is |
+|---|---|---|---|---|
+| `fill_rate` | higher | pool-free | measured | cards returned over cards asked for |
+| `usable_per_batch` | higher | pool-free | measured | cards per batch that could really have been shown |
+| `complete_rate` | higher | pool-free | measured | usable cards handed back with the details a card is built from |
+| `waste_rate` | lower | pool-free | measured | proposed cards the strategy had been told to avoid |
+| `liked_recall` | higher | pool-free | measured | titles the user liked that the strategy found at all |
+| `liked_recall_top` | higher | pool-free | measured | the same, counting only the first three cards of a batch |
+| `seen_per_batch` | lower | pool-free | measured | cards per batch the user had already watched |
+| `disliked_per_batch` | lower | pool-free | measured | cards per batch the user turned down |
+| `coverage` | — | pool-free | measured | usable cards the fixture has an opinion on |
+| `catalogue_coverage` | — | pool-free | measured | usable cards the fixture can describe |
+| `already_seen_rate` | lower | votes | measured | scored cards the user had already watched (**the fork: 47 %**) |
+| `like_rate` | higher | votes | measured | scored cards the user wanted, and had not seen |
+| `new_like_rate` | higher | votes | measured | likes among the cards new to them (**the fork: 63 %**) |
+| `agreement` | — | votes | measured | scored cards the user liked, already seen or not |
+| `skip_rate` | lower | votes | measured | judged cards the user had no opinion on |
+| `genre_diversity` | higher | catalogue | measured | distinct genres per card the batch was asked for |
+| `franchise_repeat_rate` | lower | catalogue | measured | batches serving the same franchise twice |
+| `tmdb_calls_per_batch` | lower | pool-free | measured | metadata calls a batch cost |
+| `llm_calls_per_batch` | lower | pool-free | measured | model calls a batch cost |
+| `llm_tokens_per_card` | lower | pool-free | **estimated** | tokens per usable card |
+
+### The basis column, and why an open pool needs it
+
+Until lot 4b every strategy drew its candidates from the fixture's own catalogue, which
+on a vote set built from real votes holds exactly the titles somebody voted on. Every
+card was therefore scoreable, and `coverage` was 100 %. **The retrieval layer draws from
+TMDb**, so most proposed titles have no vote at all: coverage collapses to a few per
+cent, and every rate whose denominator is "the cards this fixture has an opinion on" is
+suddenly computed over a handful of cards. A rate on five cards and the same rate on
+sixty are not comparable numbers, whatever the table says.
+
+So each metric declares what it needs:
+
+- **`pool-free`** — meaningful whatever the pool was. Either it divides by what the
+  strategy was *asked* for (`fill_rate`, `waste_rate`, the cost rows) or by a
+  denominator the vote set fixes before the run (the two recalls), or it is a count
+  rather than a rate (`seen_per_batch`, `disliked_per_batch`).
+- **`votes`** — divides by the proposed cards the fixture voted on.
+- **`catalogue`** — needs the fixture to *describe* the proposed cards; with an open
+  pool it usually cannot.
+
+With fewer than **twelve cards** behind it, a number is printed with a `?`, named in
+the report's notes, and **not compared with another strategy's**. A count rather than a
+share, because the share is not what makes a percentage a fiction: below a dozen cards
+one card is worth more than eight points, and the gate's tolerance is two. The build
+says which comparisons it declined, every time — a gate nobody knows is switched off is
+worse than no gate.
+
+Shrinking the denominator to escape a comparison does not help, and that is the point.
+The pool-free metrics go on being graded: a strategy proposing titles nobody voted on
+scores nothing on `liked_recall`, and `seen_per_batch` keeps counting the cards it
+wasted.
+
+### Recall and avoidance: the two that an open pool cannot dilute
+
+**`liked_recall`** answers the question a rate cannot: *of the titles this person liked,
+how many did the strategy ever put in front of them?* The denominator is counted before
+the first batch — the `like` votes among the ones the replay is withholding — so it is a
+property of the vote set, identical for every strategy walked with the same options. A
+strategy that reaches past the fixture does not shrink it; it simply fails to find
+anything. `liked_recall_top` is the same number counting only the first three cards of a
+batch, because a deck is answered from the front. The report also prints the recall
+batch by batch, so "finds them immediately" and "finds them once it has run out of
+obvious picks" are different results.
+
+Only `like` votes count, never `seen_liked`: a title the user had already watched is not
+a find, it is the fault below.
+
+**`seen_per_batch`** and **`disliked_per_batch`** are counts, deliberately. Serving a
+title the user had already watched, or one they turned down, costs a swipe whether or
+not the nine cards beside it happened to be scoreable — dividing that fault by a
+denominator an open pool empties is exactly how it disappears. ADR 0013's 47 % is 4.7
+already-seen cards in a batch of ten; this is that number, in cards.
+
+**They hold each other up.** Recall alone is beaten by proposing everything in sight;
+the avoidance counts alone are beaten by proposing obscure titles nobody has an opinion
+on — which scores zero recall. And `fill_rate` and `usable_per_batch` are graded too, so
+a strategy cannot make the counts small by shrinking the batch.
 
 Everything is counted against the fixture except one thing, and the table says which:
 token counts are **measured** when the AI provider reports them and **estimated** at four
@@ -70,11 +133,12 @@ has an opinion on rather than by every card that was not waste, so padding a bat
 titles nobody voted on cannot drive it to zero; `genre_diversity` divides by the cards the
 batch was *asked* for, so three cards cannot out-diversify ten.
 
-**Two metrics are printed and not graded**, and the reason matters. `coverage` falls when
-a strategy reaches past the recorded history, which is not a fault. `agreement` counts
-`seen_liked` as a hit — the user did like the film — so the strategy ADR 0013 asks for,
-the one that stops serving titles people have already watched, will *lower* it. Grading
-either would make the gate punish the improvement it exists to protect.
+**Three metrics are printed and not graded**, and the reason matters. `coverage` and
+`catalogue_coverage` fall when a strategy reaches past the recorded history, which is
+not a fault — it is the basis column's input. `agreement` counts `seen_liked` as a hit —
+the user did like the film — so the strategy ADR 0013 asks for, the one that stops
+serving titles people have already watched, will *lower* it. Grading any of them would
+make the gate punish the improvement it exists to protect.
 
 Every rate is printed with its denominator, and the gate reads the denominators too
 (below). A rate without its denominator is a number that can be gamed.
@@ -112,19 +176,22 @@ Every rate is printed with its denominator, and the gate reads the denominators 
 ## How to read the output
 
 ```
-already_seen_rate         85.0%  lower   measured  scored cards the user had already watched (ADR 0013: 47 %)
+already_seen_rate         85.0%  lower   votes     measured  scored cards the user had already watched (ADR 0013: 47 %)
 
 3 users, 9 batches, 90/90 cards proposed
 usable 90 (wasted 0: 0 duplicate, 0 already voted, 0 already served, 0 owned)
 scored 20 (1 like, 2 dislike, 16 seen+liked, 1 seen+disliked), skipped 1, no vote 69
+found 1 of the 8 titles these users liked (0 in the first 3 cards of a batch); by batch: 0, 1, 0, …
 cost 90 metadata calls, 0 model calls, 0 tokens
 ```
 
 (that one is a `synthetic-99` run: three users, so three vote histories.)
 
-Read the counts first. `scored` is the denominator of every rate in the table above it;
-if it is small, the rates are indicative and nothing more. `no vote` is the coverage gap.
-`wasted` should be zero for any strategy that reads its own context.
+Read the counts first. `scored` is the denominator of every `votes`-basis rate in the
+table above it; if it is small, those rates are indicative and nothing more, and the
+table marks them with a `?`. `no vote` is the coverage gap. `wasted` should be zero for
+any strategy that reads its own context. The `found …` line is recall with its own
+denominator beside it, which is the line to read when coverage has collapsed.
 
 `--json <path>` writes the same report as a JSON document, sorted and stable, for a diff
 or a dashboard.
@@ -261,8 +328,10 @@ The check fails the build when:
   yet rather than that everything is fine;
 - `batches`, `usable` or `scored` falls by more than 2 %;
 - the strategy is **worse than the best of the reference floors** (`popular` and
-  `random`) on any graded metric. The floors themselves are exempt: they are the
-  yardstick, and each is worse than the other somewhere.
+  `random`) on any graded metric **whose basis both runs support**. The floors
+  themselves are exempt: they are the yardstick, and each is worse than the other
+  somewhere. Every comparison the gate declines is printed with the result, under
+  `floor comparisons not made`.
 
 The last two rules are the ones that matter. The cheapest way to improve every rate is to
 propose fewer cards — three confident picks instead of ten score beautifully — so the

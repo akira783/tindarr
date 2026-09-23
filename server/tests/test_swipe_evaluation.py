@@ -13,6 +13,7 @@ from tests.support.evaluation import InMemoryMetadata, RecordedEngine, ScriptedS
 from tindarr.ports.titles import TitleRef
 from tindarr.swipe.baselines import PopularBaseline
 from tindarr.swipe.evaluation import (
+    Baseline,
     BatchCost,
     BatchOutcome,
     CostMeter,
@@ -23,10 +24,12 @@ from tindarr.swipe.evaluation import (
     EvaluationReport,
     ReplayError,
     ReplayOptions,
+    check_floor,
     evaluate,
     load_dataset,
     replay,
     summarize,
+    uncomparable,
 )
 from tindarr.swipe.evaluation.metrics import DIRECTIONS
 from tindarr.swipe.evaluation.synthetic import build_synthetic_dataset
@@ -621,3 +624,111 @@ async def test_unknown_cards_cannot_drive_the_skip_rate_down() -> None:
 
     assert padded.counts.unknown == 2
     assert padded.metrics["skip_rate"] == 0.5
+
+
+# --- the metrics that survive an open candidate pool ----------------------------------
+
+
+async def test_recall_is_measured_against_the_vote_set_not_against_the_pool() -> None:
+    """The denominator is the withheld likes, whatever the strategy drew from."""
+    votes = [(1, "like"), (2, "like"), (3, "dislike"), (4, "like"), (5, "seen_liked")]
+    dataset = small_dataset(votes)
+    options = ReplayOptions(batch_size=2, warm_up=1)
+    # Two of the three likes are proposed; the third is never offered at all.
+    strategy = ScriptedStrategy([[movie(2), movie(90)], [movie(4), movie(91)]])
+
+    report, _ = await run(dataset, strategy, options)
+
+    assert report.counts.liked_available == 2  # votes 2 and 4; vote 1 was the warm-up
+    assert report.metrics["liked_recall"] == 1.0
+    assert report.counts.likes == 2
+
+
+async def test_a_strategy_proposing_titles_nobody_voted_on_scores_no_recall() -> None:
+    """The escape from every rate — an obscure pool — is exactly what recall catches."""
+    dataset = small_dataset([(1, "like"), (2, "like"), (3, "like")])
+    options = ReplayOptions(batch_size=2, warm_up=1)
+    strategy = ScriptedStrategy([[movie(90), movie(91)], [movie(92), movie(93)]])
+
+    report, _ = await run(dataset, strategy, options)
+
+    # Every rate is undefined or flattering; recall is not.
+    assert report.metrics["coverage"] == 0.0
+    assert report.metrics["already_seen_rate"] is None
+    assert report.counts.liked_available == 2
+    assert report.metrics["liked_recall"] == 0.0
+
+
+async def test_recall_in_the_first_cards_is_counted_apart_from_recall_anywhere() -> None:
+    dataset = small_dataset([(1, "like"), (2, "like"), (3, "like"), (4, "like")])
+    options = ReplayOptions(batch_size=5, warm_up=1)
+    # Two liked titles found, one at the front of the batch and one at the back.
+    strategy = ScriptedStrategy([[movie(2), movie(90), movie(91), movie(92), movie(3)]])
+
+    report, _ = await run(dataset, strategy, options)
+
+    assert report.metrics["liked_recall"] == pytest.approx(2 / 3)
+    assert report.metrics["liked_recall_top"] == pytest.approx(1 / 3)
+    assert report.liked_by_batch == (2,)
+
+
+async def test_an_already_seen_card_is_counted_not_diluted_into_a_rate() -> None:
+    """The fault survives a batch where nothing else carries a vote."""
+    votes = [(1, "like"), (2, "seen_liked"), (3, "seen_disliked"), (4, "dislike")]
+    dataset = small_dataset(votes)
+    options = ReplayOptions(batch_size=4, warm_up=1)
+    strategy = ScriptedStrategy([[movie(2), movie(3), movie(4), movie(90)]])
+
+    report, _ = await run(dataset, strategy, options)
+
+    assert report.metrics["seen_per_batch"] == 2.0
+    assert report.metrics["disliked_per_batch"] == 1.0
+    # The same run's rate is computed over three scored cards out of four, and the rate
+    # would read the same if the batch had held a hundred cards nobody voted on.
+    assert report.metrics["already_seen_rate"] == pytest.approx(2 / 3)
+
+
+def weak_report(scored: int, catalogued: int = 90, recall: float = 1.0) -> EvaluationReport:
+    """A report whose two basis denominators are whatever a test needs them to be."""
+    metrics: dict[str, float | None] = dict.fromkeys(DIRECTIONS, 1.0)
+    metrics["liked_recall"] = recall
+    return EvaluationReport(
+        dataset="d",
+        source="",
+        strategy="candidate",
+        options=ReplayOptions(),
+        counts=Counts(batches=9, usable=90, scored=scored, catalogued=catalogued),
+        metrics=metrics,
+        notes=(),
+    )
+
+
+def test_a_rate_the_run_cannot_support_is_printed_and_not_compared() -> None:
+    report = weak_report(scored=3)
+
+    assert "already_seen_rate" in report.weak
+    assert "liked_recall" not in report.weak
+    # Printed, with the mark that says what it is worth, and named in the notes.
+    assert "100.0%?" in report.table()
+    assert any("Marked '?'" in note for note in summarize("d", "", "s", (), ReplayOptions()).notes)
+
+
+def test_the_floor_is_not_applied_to_a_metric_neither_run_can_support() -> None:
+    floor = Baseline(
+        dataset="d",
+        strategy="popular",
+        options=ReplayOptions().as_dict(),
+        metrics={"already_seen_rate": 0.1, "liked_recall": 0.9},
+        counts={"scored": 60, "catalogued": 90},
+        tolerances={},
+    )
+    report = weak_report(scored=3, recall=0.1)
+
+    names = [regression.metric for regression in check_floor([floor], report)]
+    skipped = " ".join(uncomparable([floor], report))
+
+    # The rate would have failed the floor by a mile; it is not compared at all.
+    assert "floor.already_seen_rate" not in names
+    assert "already_seen_rate: not compared" in skipped
+    # What still carries the gate is the pool-free half.
+    assert "floor.liked_recall" in names
