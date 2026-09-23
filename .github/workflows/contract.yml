@@ -3,14 +3,22 @@ name: contract
 on:
   push:
     branches: [main]
-    paths: &paths
+    # The two lists must stay identical. They are written out rather than shared
+    # through a YAML anchor: anchors are a YAML feature, not a workflow feature,
+    # and tools that read workflows without expanding them see a dangling alias.
+    paths:
       - "api/**"
       - "redocly.yaml"
       - ".redocly.lint-ignore.yaml"
       - ".github/workflows/contract.yml"
       - ".github/tools/redocly/**"
   pull_request:
-    paths: *paths
+    paths:
+      - "api/**"
+      - "redocly.yaml"
+      - ".redocly.lint-ignore.yaml"
+      - ".github/workflows/contract.yml"
+      - ".github/tools/redocly/**"
   workflow_dispatch:
 
 permissions:

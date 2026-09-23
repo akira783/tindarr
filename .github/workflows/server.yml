@@ -3,7 +3,10 @@ name: server
 on:
   push:
     branches: [main]
-    paths: &paths
+    # The two lists must stay identical. They are written out rather than shared
+    # through a YAML anchor: anchors are a YAML feature, not a workflow feature,
+    # and tools that read workflows without expanding them see a dangling alias.
+    paths:
       - "server/**"
       # The image contains the web console, built from these.
       - "web/**"
@@ -13,7 +16,15 @@ on:
       - ".github/workflows/server.yml"
       - ".github/scripts/docker-smoke-test.sh"
   pull_request:
-    paths: *paths
+    paths:
+      - "server/**"
+      # The image contains the web console, built from these.
+      - "web/**"
+      - "shared/**"
+      - "api/openapi.yaml"
+      - ".dockerignore"
+      - ".github/workflows/server.yml"
+      - ".github/scripts/docker-smoke-test.sh"
   workflow_dispatch:
 
 permissions:

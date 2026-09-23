@@ -17,6 +17,8 @@
  * The tests are **serial and stateful**: each one needs the server to be in the state
  * the previous one left it in.
  */
+import type { Page } from "@playwright/test";
+
 import {
   AppClient,
   approveQuickConnect,
@@ -27,6 +29,23 @@ import {
 import { expect, test } from "./fixtures";
 
 test.describe.configure({ mode: "serial" });
+
+/**
+ * Fill the password form and submit it.
+ *
+ * The user name field is addressed by its role: once the server offers Quick Connect
+ * too, the sign-in panel is a tab panel labelled "User name and password", which a
+ * plain label lookup would match as well.
+ */
+async function signInWithPassword(
+  page: Page,
+  username: string,
+  password: string,
+): Promise<void> {
+  await page.getByRole("textbox", { name: "User name" }).fill(username);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+}
 
 test("the wizard claims the server, configures the media server and finishes setup", async ({
   page,
@@ -56,9 +75,7 @@ test("the wizard claims the server, configures the media server and finishes set
   // that key and found it to be an administrator's (docs/auth.md, section 6).
   await expect(page.getByRole("heading", { name: "Sign in as an administrator" })).toBeVisible();
 
-  await page.getByLabel("User name").fill(adminUser);
-  await page.getByLabel("Password", { exact: true }).fill(adminPassword);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await signInWithPassword(page, adminUser, adminPassword);
 
   // The first administrator sign-in completes setup and opens a new web session.
   await expect(page.getByRole("heading", { name: "Public address" })).toBeVisible();
@@ -81,9 +98,7 @@ test("a plain user signs in with a password and lands on phone pairing", async (
   await page.goto("/");
   await expect(page).toHaveURL(/\/sign-in$/);
 
-  await page.getByLabel("User name").fill(plainUser);
-  await page.getByLabel("Password", { exact: true }).fill(plainPassword);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await signInWithPassword(page, plainUser, plainPassword);
 
   // Not an administrator: no settings, no users, straight to "Connect a phone".
   await expect(page).toHaveURL(/\/connect-phone$/);
@@ -102,13 +117,16 @@ test("an administrator signs in with Quick Connect", async ({
   test.skip(mediaKind !== "jellyfin", "Quick Connect is a Jellyfin feature");
 
   // `quick_connect` only joins `auth_methods` once the background probe has read
-  // `GET /QuickConnect/Enabled` (docs/auth.md, section 11), so the page is re-read
-  // until the method is offered rather than once.
+  // `GET /QuickConnect/Enabled` (docs/auth.md, section 11). That probe runs every two
+  // minutes and cannot succeed before a media server is configured, so the first run
+  // that can see one may be a full interval after setup completed. The page is re-read
+  // until the method is offered, with room for one whole interval.
+  test.setTimeout(300_000);
   const tab = page.getByRole("tab", { name: "Quick Connect" });
   await expect(async () => {
     await page.goto("/sign-in");
     await expect(tab).toBeVisible({ timeout: 3_000 });
-  }).toPass({ timeout: 60_000 });
+  }).toPass({ timeout: 180_000 });
 
   await tab.click();
   await page.getByRole("button", { name: "Use Quick Connect" }).click();
@@ -132,9 +150,7 @@ test("a phone pairs with the console and gets a working token pair", async ({
   adminPassword,
 }) => {
   await page.goto("/sign-in");
-  await page.getByLabel("User name").fill(adminUser);
-  await page.getByLabel("Password", { exact: true }).fill(adminPassword);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await signInWithPassword(page, adminUser, adminPassword);
   await expect(page).toHaveURL(/\/settings$/);
 
   await page.getByRole("link", { name: "Connect a phone" }).click();

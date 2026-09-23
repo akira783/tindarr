@@ -4,10 +4,9 @@
 #
 # Usage: docker-smoke-test.sh <image>
 # Checks: /healthz and /api/v1/server/info answer; the built web console is in the
-# image and, once the server serves it (lot 2c), / answers with index.html under the
-# console CSP; logs are JSON lines and never contain the secret key; the in-image
-# healthcheck passes; a restart on the same volume reuses the key and does not migrate
-# again.
+# image and / serves its index.html under the console CSP; logs are JSON lines and
+# never contain the secret key; the in-image healthcheck passes; a restart on the same
+# volume reuses the key and does not migrate again.
 set -euo pipefail
 
 image="${1:?usage: $0 <image>}"
@@ -87,34 +86,35 @@ if docker exec "$name" sh -c 'command -v node >/dev/null 2>&1'; then
   fail "the runtime image must not contain Node"
 fi
 
-# Serving it is lot 2c. While the server answers something else, say so and move on, so
-# this check turns itself on the day the server part lands.
+# The server has served the console since lot 2c, so this is not conditional any more:
+# an image whose / does not answer with the console is a broken image.
 console_status="$(curl -sS -o console.html -D console-headers.txt -w '%{http_code}' "$base/")"
-if [ "$console_status" = "200" ]; then
-  grep -q '<div id="root"></div>' console.html || fail "/ did not serve the console index.html"
-  csp="$(grep -i '^content-security-policy:' console-headers.txt || true)"
-  [ -n "$csp" ] || fail "/ has no Content-Security-Policy"
-  for directive in "default-src 'self'" "script-src 'self'" "style-src 'self'" \
-      "object-src 'none'" "base-uri 'none'" "frame-ancestors 'none'" \
-      "require-trusted-types-for 'script'"; do
-    grep -qF "$directive" <<<"$csp" || fail "console CSP is missing: $directive"
-  done
-  grep -qi '^cache-control: no-store' console-headers.txt || fail "index.html must not be cached"
-  grep -qi '^cross-origin-opener-policy: same-origin' console-headers.txt \
-    || fail "index.html needs Cross-Origin-Opener-Policy: same-origin"
-  grep -qi '^x-frame-options: deny' console-headers.txt || fail "index.html needs X-Frame-Options: DENY"
+[ "$console_status" = "200" ] || fail "/ answered $console_status instead of serving the console"
+grep -q '<div id="root"></div>' console.html || fail "/ did not serve the console index.html"
+csp="$(grep -i '^content-security-policy:' console-headers.txt || true)"
+[ -n "$csp" ] || fail "/ has no Content-Security-Policy"
+for directive in "default-src 'self'" "script-src 'self'" "style-src 'self'" \
+    "object-src 'none'" "base-uri 'none'" "frame-ancestors 'none'" \
+    "require-trusted-types-for 'script'"; do
+  grep -qF "$directive" <<<"$csp" || fail "console CSP is missing: $directive"
+done
+grep -qi '^cache-control: no-store' console-headers.txt || fail "index.html must not be cached"
+grep -qi '^cross-origin-opener-policy: same-origin' console-headers.txt \
+  || fail "index.html needs Cross-Origin-Opener-Policy: same-origin"
+grep -qi '^x-frame-options: deny' console-headers.txt || fail "index.html needs X-Frame-Options: DENY"
 
-  asset="$(grep -o '/assets/[^"]*\.js' console.html | head -1)"
-  [ -n "$asset" ] || fail "index.html references no hashed asset"
-  curl -fsS -o /dev/null -D asset-headers.txt "$base$asset" || fail "$asset is not served"
-  grep -qi '^cache-control: public, max-age=31536000, immutable' asset-headers.txt \
-    || fail "hashed assets must be cached as immutable"
-  missing="$(curl -sS -o /dev/null -w '%{http_code}' "$base/assets/does-not-exist.js")"
-  [ "$missing" = "404" ] || fail "a missing asset must be a 404, not index.html (got $missing)"
-  echo "console served under the console CSP"
-else
-  echo "::notice::/ answered $console_status: the server does not serve the console yet (lot 2c)."
-fi
+asset="$(grep -o '/assets/[^"]*\.js' console.html | head -1)"
+[ -n "$asset" ] || fail "index.html references no hashed asset"
+curl -fsS -o /dev/null -D asset-headers.txt "$base$asset" || fail "$asset is not served"
+grep -qi '^cache-control: public, max-age=31536000, immutable' asset-headers.txt \
+  || fail "hashed assets must be cached as immutable"
+missing="$(curl -sS -o /dev/null -w '%{http_code}' "$base/assets/does-not-exist.js")"
+[ "$missing" = "404" ] || fail "a missing asset must be a 404, not index.html (got $missing)"
+# The SPA fallback must never reach under /api (docs/architecture.md, "Serving it").
+unknown_api="$(curl -sS -o /dev/null -w '%{http_code} %{content_type}' "$base/api/v1/nope/deeper")"
+[ "$unknown_api" = "404 application/problem+json" ] \
+  || fail "the SPA fallback answered under /api: $unknown_api"
+echo "console served under the console CSP"
 rm -f console.html console-headers.txt asset-headers.txt
 
 docker exec "$name" tindarr healthcheck || fail "in-image healthcheck failed"

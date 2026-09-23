@@ -1,0 +1,210 @@
+name: e2e
+
+# The end-to-end check of step 2 (docs/roadmap.md, step 2, check b): the image is
+# built from the repository root, started next to real Jellyfin and Emby containers
+# pinned by digest, and driven through the console with Playwright — setup, sign-in,
+# Quick Connect, `public_url` and a full phone pairing — while the browser is watched
+# for anything the console's CSP refuses.
+#
+# The Plex job only runs on `workflow_dispatch`, because it needs a real plex.tv
+# account. `workflow_dispatch` can only be started by someone with write access, and a
+# pull request from a fork never gets repository secrets, so a fork can neither see nor
+# use them.
+
+on:
+  push:
+    branches: [main]
+    # The two lists must stay identical. They are written out rather than shared
+    # through a YAML anchor: anchors are a YAML feature, not a workflow feature,
+    # and tools that read workflows without expanding them see a dangling alias.
+    paths:
+      - "server/**"
+      - "web/**"
+      - "shared/**"
+      - "api/openapi.yaml"
+      - ".dockerignore"
+      - ".github/workflows/e2e.yml"
+      - ".github/scripts/e2e-stack.sh"
+      - ".github/scripts/seed-media-server.py"
+      - ".github/scripts/e2e-plex.py"
+  pull_request:
+    paths:
+      - "server/**"
+      - "web/**"
+      - "shared/**"
+      - "api/openapi.yaml"
+      - ".dockerignore"
+      - ".github/workflows/e2e.yml"
+      - ".github/scripts/e2e-stack.sh"
+      - ".github/scripts/seed-media-server.py"
+      - ".github/scripts/e2e-plex.py"
+  workflow_dispatch:
+    inputs:
+      plex:
+        description: "Also run the Plex target (needs the PLEX_* repository secrets)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  console:
+    name: Console, Jellyfin and Emby
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Only the lock file decides what is installed, and no package script runs.
+      - name: Install the console's dependencies
+        working-directory: web
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Install Chromium
+        working-directory: web
+        run: npm run test:e2e:browser
+
+      # Same command as server.yml's image job: the console is inside the image.
+      - name: Build the image
+        run: docker build --pull --file server/Dockerfile --tag tindarr-server:e2e .
+
+      - name: Start the media servers and the Tindarr servers
+        env:
+          E2E_IMAGE: tindarr-server:e2e
+        run: .github/scripts/e2e-stack.sh up
+
+      - name: Run the scenario
+        working-directory: web
+        run: |
+          set -a
+          . ../e2e.env
+          set +a
+          npm run test:e2e
+
+      - name: No unexpected error in the server logs
+        if: always()
+        run: .github/scripts/e2e-stack.sh check-logs
+
+      - name: Collect the container logs
+        if: failure()
+        run: .github/scripts/e2e-stack.sh logs e2e-logs
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: e2e-console-failure
+          path: |
+            web/playwright-report
+            web/test-results
+            e2e-logs
+          retention-days: 7
+
+      - name: Tear the stack down
+        if: always()
+        run: .github/scripts/e2e-stack.sh down
+
+  plex:
+    name: Console and Plex
+    # Never on a pull request: a fork must never be able to reach these secrets, and
+    # `workflow_dispatch` is only available to someone who can already push.
+    if: github.event_name == 'workflow_dispatch' && inputs.plex
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install the console's dependencies
+        working-directory: web
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Install Chromium
+        working-directory: web
+        run: npm run test:e2e:browser
+
+      - name: Build the image
+        run: docker build --pull --file server/Dockerfile --tag tindarr-server:e2e .
+
+      - name: Start a throwaway Plex server and claim it
+        env:
+          PLEX_ACCOUNT_TOKEN: ${{ secrets.PLEX_ACCOUNT_TOKEN }}
+          PLEX_CLAIM_TOKEN: ${{ secrets.PLEX_CLAIM_TOKEN }}
+          E2E_IMAGE: tindarr-server:e2e
+        run: python3 .github/scripts/e2e-plex.py up
+
+      - name: Run the scenario
+        working-directory: web
+        env:
+          PLEX_ACCOUNT_TOKEN: ${{ secrets.PLEX_ACCOUNT_TOKEN }}
+        run: |
+          set -a
+          . ../e2e.env
+          set +a
+          npm run test:e2e
+
+      - name: No unexpected error in the server logs
+        if: always()
+        run: python3 .github/scripts/e2e-plex.py check-logs
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: e2e-plex-failure
+          path: |
+            web/playwright-report
+            web/test-results
+            e2e-logs
+          retention-days: 7
+
+      # Always, and even when the job was cancelled: a linked PIN leaves an authorised
+      # device on the account and a claimed server leaves an entry on plex.tv.
+      - name: Remove the throwaway server and the devices it created
+        if: always()
+        env:
+          PLEX_ACCOUNT_TOKEN: ${{ secrets.PLEX_ACCOUNT_TOKEN }}
+        run: python3 .github/scripts/e2e-plex.py down
+
+  actionlint:
+    name: Lint the workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Pinned by version and checksum: the binary runs in CI, so it is a dependency.
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl -fsSL -o "$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  ${archive}" | sha256sum --check --strict -
+          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
+      - name: actionlint
+        run: '"$RUNNER_TEMP/actionlint" -color'
+      - name: shellcheck the CI scripts
+        run: shellcheck .github/scripts/*.sh
