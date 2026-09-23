@@ -50,6 +50,8 @@ export function installCspGuard(): void {
   guardProperty(Element.prototype, "outerHTML");
   guardMethod(Element.prototype, "insertAdjacentHTML");
   guardMethod(document, "write");
+  guardProperty(CSSStyleDeclaration.prototype, "cssText");
+  guardMethod(CSSStyleDeclaration.prototype, "setProperty");
 
   const setAttribute = Element.prototype.setAttribute;
   Element.prototype.setAttribute = function (this: Element, name: string, value: string) {
@@ -59,7 +61,22 @@ export function installCspGuard(): void {
   restores.push(() => {
     Element.prototype.setAttribute = setAttribute;
   });
+}
 
+/**
+ * Record an inline style wherever it came from.
+ *
+ * Trapping an API only catches the components that use that API: React sets styles
+ * through the `style` object, never `setAttribute`, so a guard on `setAttribute` alone
+ * passes silently whatever the components do. This looks at the rendered result
+ * instead, which is also what a browser's `style-src 'self'` would refuse. Call it
+ * while the tree is still mounted.
+ */
+export function scanForInlineStyles(root: ParentNode): void {
+  for (const element of root.querySelectorAll("[style]")) {
+    const style = element.getAttribute("style") ?? "";
+    if (style.trim() !== "") violations.push(`inline style on <${element.localName}>`);
+  }
 }
 
 export function uninstallCspGuard(): void {

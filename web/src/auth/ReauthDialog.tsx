@@ -1,5 +1,12 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useState, type SyntheticEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type SyntheticEvent,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 import { isWaiting, reauthenticate, type AuthMethod } from "../api/operations";
@@ -23,7 +30,12 @@ export function ReauthProvider({ children }: { children: ReactNode }): ReactNode
   const { t } = useTranslation(["console", "common"]);
   const queryClient = useQueryClient();
   const { state, serverInfo } = useAuth();
-  const [resolver, setResolver] = useState<((value: boolean) => void) | null>(null);
+  // Every request that met `403 reauth_required` while the dialog was open waits for
+  // the same answer. Keeping one resolver would drop all but the last, and the
+  // requests behind the dropped ones would never settle — the console would look
+  // frozen for exactly the calls the dialog was opened for.
+  const waitingRef = useRef<((value: boolean) => void)[]>([]);
+  const [pending, setPending] = useState(0);
   const [error, setError] = useState<unknown>(null);
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -34,23 +46,29 @@ export function ReauthProvider({ children }: { children: ReactNode }): ReactNode
         new Promise<boolean>((resolve) => {
           setError(null);
           setPassword("");
-          setResolver(() => resolve);
+          waitingRef.current.push(resolve);
+          setPending(waitingRef.current.length);
         }),
     );
     return () => {
       setReauthRequester(null);
+      const abandoned = waitingRef.current;
+      waitingRef.current = [];
+      for (const resolve of abandoned) resolve(false);
     };
   }, []);
 
   const finish = useCallback(
     (ok: boolean) => {
       if (ok) void queryClient.invalidateQueries({ queryKey: SESSION_KEY });
-      resolver?.(ok);
-      setResolver(null);
+      const answered = waitingRef.current;
+      waitingRef.current = [];
+      for (const resolve of answered) resolve(ok);
+      setPending(0);
       setPassword("");
       setBusy(false);
     },
-    [queryClient, resolver],
+    [queryClient],
   );
 
   const submitPassword = (event: SyntheticEvent): void => {
@@ -87,7 +105,7 @@ export function ReauthProvider({ children }: { children: ReactNode }): ReactNode
     <>
       {children}
       <Dialog
-        open={resolver !== null}
+        open={pending > 0}
         title={t("reauth.title")}
         onClose={() => {
           finish(false);

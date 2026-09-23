@@ -5,7 +5,12 @@ import { afterEach, beforeAll, beforeEach, expect } from "vitest";
 
 import { resetClientHooks, resetFetchImpl, setFetchImpl } from "../src/api/client";
 import { setCsrfToken } from "../src/api/csrf";
-import { clearCspViolations, cspViolations, installCspGuard } from "./csp-guard";
+import {
+  clearCspViolations,
+  cspViolations,
+  installCspGuard,
+  scanForInlineStyles,
+} from "./csp-guard";
 
 beforeAll(() => {
   // jsdom has no modal dialog: enough of it for the components under test.
@@ -35,6 +40,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // While the tree is still mounted: `cleanup()` unmounts it.
+  scanForInlineStyles(document);
   cleanup();
   resetFetchImpl();
   resetClientHooks();

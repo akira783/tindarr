@@ -13,7 +13,7 @@ import {
 } from "../../api/operations";
 import { Alert, Button, ErrorAlert } from "../../components/ui";
 import { secondsUntil } from "../../lib/format";
-import { isLikelyPhone, pairingHost } from "../../lib/url";
+import { isLikelyPhone, pairingHost, pairingLinkHref } from "../../lib/url";
 
 //: Used only until the first answer arrives; after that the server says how long to
 //: wait, and `retry_after_ms` is null once nothing more can happen.
@@ -97,9 +97,11 @@ export function ConnectPhonePage(): ReactNode {
               title={t("pairing.qrAlt", { host })}
             />
           )}
-          <p>
-            <a href={pairing.link}>{t("pairing.openInApp")}</a>
-          </p>
+          {pairingLinkHref(pairing.link) !== null && (
+            <p>
+              <a href={pairing.link}>{t("pairing.openInApp")}</a>
+            </p>
+          )}
           <p className="hint">
             {t("pairing.expiresIn", { seconds: secondsUntil(pairing.expires_at) })}
           </p>

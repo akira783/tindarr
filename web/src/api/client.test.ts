@@ -112,6 +112,27 @@ describe("the console fetch wrapper", () => {
     expect(mock.calls).toHaveLength(1);
   });
 
+  it("tells the guard about a 401 the replay answered with", async () => {
+    // The session can end between the first call and the replay; the answer the
+    // caller finally gets is the one the guard has to see.
+    let attempt = 0;
+    const mock = new MockApi().on("POST", "/api/v1/pairings", () => {
+      attempt += 1;
+      return attempt === 1 ? problem(403, "reauth_required") : problem(401, "unauthorized");
+    });
+    install(mock);
+    const onUnauthorized = vi.fn();
+    setClientHooks({ onUnauthorized, requestReauth: () => Promise.resolve(true) });
+
+    const response = await consoleFetch(
+      new Request("http://localhost:3000/api/v1/pairings", { method: "POST" }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(attempt).toBe(2);
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
   it("tells the guard about a 401", async () => {
     const mock = new MockApi().on("GET", "/api/v1/auth/web/session", () =>
       problem(401, "unauthorized"),

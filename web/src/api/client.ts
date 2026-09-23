@@ -104,20 +104,23 @@ export async function consoleFetch(request: Request): Promise<Response> {
   };
 
   const replayable = request.clone();
-  const response = await send(request, hooks.getCsrfToken());
+  let response = await send(request, hooks.getCsrfToken());
 
   if (response.status === 403) {
     const code = await codeOf(response);
     if (code === "csrf_failed") {
       const token = await hooks.refreshCsrfToken();
       if (token !== null) {
-        return await send(replayable, token);
+        response = await send(replayable, token);
       }
     } else if (code === "reauth_required" && (await hooks.requestReauth())) {
-      return await send(replayable, hooks.getCsrfToken());
+      response = await send(replayable, hooks.getCsrfToken());
     }
   }
 
+  // The replayed answer goes through this too: a session that ended between the first
+  // call and the replay must send the user back to sign-in, not look like a plain
+  // failure the caller has to interpret.
   if (response.status === 401) {
     hooks.onUnauthorized();
   }

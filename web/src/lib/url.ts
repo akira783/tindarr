@@ -18,6 +18,21 @@ export function pairingHost(link: string): string | null {
   }
 }
 
+/**
+ * The pairing link, but only when it is one the console may put in an `href`.
+ *
+ * The server builds that link (`tindarr://pair?server=…&code=…`) and nothing else can
+ * reach this page, so this is belt and braces — the kind that costs one line: a value
+ * that ever came back saying `javascript:` must not become something to click.
+ */
+export function pairingLinkHref(link: string): string | null {
+  try {
+    return new URL(link).protocol === "tindarr:" ? link : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Only a plex.tv page may be opened from the console (CSP `form-action`/navigation aside). */
 export function isPlexAuthUrl(value: string): boolean {
   try {

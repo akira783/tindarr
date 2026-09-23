@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { formatDateTime, secondsUntil } from "./format";
 import { readLanguage, readTheme, writeLanguage, writeTheme } from "./prefs";
-import { currentOrigin, isLikelyPhone, isPlexAuthUrl, pairingHost } from "./url";
+import {
+  currentOrigin,
+  isLikelyPhone,
+  isPlexAuthUrl,
+  pairingHost,
+  pairingLinkHref,
+} from "./url";
 
 describe("pairingHost", () => {
   it("reads the host the phone will connect to from a pairing link", () => {
@@ -21,6 +27,16 @@ describe("pairingHost", () => {
       pairingHost(`tindarr://pair?server=${encodeURIComponent("javascript:alert(1)")}&code=a`),
     ).toBeNull();
     expect(pairingHost("not a url")).toBeNull();
+  });
+});
+
+describe("pairingLinkHref", () => {
+  it("only lets the app's own scheme become something to click", () => {
+    const link = `tindarr://pair?server=${encodeURIComponent("https://tindarr.example.com")}&code=abc`;
+    expect(pairingLinkHref(link)).toBe(link);
+    expect(pairingLinkHref("javascript:alert(1)")).toBeNull();
+    expect(pairingLinkHref("https://example.com/pair")).toBeNull();
+    expect(pairingLinkHref("not a url")).toBeNull();
   });
 });
 
