@@ -284,6 +284,34 @@ async def test_a_receipt_is_only_ever_written_once(engine: AsyncEngine) -> None:
     assert seen == {"q-1"}
 
 
+async def test_an_imports_receipt_outlives_the_retention_a_phone_queue_is_sized_for(
+    engine: AsyncEngine,
+) -> None:
+    """Ninety days is "no client can still be holding this". An import's receipt answers
+    a question with no expiry date, and letting it age out would turn the second run's
+    refusal into a silent re-import of votes the person may have undone since."""
+    user_id = await _user(engine)
+    long_after = NOW + timedelta(days=vote_repository.RECEIPT_RETENTION + 1)
+    async with write_transaction(engine) as connection:
+        await vote_repository.remember_receipt(connection, user_id, "q-1", now=NOW)
+        await vote_repository.remember_receipt(
+            connection,
+            user_id,
+            f"{vote_repository.IMPORT_RECEIPT_PREFIX}suggestarr:7:movie:27205",
+            now=NOW,
+        )
+
+        purged = await vote_repository.purge_receipts(connection, now=long_after)
+
+        seen = await vote_repository.seen_receipts(
+            connection,
+            user_id,
+            ["q-1", f"{vote_repository.IMPORT_RECEIPT_PREFIX}suggestarr:7:movie:27205"],
+        )
+    assert purged == 1
+    assert seen == {f"{vote_repository.IMPORT_RECEIPT_PREFIX}suggestarr:7:movie:27205"}
+
+
 async def test_a_receipt_survives_the_undo_it_produced(engine: AsyncEngine) -> None:
     user_id = await _user(engine)
     async with write_transaction(engine) as connection:

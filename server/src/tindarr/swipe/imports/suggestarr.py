@@ -66,6 +66,7 @@ from tindarr.ports.deck import PickKind, VoteValue, as_pick_kind, as_vote_value
 from tindarr.ports.titles import TitleRef, as_media_kind
 from tindarr.storage import users as user_repository
 from tindarr.storage import votes as vote_repository
+from tindarr.storage.votes import IMPORT_RECEIPT_PREFIX
 
 __all__ = [
     "RECEIPT_NAMESPACE",
@@ -87,7 +88,7 @@ logger = logging.getLogger(__name__)
 #: ``client_vote_id`` a phone chose. A phone's ids are opaque strings it generates; this
 #: one is a sentence about a row in somebody else's database, and the two live in the
 #: same column.
-RECEIPT_NAMESPACE: Final = "suggestarr"
+RECEIPT_NAMESPACE: Final = f"{IMPORT_RECEIPT_PREFIX}suggestarr"
 
 #: The fork's own table. Its absence is what tells "this is not a SuggestArr database"
 #: apart from "this database has no votes in it yet".

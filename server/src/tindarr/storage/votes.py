@@ -34,6 +34,7 @@ from tindarr.storage.db import UtcDateTime
 from tindarr.storage.tables import vote_receipts, votes
 
 __all__ = [
+    "IMPORT_RECEIPT_PREFIX",
     "RECEIPT_RETENTION",
     "SKIP_COOL_DOWN",
     "LikeCursor",
@@ -60,6 +61,17 @@ SKIP_COOL_DOWN: Final = 60
 #: How long a ``client_vote_id`` is remembered, in days. Longer than any queue a phone
 #: could plausibly hold, and short enough that the table does not grow for ever.
 RECEIPT_RETENTION: Final = 90
+#: Receipts whose id starts with this are an **import's** bookkeeping and are kept for
+#: ever (``purge_receipts``).
+#:
+#: The retention above is sized for a phone's offline queue, which is the only thing
+#: that was ever meant to be in this table: after ninety days no client can still be
+#: holding those items, so forgetting them is safe. An import's receipts answer a
+#: question with no expiry date — "have these rows already been brought in?" — and
+#: ``tindarr import suggestarr`` is exactly the command somebody runs again a year
+#: later, having forgotten. Letting its receipts age out would turn a refusal into a
+#: silent re-import of votes the person may have undone in the meantime.
+IMPORT_RECEIPT_PREFIX: Final = "import:"
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,11 +191,16 @@ async def seen_receipts(
 
 
 async def purge_receipts(connection: AsyncConnection, *, now: datetime) -> int:
-    """Forget the receipts of queues no phone can still be holding."""
+    """Forget the receipts of queues no phone can still be holding.
+
+    An import's receipts are exempt, whatever their age: they are not a queue and there
+    is no moment after which re-applying them becomes harmless. See
+    ``IMPORT_RECEIPT_PREFIX``.
+    """
     result = await connection.execute(
-        delete(vote_receipts).where(
-            vote_receipts.c.created_at < now - timedelta(days=RECEIPT_RETENTION)
-        )
+        delete(vote_receipts)
+        .where(vote_receipts.c.created_at < now - timedelta(days=RECEIPT_RETENTION))
+        .where(~vote_receipts.c.client_vote_id.startswith(IMPORT_RECEIPT_PREFIX))
     )
     return result.rowcount
 
