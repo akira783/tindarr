@@ -6,7 +6,7 @@ import { useAuth } from "../../auth/AuthProvider";
 import { Button } from "../../components/ui";
 import { posterUrl, trailerEmbedUrl } from "../../lib/url";
 import { lengthOf, sortedProviders } from "./deck-state";
-import { SHORTCUTS } from "./keys";
+import { KEY_CAPS, SHORTCUTS } from "./keys";
 
 /** "1 h 52", "104 min", "3 seasons", or nothing at all. */
 function useLength(card: Card): string | null {
@@ -21,9 +21,29 @@ function useLength(card: Card): string | null {
     : t("deck.card.runtimeLong", { hours, minutes: String(minutes).padStart(2, "0") });
 }
 
+/**
+ * The pick type, said three times over: a shape, a word, and a colour.
+ *
+ * A bet is the one thing that makes this deck different from a catalogue, so it
+ * is the one that is also ringed — here and around the poster. Nothing here is
+ * carried by colour alone (design/brief.md, "Constraints").
+ */
+function PickType({ card }: { card: Card }): ReactNode {
+  const { t } = useTranslation(["console", "common"]);
+  return (
+    <span className={`pick pick-${card.pick_type}`}>
+      <span className="pick-mark" aria-hidden />
+      {t(`deck.card.pickType.${card.pick_type}`)}
+    </span>
+  );
+}
+
 function Ratings({ card }: { card: Card }): ReactNode {
   const { t } = useTranslation(["console", "common"]);
   const ratings = card.ratings ?? {};
+  // One text node per value, on purpose: a scale set in its own smaller <span>
+  // would split "8.4/10" across elements, and a reader — human or test — looking
+  // for the rating as it is written would no longer find it.
   const rows: { label: string; value: string }[] = [];
   if (ratings.tmdb != null) rows.push({ label: t("deck.card.tmdb"), value: `${ratings.tmdb.toFixed(1)}/10` });
   if (ratings.imdb != null) rows.push({ label: t("deck.card.imdb"), value: `${ratings.imdb.toFixed(1)}/10` });
@@ -92,6 +112,9 @@ function Trailer({ card, open, onToggle }: { card: Card; open: boolean; onToggle
     <div className="trailer">
       <Button onClick={onToggle} aria-expanded={open} aria-keyshortcuts={SHORTCUTS.trailer}>
         {open ? t("deck.card.closeTrailer") : t("deck.card.trailer")}
+        <span className="kbd" aria-hidden>
+          {KEY_CAPS.trailer}
+        </span>
       </Button>
       {open ? (
         <iframe
@@ -121,8 +144,15 @@ export interface DeckCardProps {
 }
 
 /**
- * One card. Everything on it is text React escapes: the rationale is written by
- * a model and the title by TMDb, and neither is ever handed to a markup sink.
+ * One card: the poster, and beside it the reason to watch it.
+ *
+ * The order is the design's (design/Tindarr Refonte.dc.html, "La carte"): what
+ * kind of pick it is, the title, the facts in one line, then the rationale —
+ * before the summary, set as a quotation, because it is the sentence that has to
+ * be read rather than skipped — and last a band of what is known about the title.
+ *
+ * Everything on it is text React escapes: the rationale is written by a model and
+ * the title by TMDb, and neither is ever handed to a markup sink.
  */
 export function DeckCard({
   card,
@@ -134,12 +164,28 @@ export function DeckCard({
   const { t } = useTranslation(["console", "common"]);
   const { serverInfo } = useAuth();
   const poster = posterUrl(serverInfo?.tmdb_image_base_url, card.poster_path, "w342");
+  // The poster carries the screen: the backdrop is a wash behind the card, faded
+  // into the page, decorative and never the only thing saying anything.
+  const backdrop = posterUrl(serverInfo?.tmdb_image_base_url, card.backdrop_path, "w1280");
   const length = useLength(card);
   const kind = t(`deck.card.${card.media_type}`);
   const genres = card.genres ?? [];
+  const original =
+    card.original_title != null && card.original_title !== "" && card.original_title !== card.title
+      ? card.original_title
+      : null;
 
   return (
-    <article className="deck-card" aria-labelledby="deck-card-title">
+    <article
+      className={`deck-card deck-card--${card.pick_type}`}
+      aria-labelledby="deck-card-title"
+    >
+      {backdrop === null ? null : (
+        <div className="deck-backdrop" aria-hidden>
+          <img className="deck-backdrop-image" src={backdrop} alt="" />
+        </div>
+      )}
+
       <div className="deck-card-poster">
         {poster === null ? (
           <span className="poster poster-empty" aria-hidden />
@@ -150,42 +196,47 @@ export function DeckCard({
       </div>
 
       <div className="deck-card-body">
-        <p className="hint">{t("deck.card.position", { position, total })}</p>
+        <div className="deck-card-head">
+          <PickType card={card} />
+          <span className="hint">{t("deck.card.position", { position, total })}</span>
+        </div>
+
         <h2 id="deck-card-title">
           {card.title}
           {card.year == null ? null : <span className="deck-card-year"> ({card.year})</span>}
         </h2>
+        {original === null ? null : <p className="deck-card-original">{original}</p>}
         <p className="hint deck-card-facts">
           <span>{kind}</span>
           {length === null ? null : <span> · {length}</span>}
           {genres.length === 0 ? null : <span> · {genres.join(", ")}</span>}
         </p>
 
-        <p className="row">
-          <span className="badge badge-pick">{t(`deck.card.pickType.${card.pick_type}`)}</span>
-          {card.availability !== "none" && (
-            <span className="badge badge-availability">
-              {t(`deck.card.availability.${card.availability}`)}
-            </span>
-          )}
-        </p>
-
-        <h3>{t("deck.card.why")}</h3>
-        <p className="rationale">
-          {card.rationale == null || card.rationale === ""
-            ? t("deck.card.noRationale")
-            : card.rationale}
-        </p>
+        <figure className="rationale-figure">
+          <figcaption className="rationale-label">{t("deck.card.why")}</figcaption>
+          <blockquote className="rationale">
+            {card.rationale == null || card.rationale === ""
+              ? t("deck.card.noRationale")
+              : card.rationale}
+          </blockquote>
+        </figure>
 
         {card.overview == null || card.overview === "" ? null : (
           <p className="overview">{card.overview}</p>
         )}
 
-        <h3>{t("deck.card.ratings")}</h3>
-        <Ratings card={card} />
-
-        <h3>{t("deck.card.providers")}</h3>
-        <Providers card={card} />
+        <div className="deck-card-band">
+          <h3 className="visually-hidden">{t("deck.card.ratings")}</h3>
+          <Ratings card={card} />
+          {card.availability !== "none" && (
+            <span className={`avail avail-${card.availability}`}>
+              <span className="avail-mark" aria-hidden />
+              {t(`deck.card.availability.${card.availability}`)}
+            </span>
+          )}
+          <h3 className="visually-hidden">{t("deck.card.providers")}</h3>
+          <Providers card={card} />
+        </div>
 
         <Trailer card={card} open={trailerOpen} onToggle={onToggleTrailer} />
       </div>

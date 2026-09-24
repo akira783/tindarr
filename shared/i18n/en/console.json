@@ -462,6 +462,7 @@
     "states": {
       "generating": "Building your deck…",
       "generatingHint": "The model is choosing and explaining. The first batch takes a few seconds.",
+      "generatingNorm": "Usually 15 to 25 seconds.",
       "tooLongTitle": "Still nothing",
       "tooLongBody": "This batch is taking longer than the console will wait. Ask again, or check the AI provider on the connectors page.",
       "noProviderTitle": "No AI provider yet",
@@ -483,7 +484,15 @@
       "stalledTitle": "The deck is empty",
       "stalledBody": "Nothing new came back. Ask for another batch, or change what you are looking for.",
       "more": "Ask for more",
-      "seenWarning": "A lot of these look like titles you have already seen. A bolder setting helps."
+      "seenWarning": "A lot of these look like titles you have already seen. A bolder setting helps.",
+      "kind": {
+        "building": "First batch",
+        "dailyLimit": "Daily limit",
+        "unreachable": "Service out of reach",
+        "notConfigured": "Nothing to choose with",
+        "waited": "Waited long enough",
+        "exhausted": "Deck run out"
+      }
     },
     "controls": {
       "title": "What to show",

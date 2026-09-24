@@ -761,6 +761,13 @@ input[aria-invalid="true"] {
   min-width: 11rem;
 }
 
+.deck-controls select,
+.deck-controls input[type="text"] {
+  border-radius: var(--radius-pill);
+  padding-inline: 0.9rem;
+  background: var(--surface);
+}
+
 .deck-mood {
   align-items: end;
 }
@@ -832,6 +839,7 @@ input[aria-invalid="true"] {
 /* --- one card ------------------------------------------------------------------- */
 
 .deck-card {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
   gap: var(--space-7);
@@ -852,9 +860,34 @@ input[aria-invalid="true"] {
   }
 }
 
+/* Behind everything, inside the card's own box so it can never widen the page. */
+.deck-backdrop {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 24rem;
+  overflow: clip;
+  pointer-events: none;
+  border-radius: var(--radius-lg);
+  mask-image: linear-gradient(to bottom, rgb(0 0 0 / 70%) 0%, rgb(0 0 0 / 0%) 88%);
+}
+
+.deck-backdrop-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.3;
+}
+
 .deck-card-poster {
   position: relative;
+  z-index: 1;
   margin: 0.4rem;
+}
+
+.deck-card-body {
+  position: relative;
+  z-index: 1;
 }
 
 .deck-card .poster,
@@ -910,9 +943,6 @@ input[aria-invalid="true"] {
 }
 
 .deck-card-facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
   margin: 0;
 }
 
@@ -923,7 +953,7 @@ input[aria-invalid="true"] {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  max-width: 42ch;
+  max-width: 48ch;
 }
 
 .rationale-label {
@@ -1013,12 +1043,6 @@ input[aria-invalid="true"] {
   font-size: var(--text-lg);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
-}
-
-.rating-scale {
-  font-size: var(--text-xs);
-  font-weight: 400;
-  color: var(--muted);
 }
 
 .provider-list {
@@ -1169,12 +1193,10 @@ input[aria-invalid="true"] {
 
 /* --- the verdict bar ------------------------------------------------------------ */
 
-/* Sticky, not fixed: it floats over the card while the page scrolls, and still
-   gets out of the way of everything under the deck. */
+/* In the flow, not floating: the console's deck page scrolls — there are the
+   settings above it and the panels below — and a bar pinned to the bottom of the
+   window would sit over the rationale, which is the one thing that has to be read. */
 .deck-actions {
-  position: sticky;
-  bottom: var(--space-4);
-  z-index: 5;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1237,17 +1259,34 @@ input[aria-invalid="true"] {
   padding-inline-start: 1.4rem;
 }
 
+.deck-keys-hint {
+  margin: 0 auto;
+  max-width: 62ch;
+  text-align: center;
+}
+
+@media (pointer: coarse) {
+  .deck-keys-hint {
+    display: none;
+  }
+}
+
 /* --- waiting, and the states with no way out ------------------------------------ */
 
+/* Both live where the card would be. The wait puts a deck beside its sentence;
+   a dead end is the sentence alone. */
 .deck-state {
-  display: grid;
-  grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
-  gap: var(--space-7);
-  align-items: center;
   margin: 0;
   padding: var(--space-6) 0;
   background: none;
   border: 0;
+}
+
+.deck-wait {
+  display: grid;
+  grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
+  gap: var(--space-7);
+  align-items: center;
 }
 
 .deck-state-text {
@@ -1443,7 +1482,7 @@ input[aria-invalid="true"] {
     font-size: var(--text-lg);
   }
 
-  .deck-state {
+  .deck-wait {
     grid-template-columns: 1fr;
     gap: var(--space-5);
   }

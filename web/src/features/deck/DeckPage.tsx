@@ -27,25 +27,37 @@ import { AroundTheDeck } from "./AroundTheDeck";
 import { DeckCard } from "./DeckCard";
 import { DeckControls } from "./DeckControls";
 import { isDeck } from "./deck-state";
-import { actionForKey, SHORTCUTS, VERDICT_KEYS, VERDICTS } from "./keys";
+import { actionForKey, KEY_CAPS, SHORTCUTS, VERDICT_KEYS, VERDICTS } from "./keys";
 import { RequestDialog } from "./RequestDialog";
 import { useDeck } from "./useDeck";
 
-/** A state the deck cannot leave on its own: a sentence, and what to do next. */
+/**
+ * A state the deck cannot leave on its own.
+ *
+ * One template for all of them (design/Tindarr Refonte.dc.html, "Attente et
+ * impasses"): the kind of thing it is, in caps; a title; one sentence from the
+ * catalogue; at most one action. No alert icon — these states are frequent and
+ * none of them is a mistake.
+ */
 function DeadEnd({
+  kind,
   title,
   body,
   action,
 }: {
+  kind: string;
   title: string;
   body: string;
   action?: ReactNode;
 }): ReactNode {
   return (
-    <section className="card deck-state" aria-live="polite">
-      <h2>{title}</h2>
-      <p>{body}</p>
-      {action}
+    <section className="deck-state dead-end" aria-live="polite">
+      <div className="deck-state-text">
+        <span className="deck-state-kind">{kind}</span>
+        <h2>{title}</h2>
+        <p>{body}</p>
+        {action}
+      </div>
     </section>
   );
 }
@@ -56,6 +68,7 @@ function NotConfigured({ what }: { what: "Provider" | "Tmdb" }): ReactNode {
   const { isAdmin } = useAuth();
   return (
     <DeadEnd
+      kind={t("deck.states.kind.notConfigured")}
       title={t(`deck.states.no${what}Title`)}
       body={t(`deck.states.no${what}Body${isAdmin ? "Admin" : "User"}`)}
       action={
@@ -276,6 +289,7 @@ export function DeckPage(): ReactNode {
     live = t("deck.states.dailyLimitTitle");
     body = (
       <DeadEnd
+        kind={t("deck.states.kind.dailyLimit")}
         title={t("deck.states.dailyLimitTitle")}
         body={t("deck.states.dailyLimitBody")}
       />
@@ -284,6 +298,7 @@ export function DeckPage(): ReactNode {
     live = t("deck.states.metadataTitle");
     body = (
       <DeadEnd
+        kind={t("deck.states.kind.unreachable")}
         title={t("deck.states.metadataTitle")}
         body={t("deck.states.metadataBody")}
         action={
@@ -301,6 +316,7 @@ export function DeckPage(): ReactNode {
     live = t("deck.states.llmTitle");
     body = (
       <DeadEnd
+        kind={t("deck.states.kind.unreachable")}
         title={t("deck.states.llmTitle")}
         body={`${t(`common:errors.${code}`)} ${t("deck.states.llmBody")}`}
         action={
@@ -310,15 +326,18 @@ export function DeckPage(): ReactNode {
     );
   } else if (error !== null) {
     body = (
-      <section className="card deck-state">
-        <ErrorAlert error={error} />
-        <Button onClick={deck.retry}>{t("common:actions.retry")}</Button>
+      <section className="deck-state dead-end">
+        <div className="deck-state-text">
+          <ErrorAlert error={error} />
+          <Button onClick={deck.retry}>{t("common:actions.retry")}</Button>
+        </div>
       </section>
     );
   } else if (deck.gaveUp) {
     live = t("deck.states.tooLongTitle");
     body = (
       <DeadEnd
+        kind={t("deck.states.kind.waited")}
         title={t("deck.states.tooLongTitle")}
         body={t("deck.states.tooLongBody")}
         action={
@@ -329,9 +348,44 @@ export function DeckPage(): ReactNode {
   } else if (deck.generating || deck.query.isPending) {
     live = t("deck.states.generating");
     body = (
-      <section className="card deck-state">
-        <p role="status">{t("deck.states.generating")}</p>
-        <p className="hint">{t("deck.states.generatingHint")}</p>
+      <section className="deck-state deck-wait">
+        {/* The wait is a screen, not a spinner: a deck being dealt where the card
+            will land. Decorative, and still under prefers-reduced-motion. */}
+        <div className="deck-ghosts" aria-hidden>
+          <span className="deck-ghost deck-ghost-1" />
+          <span className="deck-ghost deck-ghost-2" />
+          <span className="deck-ghost deck-ghost-3" />
+        </div>
+        <div className="deck-state-text">
+          <span className="deck-state-kind">{t("deck.states.kind.building")}</span>
+          {/* Announced once, by the live region above: a role here would take the
+              heading's own role away from it. */}
+          <h2>{t("deck.states.generating")}</h2>
+          <p>{t("deck.states.generatingHint")}</p>
+          <p className="deck-wait-norm">{t("deck.states.generatingNorm")}</p>
+          <ul className="deck-keymap list">
+            {VERDICTS.map((value) => (
+              <li key={value}>
+                <span className="kbd" aria-hidden>
+                  {KEY_CAPS[value]}
+                </span>
+                {t(`deck.verdict.${VERDICT_KEYS[value]}`)}
+              </li>
+            ))}
+            <li>
+              <span className="kbd" aria-hidden>
+                {KEY_CAPS.undo}
+              </span>
+              {t("deck.undo")}
+            </li>
+            <li>
+              <span className="kbd" aria-hidden>
+                {KEY_CAPS.trailer}
+              </span>
+              {t("deck.card.trailer")}
+            </li>
+          </ul>
+        </div>
       </section>
     );
   } else if (current !== null) {
@@ -348,6 +402,7 @@ export function DeckPage(): ReactNode {
     live = t("deck.states.exhaustedTitle");
     body = (
       <DeadEnd
+        kind={t("deck.states.kind.exhausted")}
         title={t("deck.states.exhaustedTitle")}
         body={t("deck.states.exhaustedBody")}
       />
@@ -356,6 +411,7 @@ export function DeckPage(): ReactNode {
     live = t("deck.states.stalledTitle");
     body = (
       <DeadEnd
+        kind={t("deck.states.kind.exhausted")}
         title={t("deck.states.stalledTitle")}
         body={t("deck.states.stalledBody")}
         action={<Button onClick={deck.retry}>{t("deck.states.more")}</Button>}
@@ -367,6 +423,7 @@ export function DeckPage(): ReactNode {
     live = t("deck.states.emptyTitle");
     body = (
       <DeadEnd
+        kind={t("deck.states.kind.exhausted")}
         title={t("deck.states.emptyTitle")}
         body={t("deck.states.emptyBody")}
         action={<Button onClick={deck.retry}>{t("deck.states.more")}</Button>}
@@ -379,8 +436,8 @@ export function DeckPage(): ReactNode {
   return (
     <main id="main" className="page deck-page">
       <h1>{t("deck.title")}</h1>
-      <p>{t("deck.intro")}</p>
-      <p className="hint">
+      <p className="deck-intro">{t("deck.intro")}</p>
+      <p className="hint deck-meta">
         {left == null ? null : `${t("deck.generationsLeft", { count: left })} `}
         {swipeStatus?.streaming_region == null
           ? null
@@ -428,44 +485,56 @@ export function DeckPage(): ReactNode {
         {body}
 
         {(current !== null || deck.lastVote !== null) && (
-          <div className="deck-actions">
-          <div className="row verdicts">
-            {current === null
-              ? null
-              : VERDICTS.map((value) => (
-                  <Button
-                    key={value}
-                    variant={value === "like" ? "primary" : "secondary"}
-                    aria-keyshortcuts={SHORTCUTS[value]}
-                    onClick={() => {
-                      vote(value);
-                    }}
-                  >
-                    {t(`deck.verdict.${VERDICT_KEYS[value]}`)}{" "}
-                    <span className="badge">
-                      {t(`deck.keys.${VERDICT_KEYS[value]}`)}
-                    </span>
-                  </Button>
-                ))}
-          </div>
-          <div className="row">
-            <Button
-              ref={undoRef}
-              disabled={!canUndo}
-              aria-keyshortcuts={SHORTCUTS.undo}
-              onClick={() => {
-                undo();
-              }}
-            >
-              {deck.lastVote === null
-                ? t("deck.undo")
-                : t("deck.undoOf", { title: deck.lastVote.card.title })}{" "}
-              <span className="badge">{t("deck.keys.undo")}</span>
-            </Button>
-            <span className="hint">{t("deck.undoHint")}</span>
-          </div>
-            <p className="hint">{t("deck.keys.hint")}</p>
-          </div>
+          <>
+            {/* One bar, in the order of the arrows. Undo lives to its left,
+                behind a rule, and names the card it would bring back. */}
+            <div className="deck-actions">
+              <div className="deck-undo">
+                <Button
+                  ref={undoRef}
+                  disabled={!canUndo}
+                  aria-keyshortcuts={SHORTCUTS.undo}
+                  onClick={() => {
+                    undo();
+                  }}
+                >
+                  {deck.lastVote === null
+                    ? t("deck.undo")
+                    : t("deck.undoOf", { title: deck.lastVote.card.title })}
+                  <span className="kbd" aria-hidden>
+                    {KEY_CAPS.undo}
+                  </span>
+                </Button>
+              </div>
+              <div className="verdicts">
+                {current === null
+                  ? null
+                  : VERDICTS.map((value) => (
+                      <Button
+                        key={value}
+                        variant={value === "like" ? "primary" : "secondary"}
+                        className={
+                          value === "seen_liked" || value === "seen_disliked"
+                            ? "verdict-seen"
+                            : undefined
+                        }
+                        aria-keyshortcuts={SHORTCUTS[value]}
+                        onClick={() => {
+                          vote(value);
+                        }}
+                      >
+                        {t(`deck.verdict.${VERDICT_KEYS[value]}`)}
+                        <span className="kbd" aria-hidden>
+                          {KEY_CAPS[value]}
+                        </span>
+                      </Button>
+                    ))}
+              </div>
+            </div>
+            <p className="hint deck-keys-hint">
+              {t("deck.keys.hint")} {t("deck.undoHint")}
+            </p>
+          </>
         )}
       </section>
 

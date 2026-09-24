@@ -11,8 +11,16 @@ type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
   ref?: React.Ref<HTMLButtonElement>;
 };
 
-export function Button({ variant = "secondary", type = "button", ...props }: ButtonProps): ReactNode {
-  return <button {...props} type={type} className={`btn btn-${variant}`} />;
+export function Button({
+  variant = "secondary",
+  type = "button",
+  className,
+  ...props
+}: ButtonProps): ReactNode {
+  // The caller's class is added, never substituted: `btn` and its variant are what
+  // make a button look like one, and a caller only ever qualifies that.
+  const classes = className === undefined ? `btn btn-${variant}` : `btn btn-${variant} ${className}`;
+  return <button {...props} type={type} className={classes} />;
 }
 
 interface FieldShell {

@@ -187,7 +187,7 @@ const ROUTES = [
       { kind: "requests", configured: true, secret: { set: true }, locked_fields: [], status: { health: "ok" }, url: "http://seerr.local:5055" },
       { kind: "tmdb", configured: true, secret: { set: true }, locked_fields: [], status: { health: "ok" } },
       { kind: "omdb", configured: false, secret: { set: false }, locked_fields: [], status: { health: "not_configured" } },
-      { kind: "llm", configured: true, secret: { set: true }, locked_fields: [], status: { health: "degraded", detail: "Le dernier appel a dépassé le délai." }, provider: "openai_compatible", model: "gpt-5.6-luna", base_url: "http://127.0.0.1:8000/v1" },
+      { kind: "llm", configured: true, secret: { set: true }, locked_fields: [], status: { health: "unreachable", detail: "Le dernier appel a dépassé le délai." }, provider: "openai_compatible", model: "gpt-5.6-luna", base_url: "http://127.0.0.1:8000/v1" },
     ],
   }],
   ["/api/v1/admin/users", { users: [
@@ -228,11 +228,15 @@ const SHOTS = [
 const VIEWPORTS = [
   { name: "desktop", width: 1440, height: 900 },
   { name: "phone", width: 390, height: 844 },
+  // The narrowest screen anybody still browses on. Checked for overflow, not shot:
+  // one more pair of files per page would not tell the owner anything new.
+  { name: "narrow", width: 320, height: 844, checkOnly: true },
 ];
 const THEMES = ["dark", "light"];
 
 const browser = await chromium.launch();
 const violations = [];
+const overflows = [];
 for (const theme of THEMES) {
   for (const viewport of VIEWPORTS) {
     const context = await browser.newContext({
@@ -278,14 +282,16 @@ for (const theme of THEMES) {
     for (const shot of SHOTS) {
       await page.goto(`${origin}${shot.url}`, { waitUntil: "networkidle" });
       await page.waitForTimeout(900);
-      await page.screenshot({
-        path: join(outDir, `${shot.name}-${viewport.name}-${theme}.png`),
-        fullPage: true,
-      });
+      if (viewport.checkOnly !== true) {
+        await page.screenshot({
+          path: join(outDir, `${shot.name}-${viewport.name}-${theme}.png`),
+          fullPage: true,
+        });
+      }
       const width = await page.evaluate("document.documentElement.scrollWidth");
       const inner = await page.evaluate("window.innerWidth");
       if (width > inner + 1) {
-        console.error(`horizontal overflow on ${shot.name} ${viewport.name} ${theme}: ${width} > ${inner}`);
+        overflows.push(`${shot.name} ${viewport.name} ${theme}: ${width} > ${inner}`);
       }
       violations.push(...(await page.evaluate("window.__shotCsp ?? []")).map((v) => `${shot.name}/${viewport.name}/${theme}: ${v}`));
     }
@@ -295,9 +301,9 @@ for (const theme of THEMES) {
 await browser.close();
 server.close();
 
-if (violations.length > 0) {
-  console.error("CSP violations while shooting:");
-  for (const violation of violations) console.error(` - ${violation}`);
+if (violations.length > 0 || overflows.length > 0) {
+  for (const violation of violations) console.error(`CSP violation — ${violation}`);
+  for (const overflow of overflows) console.error(`horizontal overflow — ${overflow}`);
   process.exitCode = 1;
 } else {
   console.log(`screenshots written to design/screenshots/${label}`);

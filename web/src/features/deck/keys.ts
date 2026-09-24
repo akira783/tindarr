@@ -21,13 +21,20 @@ const BY_KEY: Readonly<Record<string, DeckAction>> = {
   t: "trailer",
 };
 
-/** The five verdicts, in the order the buttons show them. */
+/**
+ * The five verdicts, in the order the buttons show them.
+ *
+ * The order is the arrows': refusal on the left, wanting it on the right, "not
+ * now" in the middle, and the two "seen it" verdicts where their arrows are
+ * (design/Tindarr Refonte.dc.html, "Barre de verdicts"). A hand that has learnt
+ * the keyboard then finds the buttons where the keys are.
+ */
 export const VERDICTS: readonly VoteValue[] = [
-  "like",
   "dislike",
-  "seen_liked",
   "seen_disliked",
   "skip",
+  "seen_liked",
+  "like",
 ];
 
 /** Catalogue suffix for a verdict: `deck.verdict.<name>` and `deck.keys.<name>`. */
@@ -39,6 +46,24 @@ export const VERDICT_KEYS: Readonly<Record<VoteValue, VerdictKey>> = {
   seen_liked: "seenLiked",
   seen_disliked: "seenDisliked",
   skip: "skip",
+};
+
+/**
+ * What a key looks like on a button.
+ *
+ * The glyph is drawn, `aria-hidden`, beside the verdict; the key's real name goes
+ * to `aria-keyshortcuts` below, which is where a screen reader looks for it. That
+ * way the button's accessible name stays the verdict and nothing reads out
+ * "Seen it, liked it Up arrow".
+ */
+export const KEY_CAPS: Readonly<Record<DeckAction, string>> = {
+  like: "\u2192",
+  dislike: "\u2190",
+  seen_liked: "\u2191",
+  seen_disliked: "\u2193",
+  skip: "N",
+  undo: "U",
+  trailer: "T",
 };
 
 /** `aria-keyshortcuts` values, which name keys the way the specification does. */

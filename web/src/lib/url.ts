@@ -69,7 +69,7 @@ export function isLikelyPhone(): boolean {
 export function posterUrl(
   base: string | null | undefined,
   path: string | null | undefined,
-  size: "w185" | "w342" | "w500" = "w342",
+  size: "w185" | "w342" | "w500" | "w1280" = "w342",
 ): string | null {
   if (base == null || base === "" || path == null || path === "") return null;
   if (!/^\/[A-Za-z0-9._-]+$/.test(path)) return null;

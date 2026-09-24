@@ -462,6 +462,7 @@
     "states": {
       "generating": "Constitution de votre paquet…",
       "generatingHint": "Le modèle choisit et explique. Le premier lot demande quelques secondes.",
+      "generatingNorm": "D’habitude 15 à 25 secondes.",
       "tooLongTitle": "Toujours rien",
       "tooLongBody": "Ce lot dépasse le temps que la console accepte d’attendre. Redemandez-en un, ou vérifiez le fournisseur d’IA sur la page des connecteurs.",
       "noProviderTitle": "Aucun fournisseur d’IA",
@@ -483,7 +484,15 @@
       "stalledTitle": "Le paquet est vide",
       "stalledBody": "Rien de neuf n’est revenu. Demandez un autre lot, ou changez ce que vous cherchez.",
       "more": "Demander d’autres cartes",
-      "seenWarning": "Beaucoup de ces titres ressemblent à ce que vous avez déjà vu. Un réglage plus audacieux aide."
+      "seenWarning": "Beaucoup de ces titres ressemblent à ce que vous avez déjà vu. Un réglage plus audacieux aide.",
+      "kind": {
+        "building": "Premier lot",
+        "dailyLimit": "Limite quotidienne",
+        "unreachable": "Service injoignable",
+        "notConfigured": "Rien pour choisir",
+        "waited": "Assez attendu",
+        "exhausted": "Paquet épuisé"
+      }
     },
     "controls": {
       "title": "Quoi montrer",
