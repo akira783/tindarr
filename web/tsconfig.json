@@ -29,7 +29,8 @@
 
     "baseUrl": ".",
     "paths": {
-      "@i18n/*": ["../shared/i18n/*"]
+      "@i18n/*": ["../shared/i18n/*"],
+      "@design/*": ["../shared/design/*"]
     }
   },
   "include": ["src", "test", "e2e", "scripts", "vite.config.ts", "playwright.config.ts"]

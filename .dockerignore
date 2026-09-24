@@ -18,6 +18,7 @@
 !web/scripts/
 
 !shared/i18n/
+!shared/design/
 
 # Never: local state, build output, caches, secrets.
 **/node_modules

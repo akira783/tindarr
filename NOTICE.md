@@ -33,6 +33,19 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## Fonts
+
+The console serves two typefaces itself (`web/public/fonts/`), because its
+Content-Security-Policy allows `font-src 'self'` and nothing else. Both are under the
+SIL Open Font License 1.1, and each licence is kept beside the files it covers:
+
+- **Newsreader**, Production Type — `web/public/fonts/OFL-Newsreader.txt`
+- **Instrument Sans**, Rodrigo Fuenzalida and Jordan Egstad —
+  `web/public/fonts/OFL-InstrumentSans.txt`
+
+The committed files are subsets of the upstream variable fonts, cut and converted by
+`web/scripts/build-fonts.py`; they are not renamed, and no Reserved Font Name is used.
+
 ## TMDb
 
 This product uses the TMDB API but is not endorsed or certified by TMDB.

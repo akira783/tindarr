@@ -5,6 +5,7 @@ import { defineConfig } from "vitest/config";
 
 const webRoot = fileURLToPath(new URL(".", import.meta.url));
 const sharedI18n = fileURLToPath(new URL("../shared/i18n", import.meta.url));
+const sharedDesign = fileURLToPath(new URL("../shared/design", import.meta.url));
 
 // The console is served by the Tindarr server under a strict CSP (docs/adr/0009):
 // no inline script, no inline style, no data: URI, everything under /assets/.
@@ -12,13 +13,13 @@ const sharedI18n = fileURLToPath(new URL("../shared/i18n", import.meta.url));
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    alias: { "@i18n": sharedI18n },
+    alias: { "@i18n": sharedI18n, "@design": sharedDesign },
   },
   server: {
     // Same-origin development: the dev server proxies /api to a local Tindarr
     // server without rewriting Host or Origin, so cookies and the CSRF Origin
     // check behave as in production (docs/architecture.md, "Development").
-    fs: { allow: [webRoot, sharedI18n] },
+    fs: { allow: [webRoot, sharedI18n, sharedDesign] },
     proxy: {
       "/api": {
         target: process.env["TINDARR_DEV_SERVER"] ?? "http://localhost:8787",

@@ -25,8 +25,10 @@ COPY web/package.json web/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --ignore-scripts --no-audit --no-fund
 
-# The console reads the shared catalogs through its @i18n alias.
+# The console reads the shared catalogs through its @i18n alias, and the design
+# tokens both clients share through @design.
 COPY shared/i18n /src/shared/i18n
+COPY shared/design /src/shared/design
 COPY web/ ./
 # Builds, then refuses a bundle the console's CSP would break. Linting, types
 # and tests run in web.yml, not here.
