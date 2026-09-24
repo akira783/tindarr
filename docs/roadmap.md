@@ -267,12 +267,41 @@ which needs the stored cards of 4.5 —
 - A title already in the user's request queue is **shown as such on the card**, not
   filtered out. *(4.5: it needs a stored card to be shown on.)*
 
-**4.5 Serving it.** Stored batches and cards, persisted jobs, warm-up, per-user daily cap
-and concurrency, the region's streaming providers (TMDb, cached), the user's own services
-and the `subscribed` flag on card providers. Console: AI usage page. *(The import and
-calibration screens shipped with 4.4.)*
+**4.5 Serving it.** ✅ done — the engine is reachable and durable.
 
-**4.6 A swipe page in the web console.** Decided on 2026-09-24, outside the original
+- **Stored batches and cards** ([ADR 0007](adr/0007-server-side-cards.md)): a card is a
+  row with an opaque id, and a vote sends that id and one of five words. Everything else
+  — the title, the year, the pick type — is copied off this server's own row, so the
+  statistics are not a number the client writes. A card leaves the deck 24 h after being
+  served, a vote on it is accepted for a month (the offline queue), and only the unvoted
+  ones are ever purged.
+- **Background work with a state that outlives the process** (`jobs`): the deck answers
+  `202` while a batch is built, one generation per user at a time, a failure reported
+  once, and a job a restart left behind closed at startup so it cannot hold a slot for
+  ever. Warm-up 30 s after startup then every 6 h for users seen in the last 14 days;
+  the daily purge.
+- **The endpoints of the contract**: deck, votes (batch submit, idempotent per
+  `client_vote_id`, undo, reset), requests, likes, taste profile, preferences, providers,
+  stats — plus `GET /swipe/status`.
+- **Enrichment**: translation, the region's providers with the `subscribed` flag from the
+  user's own services, ratings, trailer, and the availability badge. The last two are
+  computed when the card is served, so ticking a service updates cards already in
+  somebody's hand.
+- **The taste profile**: Loves / Avoids / Nuances, rewritten in the background from votes
+  and engagement. What the user wrote lives in its own column, so "a rewrite never
+  contradicts it" is a property of the schema rather than a line in a prompt.
+- **The per-user daily cap**, charged inside the transaction that claims the job, so two
+  phones cannot both see "one left"; and **not refunded on failure**, because "it failed"
+  is the state a retry loop is in.
+- Console: the AI usage page. *(The import and calibration screens shipped with 4.4.)*
+
+One thing moved in the contract: `GET /swipe/deck` gains a documented `503`. Its `502`
+lists the AI provider's failures, which is the case that almost never reaches it — a
+model that fails costs the rationales and not the batch, because the retrieved pool is
+served in its own order. What does stop a generation is TMDb refusing the genre list a
+content filter needs.
+
+**4.6 A swipe page in the web console.** ← next. Decided on 2026-09-24, outside the original
 plan, which kept swiping for the app (steps 6–7). The console gets a deck: the four
 verdicts by keyboard and mouse, a "not now" button, provider and rating badges, the
 trailer, and the request dialog on a like. No touch gestures, no notifications — those
@@ -284,9 +313,15 @@ shortage ADR 0013's measurements ran into.
 
 - ✅ The harness runs in CI on the fixture votes and prints its metrics; a strategy change
   that makes them worse fails the build.
-- The ported tests pass.
+- ✅ The ported tests pass.
 - A real batch is generated end to end through the API with each AI provider family, and
-  every card in it comes from the retrieved pool.
+  every card in it comes from the retrieved pool. **Done for the OpenAI-compatible
+  family** (2026-09-24), against real TMDb and the author's local ChatMock: two batches
+  of ten in French, 17 s and 29 s to the first card, 6 094 input and 2 232 output tokens
+  over four generations (two batches and two profile rewrites), **no title repeated
+  between the two batches**, providers and trailers on every card, and a taste profile
+  written from the ten answers. The other four families need the owner's paid keys and
+  are the same check as step 3(b).
 - On the fixture votes, the share of already-seen cards is materially below the 47 %
   measured on the fork.
 - ✅ Importing a Netflix history file produces the expected split of finished,
@@ -295,7 +330,8 @@ shortage ADR 0013's measurements ran into.
   1 trailer dropped, **71 identified and 1 queued**; 27 films watched and 44 series split
   into 7 finished, 3 mostly watched, 3 in progress, 12 paused, 13 sampled and dropped,
   and 6 seen with no extent claimed.
-- `/status` stays under 50 ms during a generation.
+- ✅ `/status` answers while a generation is in flight: it reads rows and calls no
+  service, and the generation runs in its own task.
 
 ## Step 5: packaging and first deployment
 

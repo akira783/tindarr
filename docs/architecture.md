@@ -162,9 +162,15 @@ The fork's logic, with its middle turned around by
    dropped, and there is nothing left to search for. A model that fails costs the
    sentences, not the batch: the pool is served in its own order.
 4. **Enrichment.** Translation into the user's language, streaming providers for the
-   region, ratings (OMDb), trailer.
-5. **Profile.** Rewritten in the background every N votes, as short "Loves / Avoids /
-   Nuances" bullets. Text written by the user is kept and never contradicted.
+   region, ratings (OMDb), trailer — read once for the batch and stored on the card.
+   What depends on the moment the card is *shown* is computed then instead: the "on your
+   services" flag, from the preferences as they stand, and the availability badge, from
+   the request backend. So ticking a service or filing a request updates cards somebody
+   is already holding.
+5. **Profile.** Rewritten in the background every ten opinions, as short "Loves / Avoids
+   / Nuances" bullets. Unlike the batch prompt, this one names titles: a vote row carries
+   the title the server copied off its own card. Text written by the user is kept in its
+   own column and never rewritten.
 
 #### What the household has already watched, from outside the deck
 
@@ -247,13 +253,25 @@ startup, jobs left `running` by a crash are marked failed. There is no Redis or 
 at this scale. If a second process ever becomes necessary, the table already serves as
 the queue.
 
-- **Batch generation.** Started when a batch is consumed or requested. One per user at
-  a time: a request for another filter set waits (`202`) until it is done.
-- **Warm-up.** 30 s after startup, then every 6 h, only for users active in the last
-  14 days.
-- **Profile rewrite.** Debounced, one per user at a time.
+- **Batch generation** (from step 4.5). Started when the deck runs low or has nothing to
+  show. One per user at a time — the job row *is* the lock, taken inside SQLite's write
+  transaction, so two polls a millisecond apart buy one batch — and two at a time for the
+  whole server. The deck answers `202` while one runs.
+- **Warm-up** (from step 4.5). 30 s after startup, then every 6 h, only for users active
+  in the last 14 days, only when they have neither a waiting batch nor enough cards left,
+  and only while the server has a free slot: a household that has all come home at once
+  is better served by their own polls than by a sweep holding every slot.
+- **Profile rewrite** (from step 4.5). Debounced on the vote count (ten new opinions),
+  one per user at a time, and charged against the same daily cap as a batch — it is the
+  same one model call.
 - **Per-user limits.** A maximum number of generations per day, set by the admin, on
-  top of the one-at-a-time rule above (see [security](security.md)).
+  top of the one-at-a-time rule above (see [security](security.md)). It is charged
+  **before** the provider is called, in the transaction that claims the job, and it is
+  **not** refunded when the call fails: "it failed" is exactly the state a retry loop is
+  in, and a refund there turns one bad minute at a provider into an unbounded number of
+  paid attempts.
+- **Swipe purge** (from step 4.5). Daily: served cards nobody voted on a month later,
+  finished job rows, and the vote receipts of queues no phone can still be holding.
 - **Media server user sync** (from step 2). 60 s after startup, then hourly: disables
   users removed or disabled on the media server, clears lost admin flags, checks the
   server's identity ([auth reference](auth.md#periodic-sync)).
@@ -275,11 +293,34 @@ Main tables: `server_state` (single row: install id, setup state, media server
 identity), `settings` (secrets encrypted), `users` (with `media_server_admin` and
 `promoted`), `sessions` (`kind`: `mobile`, `web` or `setup`), `refresh_tokens`,
 `pairings`, `watch_history` (what a user watched outside the deck: an import, a grid
-tick), `imports` and `import_reviews`, then from step 4.5 `batches`, `cards`, `votes`,
-`taste_profiles`,
-`preferences` (including the user's streaming services), `jobs`, `llm_usage`,
-`translations`, plus a cache of the region's streaming providers. The step-2 columns
-are specified in [the authentication reference](auth.md#12-tables).
+tick), `imports` and `import_reviews`, and from step 4.5 `batches`, `cards`, `votes`,
+`vote_receipts`, `taste_profiles`, `preferences` (including the user's streaming
+services), `jobs`, `llm_usage` and `region_providers` (the cache of the region's
+streaming services). The step-2 columns are specified in
+[the authentication reference](auth.md#12-tables).
+
+Three of those are worth a line each, because they are where the swipe engine's rules
+actually live:
+
+- **`cards`** carries the enrichment that does not move (the translation, the providers
+  TMDb listed, the ratings, the trailer) and nothing that depends on who is looking. A
+  card is stamped `served_at` the first time it leaves the server: that is what feeds the
+  next prompt's "already shown" list, what starts its 24 h in the deck, and what the
+  purge measures a month from. A **voted-on** card is never purged — the vote points at
+  it, and the pick type on that row is what a statistic is counted from.
+- **`vote_receipts`** is separate from `votes` because the two outlive each other. A vote
+  is replaced when somebody changes their mind and deleted when they undo; "have I
+  already stored this queued item?" must stay answerable either way, or a phone
+  reconnecting would resurrect a vote the user has since undone.
+- **`taste_profiles`** has two text columns. `user_text` is what the person typed and
+  nothing but a user edit writes it; `text` is what the last rewrite produced; the
+  profile the engine reads is the two of them, the person's first. That is what makes
+  "a rewrite never contradicts what the user wrote" a property of the storage rather
+  than an instruction in a prompt.
+
+No `translations` table: a card is generated in the user's language and stores what TMDb
+answered, so there is nothing left to translate at serve time. It would be worth one the
+day a household reads the same batch in two languages, which nothing asks for yet.
 
 **Transactions.** SQLite's Python driver does not open transactions for DDL or reads by
 itself, so the engine uses SQLAlchemy's documented SQLite recipe: the driver's

@@ -759,6 +759,23 @@ Adding one means writing the class, registering it in `STRATEGIES`
 (`server/src/tindarr/main/evaluation.py`) with what a live run of it would cost, and
 committing its baseline.
 
+**The strategy the harness grades is the strategy the server serves.** Since step 4.5
+there is exactly one place that builds the hybrid —
+`tindarr.swipe.engine.build_strategy` — and three callers: this harness, the live
+session (`tindarr eval session`) and the generation job. Before that there were two
+`HybridStrategy(...)` sites and the server was about to add a third, which is how a pool
+size or a wiring quietly stops being the one every committed baseline was measured at.
+The harness still passes its own `PoolSource`, because it wraps the retrieval layer in a
+watcher to score what was offered against what was chosen; everything else gets the
+default.
+
+The **context** is still built twice, and that is the seam to watch. `replay.py` builds
+one for a replay and `tindarr.swipe.engine` builds one for a live household — the second
+knows things the first cannot (the media server's library and engagement, the imports,
+the cards already shown, the skips still inside their cool-down). A new field on
+`StrategyContext` that changes what a strategy does has to be filled in both, or the
+gate will keep certifying numbers about a batch nobody is served.
+
 ## The candidate pool
 
 `tindarr.swipe.retrieval` builds it, per user, from two TMDb endpoints:
