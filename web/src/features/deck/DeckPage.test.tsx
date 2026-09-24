@@ -396,6 +396,52 @@ describe("the states the deck cannot leave on its own", () => {
     expect(deckCalls(api)).toHaveLength(1);
   });
 
+  it("asks for the next batch as the last card is judged", async () => {
+    const user = userEvent.setup();
+    let served = 0;
+    const api = deckApi({
+      status: { requests_enabled: false },
+      deck: () => {
+        served += 1;
+        return ok(
+          fixtures.deck({
+            cards: [fixtures.card({ id: `card-${served}`, tmdb_id: served, title: `Film ${served}` })],
+          }),
+        );
+      },
+    });
+    renderApp({ api, route: "/deck" });
+
+    await screen.findByRole("heading", { name: /Film 1/ });
+    expect(deckCalls(api)).toHaveLength(1);
+    await user.keyboard("n");
+
+    expect(await screen.findByRole("heading", { name: /Film 2/ })).toBeInTheDocument();
+    expect(deckCalls(api)).toHaveLength(2);
+  });
+
+  it("stops and hands the button over when the refill brings nothing new", async () => {
+    const user = userEvent.setup();
+    // The server keeps serving the same card: a verdict of ours never reached it.
+    const api = deckApi({
+      status: { requests_enabled: false },
+      deck: () => ok(fixtures.deck({ cards: [fixtures.card({ id: "stuck", tmdb_id: 42 })] })),
+    });
+    renderApp({ api, route: "/deck" });
+
+    await screen.findByRole("heading", { name: /Inception/ });
+    await user.keyboard("n");
+
+    expect(await screen.findByText("The deck is empty")).toBeInTheDocument();
+    const asked = deckCalls(api).length;
+    expect(asked).toBe(2);
+    // And it stays there: nothing asks again by itself, because every ask can cost
+    // a generation.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(deckCalls(api)).toHaveLength(asked);
+    expect(screen.getByRole("button", { name: "Ask for more" })).toBeInTheDocument();
+  });
+
   it("warns when most of what came back looks already seen", async () => {
     const api = deckApi({ deck: () => ok(fixtures.deck({ seen_ratio_warning: true })) });
     renderApp({ api, route: "/deck" });
