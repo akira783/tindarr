@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -153,6 +153,27 @@ describe("the five verdicts", () => {
 
     expect(votesSent(api)).toHaveLength(0);
     expect(screen.getByRole("heading", { name: /Inception/ })).toBeInTheDocument();
+  });
+
+  it("counts one verdict when two keystrokes land in the very same tick", async () => {
+    const api = deckApi({
+      status: { requests_enabled: false },
+      deck: () => ok(fixtures.deck({ cards: [fixtures.card({ id: "only", tmdb_id: 7 })] })),
+    });
+    renderApp({ api, route: "/deck" });
+
+    await screen.findByRole("heading", { name: /Inception/ });
+    // No render happens between the two: the handler's own state is a keystroke
+    // behind, which is exactly the case a state-only guard misses.
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "n" }));
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "n" }));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(votesSent(api)).toHaveLength(1);
+    });
   });
 
   it("never votes twice on the same card, however fast the key repeats", async () => {

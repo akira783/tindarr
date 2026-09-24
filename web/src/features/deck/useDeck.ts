@@ -109,6 +109,16 @@ export function useDeck(options: DeckOptions): DeckController {
 
   const queueRef = useRef<PendingVote[]>([]);
   const chainRef = useRef<Promise<void>>(Promise.resolve());
+  /**
+   * The same set as `voted`, kept in step but readable now.
+   *
+   * Two keystrokes inside one tick see the same render, so the state and the
+   * `remaining` list a handler closes over are both a keystroke behind: without
+   * this the second one would send a second verdict on the card the first has
+   * just judged. The server would take the later one, which is not wrong, but it
+   * is a vote the user did not cast.
+   */
+  const votedRef = useRef<Set<string>>(new Set());
 
   const mood = settings.mood.trim();
   const queryKey = useMemo(
@@ -215,7 +225,8 @@ export function useDeck(options: DeckOptions): DeckController {
   const vote = useCallback(
     (value: VoteValue) => {
       const card = remaining[0];
-      if (card === undefined || voted.has(card.id)) return;
+      if (card === undefined || votedRef.current.has(card.id)) return;
+      votedRef.current.add(card.id);
 
       const entry: PendingVote = {
         clientVoteId: newVoteId(),
@@ -234,10 +245,11 @@ export function useDeck(options: DeckOptions): DeckController {
       // leaving the user in front of an empty frame. Once, from a user action.
       if (remaining.length === 1) void refetch();
     },
-    [apply, autoRequest, flush, refetch, remaining, requestsEnabled, voted],
+    [apply, autoRequest, flush, refetch, remaining, requestsEnabled],
   );
 
   const unvote = useCallback((cardId: string) => {
+    votedRef.current.delete(cardId);
     setVoted((current) => {
       const next = new Set(current);
       next.delete(cardId);
