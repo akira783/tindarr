@@ -489,6 +489,17 @@ input[aria-invalid="true"] {
 
 /* --- tables, lists, tabs, dialogs ----------------------------------------------- */
 
+/* Holds a wide table on a narrow screen without the page itself scrolling. */
+.table-scroll {
+  /* Positioned so that what it holds is really held: an absolutely positioned
+     descendant — a .visually-hidden label in a cell — would otherwise take the
+     initial containing block for its own and push the whole page sideways. */
+  position: relative;
+  overflow-x: auto;
+  max-width: 100%;
+  border-radius: var(--radius-md);
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;

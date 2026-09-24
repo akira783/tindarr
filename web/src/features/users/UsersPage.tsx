@@ -72,6 +72,15 @@ export function UsersPage(): ReactNode {
       {users.data.length === 0 ? (
         <p>{t("users.empty")}</p>
       ) : (
+        // A wide table cannot fit a phone: it scrolls sideways inside its own box
+        // rather than making the whole page scroll.
+        //
+        // The rule below is about tab stops nobody can use. This one is the
+        // opposite: a scrollable region that a keyboard could not otherwise reach
+        // is exactly what WAI asks to be made focusable and labelled, so the
+        // arrow keys can scroll it. Not every browser does it on its own yet.
+        // eslint-disable-next-line jsx-a11y-x/no-noninteractive-tabindex
+        <div className="table-scroll" role="region" tabIndex={0} aria-label={t("users.title")}>
         <table className="table">
           <caption className="visually-hidden">{t("users.title")}</caption>
           <thead>
@@ -154,6 +163,7 @@ export function UsersPage(): ReactNode {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       <ConfirmDialog
