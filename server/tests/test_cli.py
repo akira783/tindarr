@@ -281,10 +281,10 @@ def test_importing_the_fork_writes_the_votes_and_is_idempotent(
     database = _fork_db(tmp_path / "requests.db")
     user_id = _seed_user(data_dir)
 
-    assert cli.main(["import", "suggestarr", "--from", str(database), "--user", user_id]) == 0
+    assert cli.main(["import", "suggestarr", "--from", str(database), f"--user={user_id}"]) == 0
     assert _vote_count(data_dir, user_id) == 4
 
-    assert cli.main(["import", "suggestarr", "--from", str(database), "--user", user_id]) == 0
+    assert cli.main(["import", "suggestarr", "--from", str(database), f"--user={user_id}"]) == 0
     assert _vote_count(data_dir, user_id) == 4
 
 
@@ -297,7 +297,9 @@ def test_a_dry_run_writes_nothing(
     user_id = _seed_user(data_dir)
 
     assert (
-        cli.main(["import", "suggestarr", "--from", str(database), "--user", user_id, "--dry-run"])
+        cli.main(
+            ["import", "suggestarr", "--from", str(database), f"--user={user_id}", "--dry-run"]
+        )
         == 0
     )
 
