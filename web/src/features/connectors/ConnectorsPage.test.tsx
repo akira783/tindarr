@@ -280,6 +280,36 @@ describe("the AI provider card", () => {
     expect(within(llm).getByLabelText("Model")).toHaveValue("model-b");
   });
 
+  it("takes a key for an OpenAI-compatible endpoint, which often needs one", async () => {
+    // The field used to be hidden for this provider, so a self-hosted endpoint behind a
+    // proxy — or any gateway that authenticates — could not be configured at all.
+    const user = userEvent.setup();
+    let saved: unknown = null;
+    const api = connectorsApi().on("PUT", "/api/v1/admin/connectors/{kind}", (call) => {
+      saved = call.body;
+      return ok(fixtures.connector("llm", { configured: true, status: { health: "ok" } }));
+    });
+
+    renderApp({ api, route: "/connectors" });
+
+    const llm = await card("AI provider");
+    await user.selectOptions(within(llm).getByLabelText("Provider"), "openai_compatible");
+    const key = within(llm).getByLabelText("API key (optional for this provider)");
+    await user.type(key, "gateway-token");
+    await user.type(within(llm).getByLabelText("Address"), "http://127.0.0.1:8000/v1");
+    await user.type(within(llm).getByLabelText("Model"), "a-local-model");
+    await user.click(within(llm).getByRole("button", { name: "Save" }));
+
+    await within(llm).findByText("Connector saved.");
+    expect(saved).toEqual({
+      connector: "llm",
+      provider: "openai_compatible",
+      api_key: "gateway-token",
+      base_url: "http://127.0.0.1:8000/v1",
+      model: "a-local-model",
+    });
+  });
+
   it("lets a model be typed when the provider lists none", async () => {
     const user = userEvent.setup();
     let saved: unknown = null;

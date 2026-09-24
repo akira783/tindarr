@@ -179,7 +179,8 @@
       "effortLow": "Low",
       "effortMedium": "Medium",
       "effortHigh": "High"
-    }
+    },
+    "apiKeyOptional": "API key (optional for this provider)"
   },
   "settings": {
     "title": "Server settings",

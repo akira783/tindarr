@@ -179,7 +179,8 @@
       "effortLow": "Faible",
       "effortMedium": "Moyen",
       "effortHigh": "Élevé"
-    }
+    },
+    "apiKeyOptional": "Clé d'API (facultative pour ce fournisseur)"
   },
   "settings": {
     "title": "Réglages du serveur",

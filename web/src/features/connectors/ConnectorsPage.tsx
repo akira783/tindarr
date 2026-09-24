@@ -289,20 +289,21 @@ function LlmCard({ connector }: { connector: Connector }): ReactNode {
           label: t(`connectors.llm.providers.${kind}`),
         }))}
       />
-      {needsKey && (
-        <TextField
-          label={t("connectors.apiKey")}
-          type="password"
-          autoComplete="off"
-          value={apiKey}
-          disabled={locked.has("api_key")}
-          locked={locked.has("api_key")}
-          lockedNote={t("connectors.locked")}
-          onChange={(event) => {
-            setApiKey(event.target.value);
-          }}
-        />
-      )}
+      {/* Every provider takes a key: a generic OpenAI-compatible endpoint or an Ollama
+          behind a proxy often needs one, and hiding the field left those unconfigurable.
+          Only the named providers make it mandatory (`needsKey`). */}
+      <TextField
+        label={needsKey ? t("connectors.apiKey") : t("connectors.apiKeyOptional")}
+        type="password"
+        autoComplete="off"
+        value={apiKey}
+        disabled={locked.has("api_key")}
+        locked={locked.has("api_key")}
+        lockedNote={t("connectors.locked")}
+        onChange={(event) => {
+          setApiKey(event.target.value);
+        }}
+      />
       {NEEDS_BASE_URL.has(provider) && (
         <TextField
           label={t("connectors.llm.baseUrl")}
