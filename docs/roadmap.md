@@ -327,11 +327,11 @@ shortage ADR 0013's measurements ran into.
 - A real batch is generated end to end through the API with each AI provider family, and
   every card in it comes from the retrieved pool. **Done for the OpenAI-compatible
   family** (2026-09-24), against real TMDb and the author's local ChatMock: two batches
-  of ten in French, 17 s and 29 s to the first card, 6 094 input and 2 232 output tokens
+  of ten in French, 14 s and 26 s to the first card, 6 079 input and 1 927 output tokens
   over four generations (two batches and two profile rewrites), **no title repeated
-  between the two batches**, providers and trailers on every card, and a taste profile
-  written from the ten answers. The other four families need the owner's paid keys and
-  are the same check as step 3(b).
+  between the two batches**, providers and trailers on every card, the already-seen
+  nudge raised after ten answers, and a taste profile written from them. The other four
+  families need the owner's paid keys and are the same check as step 3(b).
 - On the fixture votes, the share of already-seen cards is materially below the 47 %
   measured on the fork.
 - ✅ Importing a Netflix history file produces the expected split of finished,
