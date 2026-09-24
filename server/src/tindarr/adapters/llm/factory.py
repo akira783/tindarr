@@ -23,14 +23,16 @@ from tindarr.adapters.llm.openai_provider import (
     OpenAiProvider,
 )
 from tindarr.core.errors import ProblemError
-from tindarr.ports.llm import LlmConnection, LlmProvider, LlmProviderFactory
+from tindarr.ports.llm import PROVIDERS_NEEDING_KEY, LlmConnection, LlmProvider, LlmProviderFactory
 
 #: Kinds that cannot work without an address of their own.
 NEEDS_BASE_URL: Final = frozenset({"openai_compatible", "ollama"})
 #: Kinds that cannot work without a key. Ollama has no accounts.
-NEEDS_API_KEY: Final = frozenset({"openai", "anthropic", "gemini", "mistral"})
-#: The OpenAI SDK refuses to be built without a key; a local gateway often needs none.
-_NO_KEY: Final = "not-needed"
+#: One list, shared with the connector service (see the port).
+NEEDS_API_KEY: Final = PROVIDERS_NEEDING_KEY
+#: The OpenAI SDK refuses to be built without a key; a local gateway often needs none,
+#: so this placeholder is what such a gateway actually receives.
+NO_KEY: Final = "not-needed"
 
 
 def _missing(field: str) -> ProblemError:
@@ -77,7 +79,7 @@ def llm_provider_factory(
                 transport=transport,
             )
         return OpenAiProvider(
-            connection.api_key or _NO_KEY,
+            connection.api_key or NO_KEY,
             connection.model,
             kind=connection.kind,
             base_url=_openai_base_url(connection),

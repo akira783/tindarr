@@ -15,7 +15,7 @@ decide between a real JSON schema, plain JSON mode and "ask nicely, then repair"
 """
 
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Final, Literal, Protocol
 
 from pydantic import BaseModel
 
@@ -25,6 +25,13 @@ from tindarr.ports.connectors import ConnectionCheck
 type LlmProviderKind = Literal[
     "openai", "anthropic", "gemini", "mistral", "openai_compatible", "ollama"
 ]
+#: The providers that are an account somewhere, and therefore cannot work without a key.
+#: The others — a generic OpenAI-compatible endpoint, an Ollama — may take one (a gateway
+#: in front of them often authenticates) but must never be *required* to. Both the
+#: connector service and the adapter factory read this one list; when they each kept
+#: their own, "openai_compatible" fell between them and could not be saved at all.
+PROVIDERS_NEEDING_KEY: Final = frozenset({"openai", "anthropic", "gemini", "mistral"})
+
 #: How tightly the provider can be held to a JSON schema, strongest first.
 type StructuredMode = Literal["json_schema", "json_mode", "text"]
 #: The contract's ``reasoning_effort``.

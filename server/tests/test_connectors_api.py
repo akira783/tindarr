@@ -33,6 +33,7 @@ from tests.support.metadata import OMDB_API_KEY, TMDB_API_KEY, omdb_title
 from tests.support.outside import COMPATIBLE_HOST, FakeOutside
 from tests.support.requests_backend import SEERR_API_KEY, SEERR_URL, seerr_user
 from tests.test_contract import assert_matches_contract
+from tindarr.adapters.llm.factory import NO_KEY
 
 CONNECTORS = f"{API}/admin/connectors"
 MODELS = f"{API}/admin/llm/models"
@@ -290,6 +291,35 @@ def test_changing_the_ai_provider_needs_the_key_again(app: FastAPI) -> None:
         )
     assert response.status_code == 409
     assert response.json()["code"] == "secret_required"
+
+
+def test_a_compatible_endpoint_saves_with_no_key_at_all(app: FastAPI, outside: FakeOutside) -> None:
+    """A local gateway has no account, so the console must not have to invent a key.
+
+    It used to: the save rule listed only Ollama as keyless while the adapter asked a key
+    of the four named providers, so "openai_compatible" fell between the two lists and
+    answered `secret_required` for a key it would never have used.
+    """
+    # A gateway that authenticates nothing still sees the SDK's placeholder, because the
+    # OpenAI client refuses to be built without one.
+    outside.openai.api_key = NO_KEY
+
+    with console_client(app) as client:
+        csrf = set_up_server(client, app)
+        response = save(
+            client,
+            csrf,
+            "llm",
+            {
+                "connector": "llm",
+                "provider": "openai_compatible",
+                "base_url": COMPATIBLE_URL,
+                "model": "model-a",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["secret"]["set"] is False
 
 
 def test_changing_the_ai_address_needs_the_key_again(app: FastAPI) -> None:

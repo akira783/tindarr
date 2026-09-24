@@ -30,6 +30,7 @@ from tindarr.ports import problems
 from tindarr.ports.connectors import ConnectionCheck
 from tindarr.ports.factories import ConnectorFactories
 from tindarr.ports.llm import (
+    PROVIDERS_NEEDING_KEY,
     LlmConnection,
     LlmProvider,
     LlmProviderKind,
@@ -75,7 +76,8 @@ SETTING_FOR_FIELD: Final[Mapping[OptionalConnectorKind, Mapping[str, str]]] = {
     },
 }
 #: The AI providers that need no key of their own.
-_KEYLESS_PROVIDERS: Final = frozenset({"ollama"})
+#: Read from the port, so the save rule and the adapter can never disagree again.
+_KEYLESS_PROVIDERS: Final = frozenset(get_args(LlmProviderKind.__value__)) - PROVIDERS_NEEDING_KEY
 LLM_PROVIDER_KINDS: Final[tuple[LlmProviderKind, ...]] = get_args(LlmProviderKind.__value__)
 REASONING_EFFORTS: Final[tuple[ReasoningEffort, ...]] = get_args(ReasoningEffort.__value__)
 
@@ -480,8 +482,22 @@ class ConnectorService:
         same: bool,
     ) -> str:
         if provider in _KEYLESS_PROVIDERS:
-            # Ollama has no accounts; asking for a key would be asking for nothing.
-            return request.api_key or ""
+            # Ollama has no accounts, and a local gateway usually has none either, so
+            # this connector saves with no key at all. A key that *was* given still
+            # belongs to the address it was given for: moving the address asks for it
+            # again rather than sending it somewhere new. A key an environment variable
+            # pins obeys the same rule, and says which variable to change instead.
+            locked = self._locked_secret(request)
+            if locked is not None:
+                if stored is not None and not same:
+                    raise SecretPinnedToItsAddressError(SETTING_FOR_FIELD[request.kind]["api_key"])
+                return locked
+            if request.api_key:
+                return request.api_key
+            held = stored.api_key if stored else None
+            if held and not same:
+                raise problems.secret_required()
+            return held if held and same else ""
         return self._secret_for(request, stored.api_key if stored else None, same_address=same)
 
     # --- building the adapter a request describes ------------------------------------
