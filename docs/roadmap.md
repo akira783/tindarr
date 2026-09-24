@@ -403,7 +403,21 @@ request or response changed for this lot.
 - Signed multi-arch image on GHCR (server + built console), SBOM, documented
   `docker-compose.yml` and reverse-proxy notes (HTTPS for the console,
   `TINDARR_TRUSTED_PROXIES`, passing `Host`, `TINDARR_PUBLIC_URL`).
-- `tindarr import suggestarr`.
+- `tindarr import suggestarr` ✅ done, ahead of the rest of the step. It reads the fork's
+  `swipe_votes` table **read-only** — point it at a copy if the instance is running — and
+  writes the rows as this user's votes, so a migrated household does not spend its first
+  three batches on calibration. It is the one import that writes *votes*: lot 4.4's file
+  imports write history, and the distinction ADR 0013 draws between the two is kept.
+  Fork users are matched to Tindarr accounts on the **media server account id** and on
+  nothing else (never the username); when the fork has linked none, or when more than one
+  matches, it refuses and `--user <user-id>` names the account. Every row carries a
+  deterministic receipt through `vote_receipts`, so running it twice imports nothing
+  twice and an opinion changed in Tindarr since the first run is never reverted to the
+  fork's older answer. `--dry-run` says what would be written and writes nothing.
+
+  ```bash
+  tindarr import suggestarr --from /path/to/copy-of-requests.db --user <tindarr-user-id>
+  ```
 - Deployment on the author's homelab next to the fork, which is left untouched.
   Setup and configuration are done in the web console.
 

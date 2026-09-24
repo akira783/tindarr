@@ -103,3 +103,83 @@ in the deck, marked as such: it is an intention, not a memory.
   already covers it.
 - **More history sources (Trakt, per-service GDPR exports).** Measured above at 6 % of the
   problem, for a third-party dependency each. Kept only as taste signals.
+
+## Amendment, 2026-09-24: fame has two currencies, and recency says which to read
+
+Nothing above is withdrawn. This records a defect found in the *implementation* of the
+fame budget, and the rule that replaced it.
+
+**What happened.** The author swiped ten post-calibration cards in the console. Six of
+the ten were titles they had already seen — 60 %, against the 47 % of the fork this ADR
+was written against — and the offenders were all very visible **recent** releases.
+
+**What the diagnostic said.** The budget ranked fame by TMDb **vote count**, and a vote
+count measures how long a title has been available to rate at least as much as how many
+people have seen it. Measured on the committed `akira-99` cassette (943 titles carrying
+a release year), before changing anything:
+
+| Age | p75 vote count | median popularity |
+|---|---|---|
+| this year | 2 155 | 83.0 |
+| 1 year | 1 811 | 22.7 |
+| 2–3 years | 3 060 | 14.2 |
+| 4–10 years | 7 144 | 15.3 |
+| 11–20 years | 8 677 | 15.4 |
+| over 20 years | 4 645 | 12.2 |
+
+A title released in the last year carries roughly a quarter of the ratings of one that
+is four to ten years old, and five times the popularity. So **99 % of the titles
+released within a year sit under a pool-wide fame threshold, against 73 % of the older
+ones**: the budget was very nearly blind to a release season. The named cards confirm
+it — *Spider-Man: Brand New Day* (2 828 ratings), *Coyote vs. Acme* (489), *L'Odyssée*
+(3 864) and *Avatar: Fire and Ash* (4 359) all passed for free, while *Mad Max: Fury
+Road* (24 643) and the 2009 *Avatar* (34 712) were charged correctly. The escapes were
+the recent ones, measured rather than assumed.
+
+**The rule.** `CandidatePool.is_famous` now charges a candidate when **either** thousands
+have rated it — the most-rated quarter of the pool, unchanged — **or** it was released
+within `RECENT_YEARS` of the newest title in the pool *and* sits in its most-popular
+quarter. Popularity is a rolling measure of this week's activity: useless for judging an
+old film, and the only fame signal that exists for one released three months ago.
+
+Three choices worth recording:
+
+- **Recency alone is not fame.** Calling every title of the last two years famous was
+  rejected: the same cassette holds 78 titles released within a year and most are
+  listings nobody has heard of, so a `bold` budget of one card in ten would have put
+  last week's releases out of reach — which is this ADR's headline gain over the fork.
+  Recency does not make a title famous; it says which currency to read.
+- **Two years, not one.** The deficit is still there in the second and third years
+  (p75 of 1 811 and 3 060 against 7 144), and the window is counted in whole calendar
+  years, so "one year" really means "between one and two". Widening it to two charges
+  three more titles out of 943.
+- **Measured from the pool, never from a clock.** A recorded fixture whose answers change
+  meaning every 1 January is a fixture nobody can reproduce, and retrieval promises that
+  two calls with the same context build the same pool.
+
+The prompt changed with it. It used to state a vote-count threshold for the model to
+apply, which was the same defect once removed — a recent blockbuster is exactly the title
+that threshold waves through. Each candidate line now carries the verdict of the same
+predicate the answer is held to, so the sentence and the filter cannot drift apart.
+
+**What it moved**, on `akira-99`, five fresh live recordings against the code before it
+(whose own three recordings `docs/evaluation.md` reports at 0.56–0.67):
+
+| | before | after (5 recordings) |
+|---|---|---|
+| `seen_per_batch` | 0.67 (0.56–0.67) | **0.33–0.44**, median 0.33 |
+| `disliked_per_batch` | 0.11 | 0.11 every time |
+| `liked_recall` | 6.7 % | 3.3–6.7 %, median 6.7 % |
+| `vote_count_median` (pool 2 388) | 2 030 | 1 660–1 855, median 1 850 |
+| `popularity_median` | 19.2 | 13.0–14.3 |
+
+The fame diagnostic moved in the expected direction: the cards proposed went from 15 %
+below their own pool's vote-count median to about 22 % below it, and that number rests
+on all ninety cards rather than on the handful the fixture recognises.
+
+**Two honest caveats.** `liked_recall` held at its median but dipped to 3.3 % in two runs
+of five, so the claim is "did not fall" on the median and not on every recording. And
+`scored` fell from 9 to 5–7: the deck now puts fewer titles the fixture can recognise in
+front of it, so part of the drop in `seen_per_batch` is a looser lower bound rather than
+avoided faults. `docs/evaluation.md` names that escape, and it is why the pool rows —
+which need no vote at all — carry this conclusion rather than the fault counts alone.

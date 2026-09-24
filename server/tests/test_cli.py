@@ -215,3 +215,131 @@ def test_resetting_the_media_server_starts_setup_again(
             await runtime.engine.dispose()
 
     asyncio.run(check())
+
+
+# --- tindarr import suggestarr ----------------------------------------------------------
+
+
+def _fork_db(path: Path) -> Path:
+    from tests.test_swipe_imports_suggestarr import fork_database  # noqa: PLC0415
+
+    return fork_database(path)
+
+
+def _seed_user(data_dir: Path, media_id: str = "media-1") -> str:
+    from datetime import UTC, datetime  # noqa: PLC0415
+
+    from tindarr.core.config import ServerConfig  # noqa: PLC0415
+    from tindarr.main.app import start  # noqa: PLC0415
+    from tindarr.storage.db import write_transaction  # noqa: PLC0415
+    from tindarr.storage.users import insert as insert_user  # noqa: PLC0415
+    from tindarr.storage.users import new_user  # noqa: PLC0415
+
+    async def prepare() -> str:
+        runtime = await start(ServerConfig(data_dir=data_dir))
+        try:
+            async with write_transaction(runtime.engine) as connection:
+                user = await insert_user(
+                    connection,
+                    new_user(
+                        media_id,
+                        "alex",
+                        datetime(2026, 9, 24, tzinfo=UTC),
+                        admin=True,
+                        remote=True,
+                    ),
+                )
+            return user.id
+        finally:
+            await runtime.engine.dispose()
+
+    return asyncio.run(prepare())
+
+
+def _vote_count(data_dir: Path, user_id: str) -> int:
+    from tindarr.core.config import ServerConfig  # noqa: PLC0415
+    from tindarr.main.app import start  # noqa: PLC0415
+    from tindarr.storage import votes as vote_repository  # noqa: PLC0415
+    from tindarr.storage.db import write_transaction  # noqa: PLC0415
+
+    async def count() -> int:
+        runtime = await start(ServerConfig(data_dir=data_dir))
+        try:
+            async with write_transaction(runtime.engine) as connection:
+                return await vote_repository.count(connection, user_id)
+        finally:
+            await runtime.engine.dispose()
+
+    return asyncio.run(count())
+
+
+def test_importing_the_fork_writes_the_votes_and_is_idempotent(
+    data_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TINDARR_DATA_DIR", str(data_dir))
+    monkeypatch.setattr(cli, "configure_logging", _ignore_level)
+    database = _fork_db(tmp_path / "requests.db")
+    user_id = _seed_user(data_dir)
+
+    assert cli.main(["import", "suggestarr", "--from", str(database), f"--user={user_id}"]) == 0
+    assert _vote_count(data_dir, user_id) == 4
+
+    assert cli.main(["import", "suggestarr", "--from", str(database), f"--user={user_id}"]) == 0
+    assert _vote_count(data_dir, user_id) == 4
+
+
+def test_a_dry_run_writes_nothing(
+    data_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TINDARR_DATA_DIR", str(data_dir))
+    monkeypatch.setattr(cli, "configure_logging", _ignore_level)
+    database = _fork_db(tmp_path / "requests.db")
+    user_id = _seed_user(data_dir)
+
+    assert (
+        cli.main(
+            ["import", "suggestarr", "--from", str(database), f"--user={user_id}", "--dry-run"]
+        )
+        == 0
+    )
+
+    assert _vote_count(data_dir, user_id) == 0
+
+
+def test_importing_refuses_a_database_that_is_not_the_fork(
+    data_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import sqlite3  # noqa: PLC0415
+
+    monkeypatch.setenv("TINDARR_DATA_DIR", str(data_dir))
+    monkeypatch.setattr(cli, "configure_logging", _ignore_level)
+    other = tmp_path / "other.db"
+    sqlite3.connect(other).close()
+
+    with caplog.at_level(logging.ERROR):
+        assert cli.main(["import", "suggestarr", "--from", str(other)]) == 2
+
+    assert "swipe_votes" in caplog.text
+    # It failed before touching the instance, so no database was created for it.
+    assert not (data_dir / "tindarr.db").exists()
+
+
+def test_importing_refuses_when_no_account_can_be_matched(
+    data_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("TINDARR_DATA_DIR", str(data_dir))
+    monkeypatch.setattr(cli, "configure_logging", _ignore_level)
+    database = _fork_db(tmp_path / "requests.db")
+    user_id = _seed_user(data_dir)
+
+    with caplog.at_level(logging.ERROR):
+        assert cli.main(["import", "suggestarr", "--from", str(database)]) == 2
+
+    assert "--user" in caplog.text
+    assert _vote_count(data_dir, user_id) == 0

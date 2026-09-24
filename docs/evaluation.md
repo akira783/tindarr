@@ -590,14 +590,14 @@ does not compare those.
 
 | | `popular` | `random` | **`hybrid`** |
 |---|---|---|---|
-| `liked_recall` | 4.3 % | **17.4 %** | 13.0 % |
-| `liked_recall_top` | 0.0 % | 0.0 % | 0.0 % |
+| `liked_recall` | 4.3 % | **17.4 %** | **17.4 %** |
+| `liked_recall_top` | 0.0 % | 0.0 % | **4.3 %** |
 | `seen_per_batch` | 2.00 | **1.00** | 1.22 |
 | `disliked_per_batch` | 0.22 | **0.11** | **0.11** |
-| `already_seen_rate` | 85.7 % | **64.3 %** | 73.3 % |
-| `like_rate` | 4.8 % | **28.6 %** | 20.0 % |
-| `skip_rate` | 4.5 % | 6.7 % | **0.0 %** |
-| `genre_diversity` | 0.89 | 0.88 | **0.97** |
+| `already_seen_rate` | 85.7 % | **64.3 %** | 68.8 % |
+| `like_rate` | 4.8 % | **28.6 %** | 25.0 % |
+| `skip_rate` | 4.5 % | 6.7 % | **5.9 %** |
+| `genre_diversity` | 0.89 | 0.88 | **1.06** |
 | `franchise_repeat_rate` | 33.3 % | 44.4 % | **0.0 %** |
 | `fill_rate` / `usable_per_batch` | 100 % / 10.0 | 100 % / 10.0 | 98.9 % / 9.89 |
 | `popularity_median` (pool) | 79.4 (52.4) | 58.7 (56.0) | 61.5 (55.1) |
@@ -611,56 +611,104 @@ plus the `pool` rows, which need no vote at all):
 
 | | `popular` | `random` | **`hybrid`** |
 |---|---|---|---|
-| `liked_recall` | 0.0 % (0/30) | **6.7 %** (2/30) | **6.7 %** (2/30) |
+| `liked_recall` | 0.0 % (0/30) | **6.7 %** (2/30) | 3.3 % (1/30) |
 | `liked_recall_top` | 0.0 % | 0.0 % | 0.0 % |
 | `fill_rate` | 100 % | 100 % | 100 % |
 | `tmdb_calls_per_batch` | **17.2** | **17.2** | **17.2** |
-| `popularity_median` (pool) | 183.5 (51.1) | 48.6 (51.1) | **19.3** (51.1) |
-| `vote_count_median` (pool) | 2 153 (2 799) | 1 911 (2 388) | 2 030 (2 388) |
+| `popularity_median` (pool) | 183.5 (51.1) | 48.6 (51.1) | **16.2** (51.1) |
+| `vote_count_median` (pool) | 2 153 (2 799) | 1 911 (2 388) | 1 745 (2 250) |
 | `above_floor` | 100 % | 100 % | 100 % |
-| *not compared* `seen_per_batch` | **0.22** | 0.33 | 0.67 |
+| *not compared* `seen_per_batch` | **0.22** | 0.33 | 0.33 |
 | *not compared* `disliked_per_batch` | **0.00** | **0.00** | 0.11 |
-| *not compared* `already_seen_rate` | 100 % | **60.0 %** | 66.7 % |
-| *not compared* `new_like_rate` | n/a | **100 %** | 66.7 % |
-| *not compared* `coverage` | 2.2 % | 5.6 % | 10.0 % |
+| *not compared* `already_seen_rate` | 100 % | **60.0 %** | 60.0 % |
+| *not compared* `new_like_rate` | n/a | **100 %** | 50.0 % |
+| *not compared* `coverage` | 2.2 % | 5.6 % | 5.6 % |
 
-**The generated set.** The hybrid clears `popular` whole and loses to `random` on recall
-(13.0 % against 17.4 %, one liked title), on the already-seen count and on the like rate.
-It costs one model call and 305 tokens a card that neither floor costs, and the same TMDb
-calls, because all three share the pool. Neither floor is dominated, which is why the
-gate asks for *one* whole floor. Its `fill_rate` is 98.9 % rather than 100 %: the last
-batch of the third user has ten candidates left in the whole invented catalogue and two
-of them are the same series, so it ships nine cards.
+**The generated set.** The hybrid clears `popular` whole and now *matches* `random` on
+recall (17.4 % each, four liked titles; it was 13.0 % before the budget learned about
+release seasons) while being the only one of the three to find a liked title in the first
+three cards of a batch. It costs one model call and 318 tokens a card that neither floor
+costs, and the same TMDb calls, because all three share the pool. Neither floor is
+dominated, which is why the gate asks for *one* whole floor. The invented catalogue has
+invented release years, so the recency half of the budget barely fires here — which is
+the right reading of why this set moved on recall and hardly at all on the fame rows.
 
-**The author's real votes still settle nothing, and that has not changed.** The hybrid
-now matches `random` on recall (two liked titles each, `popular` finds none) and is still
-worse than both floors on the avoidance counts: 0.67 already-seen cards a batch against
-0.22 and 0.33. Three of those six cards are the **calibration** batch — the first batch
-of the run, which every strategy draws from the `familiar` band on purpose, because a
-calibration batch is trying to find out what somebody has already watched. The harness
-counts them as faults anyway, and so they are, for a household; they are not evidence
-about the ranking.
+**The author's real votes still settle nothing, and that has not changed.** On the
+avoidance counts the hybrid now sits level with `popular` and ahead of `random`: 0.33
+already-seen cards a batch against 0.22 and 0.33, where before the recency fix it served
+0.67. Part of that is the **calibration** batch — the first batch of the run, which every
+strategy draws from the `familiar` band on purpose, because a calibration batch is trying
+to find out what somebody has already watched. The harness counts those as faults anyway,
+and so they are, for a household; they are not evidence about the ranking.
 
-Those avoidance rows are printed and not compared, because with two, five and nine
-confirmable cards the three runs did not measure the same thing: the hybrid trips over
-more faults partly because it puts four times as many recognisable titles in front of
-the fixture. That is an explanation, not a defence.
+Those avoidance rows are printed and not compared, because with two, five and five
+confirmable cards the three runs did not measure the same thing. And the honest reading of
+this recording is that its `scored` fell from 9 to 5: the hybrid put *fewer* recognisable
+titles in front of the fixture, which is exactly the escape the basis column warns about —
+the fault counts get easier as coverage falls. `liked_recall` is the row that cannot be
+escaped that way, and on this recording it fell from 6.7 % to 3.3 %.
 
-**What the fame budget moved, and what it did not.** Against the same code without it,
-over three fresh recordings each: `seen_per_batch` 0.78 → 0.56–0.67, `liked_recall`
-6.7/6.7/3.3 % → 6.7 % three times, and the median vote count of the cards proposed from
-30 % *above* the pool's to 15 % *below* it. `disliked_per_batch` did not move: it is one
-card in ninety on this vote set, and both floors sit at 0.00. The profile rows are the
-reliable half of that comparison — they rest on all ninety cards — and the fault counts
-rest on the handful the fixture recognises.
+**What the recency fix moved, and how noisy the measurement is.** Four fresh recordings of
+the same configuration on `akira-99`, TMDb held constant on the cassette so only the model
+varies:
+
+| recording | `seen_per_batch` | `disliked_per_batch` | `liked_recall` | `vote_count_median` (pool) |
+|---|---|---|---|---|
+| before, committed | 0.67 | 0.11 | 6.7 % | 2 030 (2 388) |
+| 1 | 0.22 | 0.11 | 3.3 % | 1 745 (2 388) |
+| 2 | 0.22 | 0.11 | 6.7 % | 1 685 (2 388) |
+| 3 | 0.56 | 0.11 | 6.7 % | 1 852 (2 388) |
+| 4 — **the committed one** | 0.33 | 0.11 | 3.3 % | 1 745 (2 250) |
+
+So: `seen_per_batch` 0.67 → **0.22–0.56**, better in all four; `disliked_per_batch` flat at
+0.11, which is one card in ninety on this vote set and cannot move; `liked_recall` 6.7 % →
+**3.3–6.7 %**, holding in two recordings and dipping in two. The fame diagnostic moved in
+the direction the fix predicts, and it is the reliable half because it rests on all ninety
+cards rather than on the handful the fixture recognises: the median vote count of the
+proposed cards went from 15 % below its pool's to **22–29 % below**, and
+`popularity_median` from 19.2 to 12.8–16.2.
+
+**The committed recording is the fourth, not the best of the four.** Re-rolling until the
+recall came back would be choosing the number rather than measuring it, and the spread
+above is the reason a single run of this strategy is not evidence: the model's variance
+between two recordings of one configuration is larger than the effect being measured, as
+the seeded-import comparison below found independently.
+
+**A second, independent set of five.** The four above were recorded in one sitting. Five
+more were recorded separately, from the same committed TMDb cassette but topped up per
+run, so the two sets share no model answers:
+
+| | `seen_per_batch` | `liked_recall` | `vote_count_median` (pool) | `popularity_median` |
+|---|---|---|---|---|
+| 1 | 0.33 | 6.7 % | 1 660 (2 388) | 13.0 |
+| 2 | 0.33 | 6.7 % | 1 850 (2 388) | 14.0 |
+| 3 | 0.44 | 6.7 % | 1 855 (2 388) | 14.3 |
+| 4 | 0.33 | 3.3 % | 1 850 (2 388) | 13.0 |
+| 5 | 0.44 | 3.3 % | 1 852 (2 247) | 13.7 |
+
+**What nine recordings support, and what they do not.** Across both sets
+`seen_per_batch` ran 0.22–0.56 against 0.67 committed before, better in all nine; but the
+code *before* this fix had its own spread of 0.56–0.67 over three recordings, so the two
+ranges touch at 0.56 and **the fault count alone does not separate the fix from the
+model's noise**. Two recordings of one configuration gave 0.56 and 0.89 elsewhere in this
+document; that is the bar any claim here has to clear, and a count resting on five to nine
+confirmable cards does not clear it.
+
+What does carry the conclusion is the row that rests on all ninety: in every one of the
+nine, the median vote count of the proposed cards sat **18–30 % below its own pool's**,
+against 15 % below before the fix, and `popularity_median` fell from 19.2 to 12.8–16.2 in
+all nine. That is the fame diagnostic moving in the predicted direction with no recording
+against it, and it is the honest version of the claim — the deck is demonstrably drawing
+from further down its own pool, and whether that converts into fewer already-seen cards
+for a *person* is what `tindarr eval session` exists to answer.
 
 **The already-seen number ADR 0013 is about is still not answered.** The fork served 4.7
-already-seen cards a batch; the hybrid serves 1.22 on the generated set and 0.67 on the
-real one, of which 0.33 is the calibration batch — and on that real set a strategy that
-knows nothing about taste served 0.22. The fork's figure was measured against a person
-answering; these are measured against a fixture that can recognise 99 titles. What would
-settle it is a deck in front of a person — `tindarr eval session` is that, and it is the
-only thing here that can — or a second, larger vote set.
+already-seen cards a batch; the hybrid serves 1.22 on the generated set and 0.22–0.56 on
+the real one — and on that real set a strategy that knows nothing about taste served 0.22.
+The fork's figure was measured against a person answering; these are measured against a
+fixture that can recognise 99 titles, and one that recognises fewer of them after this
+change. What would settle it is a deck in front of a person — `tindarr eval session` is
+that, and it is the only thing here that can — or a second, larger vote set.
 
 ### What seeding from a real import does (lot 4c)
 
@@ -832,23 +880,41 @@ vote counts:
   legitimately be shown; taking it out of the pool takes it out of *every* batch of the
   run, which is what the fame cut did and what cost it recall. The budget takes it out
   of *this* batch.
-- **The prompt states it, and the answer is held to it.** The candidate line always
-  carried a vote count and nothing ever said what it meant — the model duly ranked by
-  it. The prompt now names the pool's own threshold and the budget; `_within_budget`
-  then drops the picks past it and fills from the pool, because the franchise rule
-  already established that asking is not a mechanism. A model that spends its batch on
+- **The prompt marks each candidate, and the answer is held to the same predicate.** The
+  candidate line always carried a vote count and nothing ever said what it meant — the
+  model duly ranked by it. Stating a *threshold* in the prompt was the same defect once
+  removed, since it asked the model to apply a rule; each candidate line now carries the
+  verdict of `CandidatePool.is_famous`, the very predicate `_within_budget` then enforces,
+  so the sentence and the filter cannot drift apart. A model that spends its batch on
   blockbusters loses its own choices, not extra cards.
+- **Fame has two currencies, and the title's age says which one to read.** A vote count
+  measures how long a title has been available to rate as much as how many people saw it,
+  so a release everybody is watching right now slips under a vote-count cap while a
+  decades-old cult film is charged for it. Measured on this cassette before anything was
+  changed: the upper quartile of vote counts is 2 155 for titles released this year and
+  1 811 for last year's, against 7 144 at four-to-ten years old — and 99 % of the titles
+  released within a year sit under a pool-wide fame threshold, against 73 % of the older
+  ones. So a title is also charged when it is within `RECENT_YEARS` of the newest release
+  in the pool **and** in that pool's most-popular quarter. Recency alone is deliberately
+  not the rule: most of a season's releases are listings nobody has heard of, and charging
+  them would put last week's films out of reach of a bold budget, which is ADR 0013's
+  headline gain over the fork. "Recent" is measured from the pool and never from a clock,
+  so a recorded fixture does not change meaning every 1 January.
 - **A calibration batch spends nothing.** It reads the `familiar` band, whose budget is
   "no budget", because a calibration batch is trying to find out what somebody has
   already watched and famous is the point.
 
 Measured against the previous prompt over three fresh recordings each, on `akira-99`
-(the fix, then the same code without it):
+(the vote-count budget, then the same code without it):
 
 | | `seen_per_batch` | `liked_recall` | median votes / pool |
 |---|---|---|---|
 | with the budget | 0.56, 0.67, 0.67 | 6.7 %, 6.7 %, 6.7 % | ~1 960–2 170 / ~2 400 |
 | without it | 0.78, 0.78, 0.78 | 6.7 %, 6.7 %, 3.3 % | ~2 840–2 930 / ~2 200 |
+
+Adding the recency currency on top of that moved `seen_per_batch` again, to 0.22–0.56 over
+four fresh recordings, at a `liked_recall` of 3.3–6.7 % against 6.7 %. Those four runs, and
+why the committed one is not the best of them, are in *What the recency fix moved* above.
 
 A first attempt spent the budget against the pool's **median** instead of its upper
 quartile, and it is worth recording because it failed in the informative direction:

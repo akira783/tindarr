@@ -4,8 +4,21 @@ import secrets
 from typing import Final
 
 _ID_BYTES: Final = 16
+#: base64url uses ``-`` and ``_``; a value starting with ``-`` is read as an option by
+#: every command line there is, so ``tindarr import suggestarr --user -AbC…`` failed for
+#: one identifier in sixty-four. The id is opaque, so the cheapest fix is to never mint
+#: one that starts that way; the alphabet keeps all its characters everywhere else.
+_LEADING_TO_AVOID: Final = "-_"
 
 
 def new_id() -> str:
-    """Return a fresh 128-bit identifier, base64url without padding."""
-    return secrets.token_urlsafe(_ID_BYTES)
+    """Return a fresh 128-bit identifier, base64url without padding.
+
+    It never starts with ``-`` or ``_``, so it can be typed as a command-line value
+    without quoting. Rejection costs one draw in thirty-two on average and keeps every
+    identifier exactly as long and exactly as random as the others.
+    """
+    while True:
+        candidate = secrets.token_urlsafe(_ID_BYTES)
+        if candidate[0] not in _LEADING_TO_AVOID:
+            return candidate

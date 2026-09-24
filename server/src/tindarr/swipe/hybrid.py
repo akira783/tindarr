@@ -251,7 +251,7 @@ def _one_per_series(
 
 
 class _FameBudget:
-    """How many cards of one batch may come from the most-rated quarter of the pool.
+    """How many cards of one batch may be titles most people have already seen.
 
     The measurement that asked for this is in ``docs/evaluation.md``: given the pool,
     the model's picks sat above their own pool's vote-count median in eight batches of
@@ -260,21 +260,28 @@ class _FameBudget:
     probably already seen it" — and ADR 0013's whole complaint is that 47 % of the
     fork's cards were titles the user already knew.
 
+    **What counts as famous is ``CandidatePool.is_famous`` and is not decided here.**
+    Since the 2026-09-24 amendment to ADR 0013 that is two currencies rather than one —
+    a vote count for a title that has had time to earn one, and this week's popularity
+    for one that has not — because the author's own session found the escapes were all
+    recent releases. The predicate lives on the pool so that the sentence in the prompt
+    and the filter on the answer read the same thing; see ``_candidate_line``.
+
     It is spent here, on the batch, rather than filtered out of the pool. A candidate
     the novelty band admits is one this user could legitimately be shown; removing it
     from the pool would remove it from *every* batch of the run, and the earlier attempt
     at that — a fame cut on the popularity axis — cost recall and moved nothing.
     """
 
-    __slots__ = ("_left", "_threshold")
+    __slots__ = ("_left", "_pool")
 
     def __init__(self, pool: CandidatePool, size: int) -> None:
-        self._threshold = pool.famous_votes
+        self._pool = pool
         self._left = pool.famous(size)
 
     def spend(self, title: Title) -> bool:
         """Whether ``title`` fits the budget, charging it when it does."""
-        if title.vote_count <= self._threshold:
+        if not self._pool.is_famous(title):
             return True
         if self._left <= 0:
             return False
@@ -570,16 +577,26 @@ def _seen_ratio(history: Sequence[Vote]) -> float | None:
     return sum(1 for vote in recent if vote.seen) / len(recent)
 
 
+#: The marker put on a candidate the fame budget will charge for. A word rather than a
+#: symbol: the budget sentence has to be able to name it, and a model asked to count
+#: "the ones marked widely-seen" counts better than one asked to count a glyph.
+_FAMOUS_MARK: Final = "widely-seen"
+
+
 def _candidates(pool: CandidatePool) -> str:
-    lines = "\n".join(_candidate_line(title, pool.genre_names(title)) for title in pool.titles)
+    lines = "\n".join(
+        _candidate_line(title, pool.genre_names(title), famous=pool.is_famous(title))
+        for title in pool.titles
+    )
     return (
         "CANDIDATES — the only titles you may choose, one per line as "
-        f'"id | title (type, year) [genres] rating/number of people who rated it":\n{lines}'
+        '"id | title (type, year) [genres] rating/number of people who rated it", '
+        f'with "{_FAMOUS_MARK}" on the ones most people have watched:\n{lines}'
     )
 
 
 def _fame_budget(pool: CandidatePool, size: int) -> str:
-    """Say what the vote count means and how much of the batch may spend it.
+    """Say what the marker means and how much of the batch may spend it.
 
     The budget was a silent pool filter before this, which is the shape of defect the
     harness caught: every candidate had already passed the adaptive popularity floor, so
@@ -587,39 +604,59 @@ def _fame_budget(pool: CandidatePool, size: int) -> str:
     track "they have already seen this" — the vote count — was printed with no
     explanation at all. The model duly ranked by it.
 
-    The threshold is the pool's own median rather than a constant, so it means the same
-    thing whatever TMDb answered today, and the sentence is only written when there is a
-    budget to state: at the comfort end, and on a calibration batch, famous is the point.
+    It then stated a **threshold**, which was the next version of the same defect. The
+    model was asked to apply a vote-count cut to a list, and a vote count is exactly
+    what a recent blockbuster has not got: the author's session of 2026-09-24 came back
+    60 % already-seen and every escape was a title from the last two release seasons.
+    So the prompt no longer states a number for the model to apply — the candidate lines
+    carry the verdict of ``CandidatePool.is_famous``, which is the same predicate the
+    answer is then held to, and this sentence only has to say how many of them are
+    affordable. A prompt and a filter that compute fame separately are a prompt and a
+    filter that will eventually disagree.
+
+    The sentence is only written when there is a budget to state: at the comfort end,
+    and on a calibration batch, famous is the point.
     """
     allowed = pool.famous(size)
     if allowed >= size or not pool.titles:
         return ""
     return (
-        "HOW FAMOUS A CANDIDATE IS. The number after the slash is how many people have "
-        'ever rated that title on TMDb. It is the best signal here for "this user has '
-        'probably already seen it": nearly half the cards the previous engine served '
-        "this user were titles they already knew, and they were the most-rated ones.\n"
-        f"A quarter of the candidates above are rated by more than {pool.famous_votes} "
-        f"people. At most {allowed} of your {size} cards may come from that quarter; the "
-        "rest must be less-rated titles. Cards past that limit are dropped and filled from the "
-        "list, so a deck of blockbusters costs you your own choices, not extra cards."
+        f'HOW FAMOUS A CANDIDATE IS. A candidate marked "{_FAMOUS_MARK}" is one this '
+        "user has probably already watched: either thousands of people have rated it, "
+        "or it came out in the last couple of years and is being watched everywhere "
+        "right now. Nearly half the cards the previous engine served this user were "
+        "titles they already knew.\n"
+        f'At most {allowed} of your {size} cards may be marked "{_FAMOUS_MARK}"; the '
+        "rest must be titles without the mark. A recent release is not exempt — it is "
+        "the case this rule was written for. Cards past that limit are dropped and "
+        "filled from the list, so a deck of blockbusters costs you your own choices, "
+        "not extra cards."
     )
 
 
-def _candidate_line(title: Title, genres: Sequence[str]) -> str:
+def _candidate_line(title: Title, genres: Sequence[str], *, famous: bool) -> str:
     """One candidate, in the fields a taste can be matched against.
 
     The genres are here because without them the line is a title string and a year: a
     model recognises a famous film from that and nothing else, which is the memory ADR
     0013 is trying to stop depending on. The rating and the vote count are what "is this
-    worth a card, and is it something everybody has seen" is read from.
+    worth a card" is read from.
+
+    ``famous`` is **not** read off the vote count on this line, and that is the point of
+    the 2026-09-24 amendment to ADR 0013. A title released three months ago has not had
+    time to collect ratings, so the number here understates how many people have seen it
+    by an order of magnitude — which is how four recent blockbusters walked into one of
+    the author's batches. The mark carries ``CandidatePool.is_famous``, the same
+    predicate ``_within_budget`` then holds the answer to, so the model is told exactly
+    what it will be charged for rather than asked to re-derive it from a threshold.
     """
     year = f", {title.year}" if title.year else ""
     named = f" [{', '.join(_line(genre) for genre in genres)}]" if genres else ""
     rating = f"{title.vote_average:.1f}" if title.vote_average is not None else "?"
+    mark = f" {_FAMOUS_MARK}" if famous else ""
     return (
         f"- {title.ref.tmdb_id} | {_line(title.title)} ({title.ref.kind}{year})"
-        f"{named} {rating}/{title.vote_count}"
+        f"{named} {rating}/{title.vote_count}{mark}"
     )
 
 

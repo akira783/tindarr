@@ -414,10 +414,88 @@ def crowd(tmdb_id: int, votes: int) -> Title:
     )
 
 
+def recent(tmdb_id: int, *, votes: int, popularity: float, year: int) -> Title:
+    """One candidate described by the axis a young title's fame actually shows on."""
+    return Title(
+        ref=TitleRef("movie", tmdb_id),
+        title=f"T{tmdb_id}",
+        vote_count=votes,
+        popularity=popularity,
+        year=year,
+    )
+
+
 #: Eight quiet titles and four blockbusters: the upper quartile is the four.
 CROWDED = [crowd(index, 100 * index) for index in range(1, 9)] + [
     crowd(index, 20_000 + index) for index in (9, 10, 11, 12)
 ]
+
+
+#: The shape the author's session of 2026-09-24 tripped over, as TMDb had it that day:
+#: four titles from the last two release seasons that everybody has seen and almost
+#: nobody has rated yet, beside one genuinely obscure one — and two old blockbusters the
+#: vote count already catches on its own.
+SEASON = [
+    recent(21, votes=2_828, popularity=653.8, year=2026),  # Spider-Man: Brand New Day
+    recent(22, votes=489, popularity=409.4, year=2026),  # Coyote vs. Acme
+    recent(23, votes=3_864, popularity=347.0, year=2026),  # L'Odyssée
+    recent(24, votes=4_359, popularity=75.1, year=2025),  # Avatar: Fire and Ash
+    recent(25, votes=75, popularity=1.9, year=2026),  # a listing nobody has heard of
+    recent(26, votes=24_643, popularity=61.1, year=2015),  # Mad Max: Fury Road
+    recent(27, votes=34_712, popularity=46.3, year=2009),  # Avatar
+]
+#: The season inside a pool with a quiet end to it, which is what TMDb actually returns.
+#: Both thresholds are the pool's own quartiles, so a pool that is *only* blockbusters
+#: has no famous end by construction — the fixture has to be a plausible pool for the
+#: rule to be measurable at all.
+SEASON_POOL = [*SEASON, *CROWDED[:8]]
+
+
+def test_a_vote_count_alone_does_not_know_what_a_release_season_is() -> None:
+    """Measured on the committed `akira-99` cassette: the upper quartile of vote counts
+    is 2 155 for titles released this year against 7 144 at four-to-ten years old, so 99
+    % of the titles released within a year sit under a pool-wide fame threshold and 73 %
+    of the older ones do. Every escape in the author's session came through that gap."""
+    pool = CandidatePool(titles=tuple(SEASON_POOL), band=NOVELTY_BANDS["balanced"])
+
+    famous = {title.ref.tmdb_id for title in pool.titles if pool.is_famous(title)}
+
+    # The four recent blockbusters are charged although all four are under the pool's
+    # own vote-count quartile, and the two old ones are charged on that quartile alone.
+    assert famous == {21, 22, 23, 24, 26, 27}
+    # Recency is not itself fame: the obscure new release stays free, which is what
+    # keeps ADR 0013's "last week's releases are in reach" true under a bold budget.
+    assert not pool.is_famous(pool.titles[4])
+
+
+def test_recency_is_measured_from_the_pool_and_never_from_a_clock() -> None:
+    """A recorded fixture whose answers change meaning every 1 January is a fixture
+    nobody can reproduce, and retrieval promises two calls build the same pool."""
+    pool = CandidatePool(titles=tuple(SEASON_POOL))
+
+    assert pool.newest_year == 2026
+    assert pool.is_recent(pool.titles[3])  # 2025, one year off the newest
+    assert not pool.is_recent(pool.titles[5])  # 2015
+    # Nothing carries a year, so nothing is recent and the rule falls back to votes.
+    assert CandidatePool(titles=tuple(CROWDED)).newest_year is None
+    assert not CandidatePool(titles=tuple(CROWDED)).is_recent(CROWDED[0])
+
+
+async def test_a_deck_of_recent_blockbusters_costs_the_model_its_own_choices() -> None:
+    """The fault the amendment is about, end to end: before it, all four of these were
+    free and a batch of five could be four titles the user had just seen advertised."""
+    llm = ScriptedLlm(answers=[answer(*((index, "safe") for index in (21, 22, 23, 24, 25)))])
+    pool = SEASON_POOL
+    source = FixedPool(pool, band=NOVELTY_BANDS["balanced"])
+    strategy = HybridStrategy(source, InMemoryMetadata(pool), llm)
+
+    cards = await strategy.propose(warmed(), 5)
+
+    # One of five may be `widely-seen` at `balanced`: 21 spends it, 22, 23 and 24 are
+    # dropped although the pool's vote-count quartile would have waved three of them
+    # through, and the batch is filled from the quiet end with no rationale on it.
+    assert [card.ref.tmdb_id for card in cards] == [21, 25, 1, 2, 3]
+    assert [card.reason is None for card in cards] == [False, False, True, True, True]
 
 
 def test_the_pool_says_where_its_famous_quarter_starts() -> None:
@@ -473,16 +551,41 @@ async def test_a_calibration_batch_spends_no_budget() -> None:
     assert [card.ref.tmdb_id for card in cards] == [9, 10, 11, 12]
 
 
-def test_the_prompt_states_the_budget_it_will_be_held_to() -> None:
+def test_the_prompt_marks_the_candidates_the_budget_will_charge_for() -> None:
     """The floor was a silent pool filter, and the model duly ranked by the one number
-    on the line that nobody had explained to it."""
+    on the line that nobody had explained to it. Stating a *threshold* instead was the
+    same defect once removed: the model was asked to apply a vote-count cut, and a vote
+    count is exactly what a recent blockbuster has not got. So the verdict travels on
+    the candidate line, from the predicate the answer is then held to."""
     pool = CandidatePool(titles=tuple(CROWDED), band=NOVELTY_BANDS["balanced"])
 
     text = batch_prompt(warmed(), pool, 10, calibrating=False)
 
-    assert "rated by more than 20009 people" in text
     assert "At most 2 of your 10 cards" in text
     assert "number of people who rated it" in text
+    # The blockbusters carry the mark and the eight quiet titles do not. 9 sits *on* the
+    # quartile and is free, exactly as the budget has always spent it.
+    marked = {
+        line.split(" | ")[0]
+        for line in text.splitlines()
+        if line.startswith("- ") and "widely-seen" in line
+    }
+    assert marked == {f"- {index}" for index in (10, 11, 12)}
+
+
+def test_a_recent_release_is_marked_although_few_people_have_rated_it_yet() -> None:
+    """The fault of 2026-09-24: a vote count measures how long a title has been
+    available to rate as much as how many people saw it, so a blockbuster three months
+    old walks under a pool-wide fame threshold while an old cult film is charged."""
+    pool = CandidatePool(
+        titles=(*CROWDED, recent(20, votes=2_828, popularity=653.8, year=2026)),
+        band=NOVELTY_BANDS["balanced"],
+    )
+
+    text = batch_prompt(warmed(), pool, 10, calibrating=False)
+
+    assert pool.is_famous(pool.titles[-1])
+    assert any(line.startswith("- 20 | ") and "widely-seen" in line for line in text.splitlines())
 
 
 def test_the_prompt_says_nothing_about_fame_where_there_is_no_budget() -> None:

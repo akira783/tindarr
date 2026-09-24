@@ -4,6 +4,12 @@
 ``tindarr media-server reset`` is the host-side recovery path when the media server was
 replaced and nobody can re-authenticate on it any more (docs/auth.md, section 3).
 
+``tindarr import suggestarr`` reads the votes somebody already cast in the SuggestArr
+fork and writes them into their Tindarr account, so a migrated household does not start
+from an empty taste profile (roadmap step 5). It opens the fork's database **read-only**
+and it is safe to run twice. It is the one import that writes *votes*: lot 4.4's file
+imports write history, which is a different table and a different claim.
+
 ``tindarr eval`` is the offline evaluation harness of ADR 0013 (docs/evaluation.md). It
 is a development command: it opens no instance database, it makes no network call unless
 ``--live`` is given and confirmed, and it exits 1 — not 2 — when the numbers regressed,
@@ -19,7 +25,7 @@ import sys
 import urllib.request
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TextIO
+from typing import TYPE_CHECKING, TextIO
 from urllib.error import URLError
 
 import uvicorn
@@ -44,9 +50,15 @@ from tindarr.main.evaluation import (
     write_report,
 )
 from tindarr.main.session import SESSION_FIXTURES, SessionOptions, run_session
+from tindarr.storage import votes as vote_repository
+from tindarr.storage.db import write_transaction
 from tindarr.storage.settings import environment_overrides
 from tindarr.swipe.evaluation import ReplayOptions
+from tindarr.swipe.imports import suggestarr
 from tindarr.swipe.strategy import NOVELTY_LEVELS, Novelty
+
+if TYPE_CHECKING:  # pragma: no cover - imported for the annotation and nothing else
+    from sqlalchemy.ext.asyncio import AsyncConnection
 
 HEALTHCHECK_TIMEOUT_S = 3
 #: Connections uvicorn serves at the same time; beyond it a connection gets `503` and
@@ -75,8 +87,44 @@ def _parser() -> argparse.ArgumentParser:
         help="clear the media server, sign everyone out and start first-run setup again",
     )
     reset.add_argument("--yes", action="store_true", help="do not ask for confirmation (scripts)")
+    _add_import(commands.add_parser("import", help="bring in what another tool already knows"))
     _add_eval(commands.add_parser("eval", help="offline evaluation harness (development)"))
     return parser
+
+
+def _add_import(group: argparse.ArgumentParser) -> None:
+    """Add ``tindarr import suggestarr``: the fork's votes, into a Tindarr account."""
+    actions = group.add_subparsers(dest="action", required=True)
+    fork = actions.add_parser(
+        "suggestarr",
+        help="import the votes cast in the SuggestArr fork's swipe deck",
+        description=(
+            "Read a SuggestArr database and store its swipe votes as this user's votes. "
+            "The database is opened read-only and never written to; point this at a copy "
+            "if the instance is running. Running it twice imports nothing twice."
+        ),
+    )
+    fork.add_argument(
+        "--from",
+        dest="database",
+        type=Path,
+        required=True,
+        help="the fork's SQLite database (read-only)",
+    )
+    fork.add_argument(
+        "--user",
+        dest="user_id",
+        default=None,
+        help=(
+            "the Tindarr user id to import into. Needed when the fork has no linked "
+            "media server account to match on, or when more than one matches"
+        ),
+    )
+    fork.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="say what would be imported, and write nothing",
+    )
 
 
 def _add_eval(harness: argparse.ArgumentParser) -> None:
@@ -249,6 +297,100 @@ def _confirmed_on_the_terminal() -> bool:
     return answer.strip() == RESET_CONFIRMATION  # pragma: no cover - interactive
 
 
+def import_command(config: ServerConfig, args: argparse.Namespace) -> int:
+    """Run one ``tindarr import`` action. Returns 2 on a mistake.
+
+    The fork's database is read **before** the runtime starts. Reading it is where most
+    of the ways this can go wrong live — wrong path, wrong database, no votes — and
+    finding out after migrating the instance's own database would be a worse trade for
+    nobody's benefit.
+    """
+    out = sys.stdout
+    try:
+        fork_votes, unreadable = suggestarr.read_votes(args.database)
+        identities = suggestarr.read_identities(args.database)
+    except suggestarr.ForkDatabaseError as failure:
+        logger.error("%s", failure)  # noqa: TRY400 - the traceback adds nothing here
+        return 2
+    if not fork_votes:
+        out.write(f"{args.database} holds no votes this command can read.\n")
+        return 0
+    try:
+        return asyncio.run(
+            _import_suggestarr(config, args, fork_votes, identities, unreadable, out)
+        )
+    except suggestarr.MappingError as failure:
+        logger.error("%s", failure)  # noqa: TRY400 - the traceback adds nothing here
+        return 2
+
+
+async def _import_suggestarr(  # noqa: PLR0913, PLR0917 - one argument per thing already read
+    config: ServerConfig,
+    args: argparse.Namespace,
+    fork_votes: Sequence[suggestarr.ForkVote],
+    identities: Sequence[suggestarr.ForkIdentity],
+    unreadable: int,
+    out: TextIO,
+) -> int:
+    """Resolve each fork user to an account and store their votes, or say why not."""
+    by_fork_user: dict[int, list[suggestarr.ForkVote]] = {}
+    for vote in fork_votes:
+        by_fork_user.setdefault(vote.fork_user_id, []).append(vote)
+    if args.user_id is not None and len(by_fork_user) > 1:
+        logger.error(
+            "this database holds votes from %d different fork users, so --user would give "
+            "all of them to one account. Import from a database with one user, or link the "
+            "media server accounts in the fork first.",
+            len(by_fork_user),
+        )
+        return 2
+    runtime = await start(config)
+    try:
+        async with write_transaction(runtime.engine) as connection:
+            for fork_user_id, theirs in sorted(by_fork_user.items()):
+                target = await suggestarr.resolve_target(
+                    connection, identities, fork_user_id, override=args.user_id
+                )
+                if args.dry_run:
+                    await _report_dry_run(connection, target, theirs, unreadable, out)
+                    continue
+                report = await suggestarr.store_votes(
+                    connection,
+                    target,
+                    theirs,
+                    now=runtime.services.clock.now(),
+                    unreadable=unreadable,
+                )
+                out.write(
+                    f"{target}: imported {report.imported}, already imported "
+                    f"{report.already_imported}, superseded by a newer Tindarr vote "
+                    f"{report.superseded}, unreadable {report.unreadable}.\n"
+                )
+            if args.dry_run:
+                # Nothing was written, but the receipts were read inside the write
+                # transaction: roll it back so a dry run leaves the write lock clean.
+                await connection.rollback()
+    finally:
+        await runtime.engine.dispose()
+    return 0
+
+
+async def _report_dry_run(
+    connection: "AsyncConnection",
+    target: str,
+    fork_votes: Sequence[suggestarr.ForkVote],
+    unreadable: int,
+    out: TextIO,
+) -> None:
+    """Say what a real run would write, counted against the receipts already stored."""
+    receipts = [suggestarr.receipt_id(vote) for vote in fork_votes]
+    already = await vote_repository.seen_receipts(connection, target, receipts)
+    out.write(
+        f"{target}: would import {sum(1 for one in receipts if one not in already)}, "
+        f"already imported {len(already)}, unreadable {unreadable}. Nothing was written.\n"
+    )
+
+
 def evaluate_command(args: argparse.Namespace) -> int:
     """Run one ``tindarr eval`` action. Returns 1 on a regression, 2 on a mistake."""
     out = sys.stdout
@@ -336,4 +478,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(config.log_level)
     if command == "media-server":
         return reset_media_server(config, confirmed=bool(args.yes))
+    if command == "import":
+        return import_command(config, args)
     return serve(config)
