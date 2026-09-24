@@ -674,6 +674,34 @@ above is the reason a single run of this strategy is not evidence: the model's v
 between two recordings of one configuration is larger than the effect being measured, as
 the seeded-import comparison below found independently.
 
+**A second, independent set of five.** The four above were recorded in one sitting. Five
+more were recorded separately, from the same committed TMDb cassette but topped up per
+run, so the two sets share no model answers:
+
+| | `seen_per_batch` | `liked_recall` | `vote_count_median` (pool) | `popularity_median` |
+|---|---|---|---|---|
+| 1 | 0.33 | 6.7 % | 1 660 (2 388) | 13.0 |
+| 2 | 0.33 | 6.7 % | 1 850 (2 388) | 14.0 |
+| 3 | 0.44 | 6.7 % | 1 855 (2 388) | 14.3 |
+| 4 | 0.33 | 3.3 % | 1 850 (2 388) | 13.0 |
+| 5 | 0.44 | 3.3 % | 1 852 (2 247) | 13.7 |
+
+**What nine recordings support, and what they do not.** Across both sets
+`seen_per_batch` ran 0.22–0.56 against 0.67 committed before, better in all nine; but the
+code *before* this fix had its own spread of 0.56–0.67 over three recordings, so the two
+ranges touch at 0.56 and **the fault count alone does not separate the fix from the
+model's noise**. Two recordings of one configuration gave 0.56 and 0.89 elsewhere in this
+document; that is the bar any claim here has to clear, and a count resting on five to nine
+confirmable cards does not clear it.
+
+What does carry the conclusion is the row that rests on all ninety: in every one of the
+nine, the median vote count of the proposed cards sat **18–30 % below its own pool's**,
+against 15 % below before the fix, and `popularity_median` fell from 19.2 to 12.8–16.2 in
+all nine. That is the fame diagnostic moving in the predicted direction with no recording
+against it, and it is the honest version of the claim — the deck is demonstrably drawing
+from further down its own pool, and whether that converts into fewer already-seen cards
+for a *person* is what `tindarr eval session` exists to answer.
+
 **The already-seen number ADR 0013 is about is still not answered.** The fork served 4.7
 already-seen cards a batch; the hybrid serves 1.22 on the generated set and 0.22–0.56 on
 the real one — and on that real set a strategy that knows nothing about taste served 0.22.
