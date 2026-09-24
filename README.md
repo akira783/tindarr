@@ -13,29 +13,30 @@ Tired of scrolling Netflix for 45 minutes before giving up and rewatching The Of
 
 Under the hood, Tindarr is a self-hosted server plus an Android app (iOS is still playing hard to get). The server learns your type from your swipes and your media server's watch history, asks an AI provider to play matchmaker, and files requests through Seerr. It also serves a small web console for setup and administration. Pairing your phone takes one QR code scan, which is less awkward than asking for a number.
 
-## Relationship status: we've met, it's going well, no swiping yet
+## Relationship status: we are seeing each other, it is going well
 
-**What works today** (steps 1 and 2):
+**What works today** (steps 1 to 4):
 
 - **Claim your server** with a one-time setup code, from the web console it serves itself.
-- **Point it at** Jellyfin (10.10+), Emby or Plex.
-- **Sign in with your media server account** — a password, a Jellyfin Quick Connect code, or a Plex PIN. Tindarr has no passwords of its own, so it cannot leak yours.
-- **Administer it**: server settings, users and roles, your own sessions, connector tests.
+- **Point it at** Jellyfin (10.10+), Emby or Plex, and **sign in with that account** — a password, a Jellyfin Quick Connect code or a Plex PIN. Tindarr has no passwords of its own, so it cannot leak yours.
+- **Swipe, in the browser.** One card at a time: poster, the model's one sentence on why you, ratings, where it streams, the trailer. Five verdicts on the arrow keys, undo on the last one, and a like files the request through Seerr.
+- **It learns.** Your votes, your media server's watch history, and imports of what you watched elsewhere (Netflix, IMDb, Letterboxd) feed a taste profile you can read and edit.
+- **Administer it**: connectors, users and roles, AI usage, your sessions.
 - **Pair a phone** by QR code, with an approval step, so nobody pairs theirs while you make coffee.
 
-**What it still does not do** is the one thing it is named after: there is nothing to swipe. No TMDb, no AI, no requests, no app. Cards arrive at step 4, the app at step 7.
+**What it still does not do**: there is no app yet, and no published image — you run it from a clone. The app arrives at step 7, the image at step 5.
 
 | Step | | |
 |---|---|---|
 | 1 | Server foundation | ✅ |
 | 2 | Setup, sign-in, web console | ✅ |
-| 3 | TMDb, OMDb, Seerr, AI providers | next |
-| 4 | The swipe engine | |
-| 5 | Packaged image, first real deployment | |
+| 3 | TMDb, OMDb, Seerr, AI providers | ✅ |
+| 4 | The swipe engine, and a deck in the console | ✅ |
+| 5 | Packaged image, first real deployment | next |
 | 6–8 | Android app: pairing, the deck, likes and taste | |
 | 9–11 | Offline votes, notifications, beta, release | |
 
-The [roadmap](docs/roadmap.md) has the details, and every step ends with checks that must be green before the next one starts.
+The [roadmap](docs/roadmap.md) has the details, and every step ends with checks that must be green before the next one starts. No recommendation strategy ships on a promise: the [evaluation harness](docs/evaluation.md) replays real votes and fails the build when the numbers get worse.
 
 ## How it fits together
 
@@ -56,7 +57,7 @@ The [roadmap](docs/roadmap.md) has the details, and every step ends with checks 
 
 Your data stays on your server. The AI provider you choose receives titles from your votes and history, your taste profile and the mood you type. Nothing is sent to the Tindarr authors: there is no Tindarr cloud, no telemetry, and nothing to sign up for.
 
-## Try it before it can swipe
+## Try it
 
 There is no published image yet — that is step 5. From a clone, with [uv](https://docs.astral.sh/uv/) and Node 24+:
 
