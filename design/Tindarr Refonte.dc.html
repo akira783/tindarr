@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0b0a09;color:#f3eee7;font-family:"Instrument Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:#f2b35a}a:hover{color:#f7cb8a}
+@keyframes tdDeal{0%{transform:translate(-60px,30px) rotate(-14deg);opacity:0}14%{transform:translate(0,0) rotate(var(--r));opacity:1}72%{transform:translate(0,0) rotate(var(--r));opacity:1}100%{transform:translate(90px,-16px) rotate(14deg);opacity:0}}
+@keyframes tdBreath{0%,100%{opacity:.45}50%{opacity:1}}
+</style>
+</helmet>
+<section id="1" data-screen-label="Tindarr — refonte" style="padding:96px; display:flex; flex-direction:column; gap:120px; width:max-content;">
+
+<header style="display:flex; flex-direction:column; gap:20px; max-width:1100px;">
+<div style="display:flex; align-items:center; gap:14px;"><span style="font-family:ui-monospace,Menlo,monospace; font-size:13px; color:#1a1209; background:#f2b35a; padding:3px 9px; border-radius:4px; font-weight:600;">1</span><span style="font-size:14px; color:#b5aa9c; letter-spacing:.08em; text-transform:uppercase;">Refonte · jetons, composants, planches</span></div>
+<h1 style="margin:0; font-family:Newsreader,Georgia,serif; font-weight:500; font-size:88px; line-height:1; letter-spacing:-.02em;">Tindarr, la salle éteinte.</h1>
+<p style="margin:0; font-size:20px; line-height:1.55; color:#b5aa9c; max-width:62ch; text-wrap:pretty;">L'affiche porte l'écran, la raison se lit comme une réplique, et le pari se voit à sa forme autant qu'à sa couleur. Deux polices : Newsreader pour les titres et les raisons, Instrument Sans pour l'interface, toutes deux sous licence OFL et servies par le serveur. Jetons prêts à coller : <a href="tokens.css">tokens.css</a>.</p>
+</header>
+
+<div data-screen-label="Jetons" style="display:grid; grid-template-columns:720px 640px 640px 720px; gap:40px; align-items:start;">
+<div style="background:#1a1714; border:1px solid #37312b; border-radius:14px; padding:32px; display:flex; flex-direction:column; gap:20px;">
+<h2 style="margin:0; font-family:Newsreader,Georgia,serif; font-weight:500; font-size:32px;">Couleur</h2>
+<div style="display:grid; grid-template-columns:150px 1fr 1fr; gap:10px 16px; font-size:13px; color:#b5aa9c; text-transform:uppercase; letter-spacing:.08em;"><span>Jeton</span><span>Sombre</span><span>Clair</span></div>
+<sc-for list="{{ colors }}" as="c" hint-placeholder-count="15">
+<div style="display:grid; grid-template-columns:150px 1fr 1fr; gap:16px; align-items:center;">
+<div style="display:flex; flex-direction:column;"><code style="font-family:ui-monospace,Menlo,monospace; font-size:14px; color:#f3eee7;">{{ c.n }}</code><span style="font-size:12px; color:#b5aa9c;">{{ c.note }}</span></div>
+<div style="display:flex; align-items:center; gap:10px;"><span style="width:40px; height:40px; border-radius:8px; border:1px solid #5a5148; background:{{ c.d }};"></span><code style="font-family:ui-monospace,Menlo,monospace; font-size:13px; color:#b5aa9c;">{{ c.d }}</code></div>
+<div style="display:flex; align-items:center; gap:10px;"><span style="width:40px; height:40px; border-radius:8px; border:1px solid #5a5148; background:{{ c.l }};"></span><code style="font-family:ui-monospace,Menlo,monospace; font-size:13px; color:#b5aa9c;">{{ c.l }}</code></div>
+</div>
+</sc-for>
+<p style="margin:0; font-size:14px; line-height:1.5; color:#b5aa9c;">Tout texte courant passe AA (4,5:1) sur --bg et --surface dans les deux thèmes. --accent n'est jamais du texte en clair : --accent-ink prend le relais. Le voile d'affiche reste sombre dans les deux thèmes.</p>
+</div>
+
+<div style="background:#1a1714; border:1px solid #37312b; border-radius:14px; padding:32px; display:flex; flex-direction:column; gap:18px;">
+<h2 style="margin:0; font-family:Newsreader,Georgia,serif; font-weight:500; font-size:32px;">Typographie</h2>
+<sc-for list="{{ typeScale }}" as="t" hint-placeholder-count="9">
+<div style="display:grid; grid-template-columns:130px 1fr; gap:16px; align-items:baseline; border-top:1px solid #37312b; padding-top:12px;">
+<div style="display:flex; flex-direction:column;"><code style="font-family:ui-monospace,Menlo,monospace; font-size:13px; color:#f3eee7;">{{ t.n }}</code><span style="font-size:12px; color:#b5aa9c;">{{ t.px }}</span></div>
+<span style="font-family:{{ t.f }}; font-size:{{ t.px }}; font-style:{{ t.s }}; font-weight:{{ t.w }}; line-height:1.15; color:#f3eee7; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ t.sample }}</span>
+</div>
+</sc-for>
+</div>
+
+<div style="background:#1a1714; border:1px solid #37312b; border-radius:14px; padding:32px; display:flex; flex-direction:column; gap:18px;">
+<h2 style="margin:0; font-family:Newsreader,Georgia,serif; font-weight:500; font-size:32px;">Espacement, rayons</h2>
+<sc-for list="{{ spaces }}" as="s" hint-placeholder-count="8">
+<div style="display:grid; grid-template-columns:110px 70px 1fr; gap:12px; align-items:center;">
+<code style="font-family:ui-monospace,Menlo,monospace; font-size:13px; color:#f3eee7;">{{ s.n }}</code><span style="font-size:13px; color:#b5aa9c;">{{ s.v }}</span><span style="height:14px; width:{{ s.v }}; background:#f2b35a; border-radius:2px;"></span>
+</div>
+</sc-for>
+<div style="display:flex; gap:16px; margin-top:8px; flex-wrap:wrap;">
+<sc-for list="{{ radii }}" as="r" hint-placeholder-count="4">
+<div style="display:flex; flex-direction:column; gap:8px; align-items:center;"><span style="width:88px; height:64px; border:1.5px solid #b5aa9c; border-radius:{{ r.v }};"></span><code style="font-family:ui-monospace,Menlo,monospace; font-size:12px; color:#f3eee7;">{{ r.n }}</code><span style="font-size:12px; color:#b5aa9c;">{{ r.use }}</span></div>
+</sc-for>
+</div>
+<p style="margin:0; font-size:14px; line-height:1.5; color:#b5aa9c;">Gouttières : 16 px au téléphone (--space-4), 32 px au bureau (--space-6). Cibles tactiles ≥ 44 px.</p>
+</div>
+
+<div style="background:#1a1714; border:1px solid #37312b; border-radius:14px; padding:32px; display:flex; flex-direction:column; gap:18px;">
+<h2 style="margin:0; font-family:Newsreader,Georgia,serif; font-weight:500; font-size:32px;">Élévation, focus, mouvement</h2>
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+<div style="display:flex; flex-direction:column; gap:10px;"><span style="height:110px; border-radius:8px; background:#24201c; box-shadow:0 40px 90px -30px rgb(0 0 0 / .8), 0 0 0 1px rgb(255 255 255 / .06);"></span><code style="font-family:ui-monospace,Menlo,monospace; font-size:13px;">--shadow-poster</code><span style="font-size:12px; color:#b5aa9c;">Affiche seulement. Rien d'autre ne flotte au-dessus du fond.</span></div>
+<div style="display:flex; flex-direction:column; gap:10px;"><span style="height:110px; border-radius:14px; background:#24201c; box-shadow:0 18px 40px -16px rgb(0 0 0 / .7);"></span><code style="font-family:ui-monospace,Menlo,monospace; font-size:13px;">--shadow-float</code><span style="font-size:12px; color:#b5aa9c;">Barre de verdicts, dialogues, menu téléphone.</span></div>
+</div>
+<div style="display:flex; gap:20px; align-items:center; padding:20px; background:#0f0d0b; border-radius:8px;">
+<span style="display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 18px; border-radius:999px; background:#f2b35a; color:#1a1209; font-weight:600; font-size:15px; outline:2px solid #f3eee7; outline-offset:3px;">J'aime <span style="min-width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border:1px solid rgb(26 18 9 / .4); border-radius:4px; font-size:13px;">→</span></span>
+<span style="font-size:13px; line-height:1.5; color:#b5aa9c;">--focus-ring : 2 px en couleur de texte, décalé de 3 px. Il ne reprend jamais l'accent, pour rester visible sur le bouton plein.</span>
+</div>
+<sc-for list="{{ motion }}" as="m" hint-placeholder-count="6">
+<div style="display:grid; grid-template-columns:130px 110px 1fr; gap:12px; align-items:baseline; border-top:1px solid #37312b; padding-top:10px;"><code style="font-family:ui-monospace,Menlo,monospace; font-size:13px;">{{ m.n }}</code><span style="font-size:13px; color:#f2b35a;">{{ m.v }}</span><span style="font-size:13px; color:#b5aa9c;">{{ m.use }}</span></div>
+</sc-for>
+</div>
+</div>
+
+<div data-screen-label="Composants" style="display:grid; grid-template-columns:repeat(4, 700px); gap:40px; align-items:start;">
+
+<div style="--bg:#0f0d0b; --surface:#1a1714; --surface-2:#24201c; --border:#37312b; --border-strong:#5a5148; --text:#f3eee7; --muted:#b5aa9c; --accent:#f2b35a; --on-accent:#1a1209; --accent-ink:#f2b35a; --bet:#b9b5ff; --success:#8fd4a4; --focus:#f3eee7; --sa:#1d1a16; --sb:#25201b; background:#1a1714; border:1px solid #37312b; border-radius:14px; padding:32px; display:flex; flex-direction:column; gap:22px; color:var(--text);">
+<div style="display:flex; justify-content:space-between; align-items:baseline;"><h2 style="margin:0; font-family:Newsreader,Georgia,serif; font-weight:500; font-size:32px;">La carte</h2><code style="font-family:ui-monospace,Menlo,monospace; font-size:13px; color:var(--muted);">.deck-card</code></div>
+<ol style="margin:0; padding-left:20px; display:flex; flex-direction:column; gap:8px; font-size:15px; line-height:1.5; color:var(--muted);">
+<li><strong style="color:var(--text);">Étiquette de choix</strong> au-dessus du titre, jamais en fin de carte.</li>
+<li><strong style="color:var(--text);">Titre</strong> en --font-display, <code style="font-family:ui-monospace,Menlo,monospace;">original_title</code> en italique dessous s'il diffère.</li>
+<li><strong style="color:var(--text);">Faits</strong> : type · durée ou saisons · genres, une seule ligne.</li>
+<li><strong style="color:var(--text);">La raison</strong>, avant le résumé, en italique à 26 px : c'est la réplique de la carte. Guillemet ouvrant dans la couleur du type de choix.</li>
+<li><strong style="color:var(--text);">Résumé</strong> en --muted, coupé à 3 lignes.</li>
+<li><strong style="color:var(--text);">Notes, plateformes, disponibilité</strong> sur une bande basse, séparée d'un filet.</li>
+<li><strong style="color:var(--text);">Bande-annonce</strong> : bouton discret, touche T. Le cadre YouTube n'est construit qu'au clic.</li>
+</ol>
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
+<div style="display:flex; flex-direction:column; gap:10px;">
+<div style="aspect-ratio:2/3; border-radius:8px; background:var(--surface-2); display:flex; flex-direction:column; justify-content:space-between; padding:20px; box-shadow:0 0 0 1px var(--border);">
+<span style="font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted);">Série · 2019</span>
+<span style="font-family:Newsreader,Georgia,serif; font-size:30px; line-height:1.05; font-weight:500; text-wrap:balance;">Le Bureau des légendes</span>
+</div>
+<span style="font-size:13px; line-height:1.45; color:var(--muted);"><code style="font-family:ui-monospace,Menlo,monospace; color:var(--text);">.poster--empty</code> : sans <code style="font-family:ui-monospace,Menlo,monospace;">poster_path</code>, l'affiche devient typographique. Même ratio 2:3, rien ne saute.</span>
+</div>
+<div style="display:flex; flex-direction:column; gap:10px;">
+<div style="aspect-ratio:2/3; position:relative;">
+<div style="position:absolute; inset:0; border-radius:8px; background:var(--surface-2); opacity:.6;"></div>
+<div style="position:absolute; inset:0; border-radius:8px; background:repeating-linear-gradient(135deg, var(--sa) 0 12px, var(--sb) 12px 24px); box-shadow:0 30px 60px -24px rgb(0 0 0 / .8); transform:translateX(38px) rotate(8deg); transform-origin:50% 120%;">
+<span style="position:absolute; top:18px; left:16px; border:2px solid var(--accent); color:var(--accent); border-radius:4px; padding:4px 10px; font-weight:700; font-size:18px; letter-spacing:.08em; transform:rotate(-12deg); background:rgb(15 13 11 / .7);">J'AIME</span>
+</div>
+</div>
+<span style="font-size:13px; line-height:1.45; color:var(--muted);"><strong style="color:var(--text);">Geste</strong> : inclinaison ±--swipe-tilt, tampon du verdict qui s'affirme avec la distance. Seuil 30 % de la largeur, puis départ en --dur-swipe.</span>
+</div>
+</div>
+<div style="display:flex; flex-direction:column; gap:6px; font-size:14px; line-height:1.5; color:var(--muted); border-top:1px solid var(--border); padding-top:16px;">
+<span><code style="font-family:ui-monospace,Menlo,monospace; color:var(--text);">.deck-card--safe</code> guillemet --accent-ink, aucun cadre.</span>
+<span><code style="font-family:ui-monospace,Menlo,monospace; color:var(--text);">.deck-card--explore</code> affiche cernée d'un filet --bet décalé de 6 px, guillemet --bet.</span>
+<span><code style="font-family:ui-monospace,Menlo,monospace; color:var(--text);">.deck-card--calibration</code> barre de 15 crans sous l'étiquette.</span>
+</div>
+</div>
+
+<div style="--bg:#0f0d0b; --surface:#1a1714; --surface-2:#24201c; --border:#37312b; --border-strong:#5a5148; --text:#f3eee7; --muted:#b5aa9c; --accent:#f2b35a; --on-accent:#1a1209; --focus:#f3eee7; background:#1a1714; border:1px solid #37312b; border-radius:14px; padding:32px; display:flex; flex-direction:column; gap:22px; color:var(--text);">
+<div style="display:flex; justify-content:space-between; align-items:baseline;"><h2 style="margin:0; font-family:Newsreader,Georgia,serif; font-weight:500; font-size:32px;">Barre de verdicts</h2><code style="font-family:ui-monospace,Menlo,monospace; font-size:13px; color:var(--muted);">.verdict-bar</code></div>
+<div style="display:flex; flex-direction:column; gap:10px; padding:20px; background:var(--bg); border-radius:8px;">
+<div style="display:flex; gap:8px;">
+<span style="flex:1; display:inline-flex; align-items:center; justify-content:space-between; gap:10px; height:48px; padding:0 10px 0 18px; border-radius:999px; background:var(--surface); border:1px solid var(--border-strong); font-size:15px; font-weight:500;">Pas pour moi <span style="min-width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:13px; color:var(--muted);">←</span></span>
+<span style="flex:1; display:inline-flex; align-items:center; justify-content:space-between; gap:10px; height:48px; padding:0 10px 0 18px; border-radius:999px; background:var(--surface); border:1px solid var(--border-strong); font-size:15px; font-weight:500;">Plus tard <span style="min-width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:13px; color:var(--muted);">N</span></span>
+<span style="flex:1; display:inline-flex; align-items:center; justify-content:space-between; gap:10px; height:48px; padding:0 10px 0 18px; border-radius:999px; background:var(--accent); color:var(--on-accent); font-size:15px; font-weight:600;">J'aime <span style="min-width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border:1px solid rgb(26 18 9 / .4); border-radius:4px; font-size:13px;">→</span></span>
+</div>
+<div style="display:flex; gap:8px;">
+<span style="flex:1; display:inline-flex; align-items:center; justify-content:space-between; gap:10px; height:44px; padding:0 10px 0 18px; border-radius:999px; border:1px dashed var(--border-strong); font-size:14px; font-weight:500;">Déjà vu, pas pour moi <span style="min-width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:13px; color:var(--muted);">↓</span></span>
+<span style="flex:1; display:inline-flex; align-items:center; justify-content:space-between; gap:10px; height:44px; padding:0 10px 0 18px; border-radius:999px; border:1px dashed var(--border-strong); font-size:14px; font-weight:500;">Déjà vu, aimé <span style="min-width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:13px; color:var(--muted);">↑</span></span>
+</div>
+</div>
+<ul style="margin:0; padding-left:20px; display:flex; flex-direction:column; gap:8px; font-size:15px; line-height:1.5; color:var(--muted);">
+<li>L'ordre suit les flèches : le refus à gauche, l'envie à droite, « Plus tard » au centre. Proposition : réordonner <code style="font-family:ui-monospace,Menlo,monospace; color:var(--text);">VERDICTS</code> en conséquence dans <code style="font-family:ui-monospace,Menlo,monospace;">keys.ts</code>.</li>
+<li>« Déjà vu » (la moitié des cartes) a sa propre rangée, en tirets : même poids que les autres, mais on voit tout de suite que ce n'est pas un avis sur l'envie.</li>
+<li>J'aime est le seul bouton plein. Pas de rouge pour le refus : un refus n'est pas une erreur.</li>
+<li>Touches <code style="font-family:ui-monospace,Menlo,monospace; color:var(--text);">.kbd</code> affichées en glyphes (←, N) ; le nom long reste dans <code style="font-family:ui-monospace,Menlo,monospace;">aria-keyshortcuts</code>. Masquées sous <code style="font-family:ui-monospace,Menlo,monospace;">(pointer: coarse)</code>.</li>
+<li>Annuler (U) vit à gauche de la barre, séparé d'un filet, et nomme le titre : « Annuler « Paterson » ».</li>
+<li>Pression : échelle 0,97 en --dur-fast. Téléphone : 56 px pour la rangée principale, 44 px pour « Déjà vu ».</li>
+</ul>
+</div>
+
+<div style="--text:#f3eee7; --muted:#b5aa9c; --border:#37312b; --border-strong:#5a5148; --accent-ink:#f2b35a; --bet:#b9b5ff; --success:#8fd4a4; background:#1a1714; border:1px solid #37312b; border-radius:14px; padding:32px; display:flex; flex-direction:column; gap:22px; color:var(--text);">
+<div style="display:flex; justify-content:space-between; align-items:baseline;"><h2 style="margin:0; font-family:Newsreader,Georgia,serif; font-weight:500; font-size:32px;">Badges</h2><code style="font-family:ui-monospace,Menlo,monospace; font-size:13px; color:var(--muted);">.pick · .avail · .provider · .rating</code></div>
+<div style="display:flex; flex-direction:column; gap:12px;">
+<span style="font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted);">Type de choix — forme + texte + couleur</span>
+<div style="display:flex; flex-direction:column; gap:12px;">
+<div style="display:flex; align-items:center; gap:16px;"><span style="display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--accent-ink);"><span style="width:9px; height:9px; border-radius:50%; background:var(--accent-ink);"></span>Dans vos goûts</span><span style="font-size:13px; color:var(--muted);">safe · rond plein</span></div>
+<div style="display:flex; align-items:center; gap:16px;"><span style="display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--bet); border:1px solid var(--bet); padding:5px 12px 5px 10px; border-radius:999px;"><span style="width:9px; height:9px; background:var(--bet); transform:rotate(45deg);"></span>Un pas de côté</span><span style="font-size:13px; color:var(--muted);">explore · losange, cerné : le pari</span></div>
+<div style="display:flex; align-items:center; gap:16px;"><span style="display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--text);"><span style="width:9px; height:9px; border:1.5px solid var(--text);"></span>Pour vous cerner · 4/15</span><span style="font-size:13px; color:var(--muted);">calibration · carré vide</span></div>
+</div>
+</div>
+<div style="display:flex; flex-direction:column; gap:12px; border-top:1px solid var(--border); padding-top:18px;">
+<span style="font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted);">Disponibilité — none n'affiche rien</span>
+<div style="display:flex; flex-wrap:wrap; gap:8px;">
+<span style="display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 12px; border-radius:999px; border:1px solid var(--border-strong); font-size:13px;"><span style="width:8px; height:8px; border-radius:50%; border:1.5px solid var(--text);"></span>Déjà demandé</span>
+<span style="display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 12px; border-radius:999px; border:1px solid var(--border-strong); font-size:13px;"><span style="width:8px; height:8px; border-radius:50%; border:1.5px solid var(--text); border-right-color:transparent;"></span>En cours de téléchargement</span>
+<span style="display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 12px; border-radius:999px; border:1px solid var(--success); color:var(--success); font-size:13px;"><span style="width:8px; height:8px; border-radius:50%; background:linear-gradient(90deg, var(--success) 50%, transparent 50%); border:1.5px solid var(--success);"></span>En partie sur votre serveur</span>
+<span style="display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 12px; border-radius:999px; border:1px solid var(--success); color:var(--success); font-size:13px;"><span style="width:8px; height:8px; border-radius:50%; background:var(--success); border:1.5px solid var(--success);"></span>Sur votre serveur</span>
+</div>
+</div>
+<div style="display:flex; flex-direction:column; gap:12px; border-top:1px solid var(--border); padding-top:18px;">
+<span style="font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted);">Plateforme — les vôtres d'abord, écrit en toutes lettres</span>
+<div style="display:flex; flex-wrap:wrap; gap:8px;">
+<span style="display:inline-flex; align-items:center; gap:8px; height:32px; padding:0 6px 0 12px; border-radius:999px; border:1px solid var(--text); font-size:14px;"><strong style="font-weight:600;">MUBI</strong><span style="color:var(--muted);">Abonnement</span><span style="background:var(--text); color:#0f0d0b; font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; padding:3px 8px; border-radius:999px;">Sur vos services</span></span>
+<span style="display:inline-flex; align-items:center; gap:8px; height:32px; padding:0 12px; border-radius:999px; border:1px solid var(--border); font-size:14px;"><strong style="font-weight:600;">Canal+</strong><span style="color:var(--muted);">Location</span></span>
+</div>
+</div>
+<div style="display:flex; flex-direction:column; gap:12px; border-top:1px solid var(--border); padding-top:18px;">
+<span style="font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted);">Note — chiffres tabulaires, absentes = omises</span>
+<div style="display:flex; gap:28px;">
+<div style="display:flex; flex-direction:column;"><span style="font-size:12px; color:var(--muted);">TMDb</span><span style="font-size:18px; font-weight:600; font-variant-numeric:tabular-nums;">7,7<span style="font-size:13px; color:var(--muted); font-weight:400;">/10</span></span></div>
+<div style="display:flex; flex-direction:column;"><span style="font-size:12px; color:var(--muted);">Rotten Tomatoes</span><span style="font-size:18px; font-weight:600; font-variant-numeric:tabular-nums;">96 %</span></div>
+<div style="display:flex; flex-direction:column;"><span style="font-size:12px; color:var(--muted);">Metacritic</span><span style="font-size:18px; font-weight:600; font-variant-numeric:tabular-nums;">95<span style="font-size:13px; color:var(--muted); font-weight:400;">/100</span></span></div>
+</div>
+</div>
+</div>
+
+<div style="--bg:#0f0d0b; --surface:#1a1714; --surface-2:#24201c; --border:#37312b; --border-strong:#5a5148; --text:#f3eee7; --muted:#b5aa9c; --accent:#f2b35a; background:#1a1714; border:1px solid #37312b; border-radius:14px; padding:32px; display:flex; flex-direction:column; gap:22px; color:var(--text);">
+<div style="display:flex; justify-content:space-between; align-items:baseline;"><h2 style="margin:0; font-family:Newsreader,Georgia,serif; font-weight:500; font-size:32px;">Attente et impasses</h2><code style="font-family:ui-monospace,Menlo,monospace; font-size:13px; color:var(--muted);">.deck-wait · .dead-end</code></div>
+<ul style="margin:0; padding-left:20px; display:flex; flex-direction:column; gap:8px; font-size:15px; line-height:1.5; color:var(--muted);">
+<li><strong style="color:var(--text);">L'attente est un écran</strong> : un paquet qui se distribue à la place de la carte, le titre d'état en --font-display, un compteur de secondes, et les touches du deck pour occuper les 20 secondes.</li>
+<li>La piste montre ce qui est normal (15 à 25 s). Au-delà de la limite de la console, on passe à « Toujours rien ».</li>
+<li>Les réglages restent visibles mais désactivés : changer d'envie relancerait un lot payé.</li>
+<li>Une seule annonce <code style="font-family:ui-monospace,Menlo,monospace;">aria-live</code> au début. Sans mouvement sous <code style="font-family:ui-monospace,Menlo,monospace;">prefers-reduced-motion</code> : le paquet reste posé, le compteur avance.</li>
+</ul>
+<div style="display:flex; flex-direction:column; gap:14px; padding:28px; background:var(--bg); border-radius:8px; border:1px solid var(--border);">
+<span style="display:inline-flex; align-items:center; gap:8px; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted);"><span style="width:9px; height:9px; border:1.5px solid var(--muted); border-radius:50%;"></span>Limite quotidienne</span>
+<h3 style="margin:0; font-family:Newsreader,Georgia,serif; font-weight:500; font-size:34px; line-height:1.1;">C’est tout pour aujourd’hui</h3>
+<p style="margin:0; font-size:16px; line-height:1.55; color:var(--muted); max-width:46ch;">Votre limite quotidienne est atteinte. Revenez demain, ou demandez à un administrateur de la relever.</p>
+</div>
+<div style="display:flex; flex-direction:column; gap:14px; padding:28px; background:var(--bg); border-radius:8px; border:1px solid var(--border);">
+<span style="display:inline-flex; align-items:center; gap:8px; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted);"><span style="width:9px; height:9px; border:1.5px solid var(--muted); transform:rotate(45deg);"></span>Service injoignable</span>
+<h3 style="margin:0; font-family:Newsreader,Georgia,serif; font-weight:500; font-size:34px; line-height:1.1;">TMDb n’a pas répondu</h3>
+<p style="margin:0; font-size:16px; line-height:1.55; color:var(--muted); max-width:46ch;">Le dernier lot s’est arrêté faute d’avoir joint le service de métadonnées. Réessayez dans un instant.</p>
+<span style="align-self:flex-start; display:inline-flex; align-items:center; height:44px; padding:0 20px; border-radius:999px; border:1px solid var(--border-strong); font-size:15px; font-weight:500;">Réessayer</span>
+</div>
+<p style="margin:0; font-size:14px; line-height:1.5; color:var(--muted);">Gabarit commun : catégorie en capitales, titre, une phrase du catalogue, au plus une action. Pas d'icône d'alerte : ces états sont fréquents et ne sont pas des erreurs.</p>
+</div>
+</div>
+
+<div style="display:flex; gap:64px; align-items:flex-start;">
+<div style="display:flex; flex-direction:column; gap:16px;">
+<span style="font-size:15px; color:#b5aa9c;"><strong style="color:#f3eee7; font-weight:600;">Deck · bureau · sombre</strong> — 1440 × 900, carte « un pas de côté », J'aime au focus clavier</span>
+
+<div data-screen-label="Deck bureau sombre" style="--bg:#0f0d0b; --surface:#1a1714; --surface-2:#24201c; --border:#37312b; --border-strong:#5a5148; --text:#f3eee7; --muted:#b5aa9c; --accent:#f2b35a; --on-accent:#1a1209; --accent-ink:#f2b35a; --bet:#b9b5ff; --success:#8fd4a4; --focus:#f3eee7; --sa:#1d1a16; --sb:#25201b; --shadow:0 40px 90px -30px rgb(0 0 0 / .8), 0 0 0 1px rgb(255 255 255 / .06); width:1440px; height:900px; position:relative; overflow:hidden; background:var(--bg); color:var(--text); border-radius:6px;">
+<div style="position:absolute; left:0; right:0; top:0; height:560px; background:repeating-linear-gradient(135deg, var(--sa) 0 14px, var(--sb) 14px 28px);"></div>
+<div style="position:absolute; left:0; right:0; top:0; height:560px; background:linear-gradient(to bottom, color-mix(in oklab, var(--bg) 30%, transparent) 0%, var(--bg) 100%);"></div>
+<span style="position:absolute; top:128px; right:32px; font-family:ui-monospace,Menlo,monospace; font-size:12px; color:var(--muted);">backdrop_path · w1280, fondu vers --bg</span>
+<div style="position:relative; display:flex; flex-direction:column; height:100%;">
+<header style="height:60px; flex:none; display:flex; align-items:center; gap:40px; padding:0 32px; border-bottom:1px solid var(--border); background:color-mix(in oklab, var(--bg) 75%, transparent);">
+<span style="font-family:Newsreader,Georgia,serif; font-size:24px; font-weight:600; letter-spacing:-.01em;">Tindarr</span>
+<nav style="display:flex; gap:28px; font-size:14px; height:100%;">
+<span style="display:flex; align-items:center; color:var(--text); font-weight:600; box-shadow:inset 0 -2px 0 var(--accent);">Swiper</span>
+<span style="display:flex; align-items:center; color:var(--muted);">Déjà vus</span>
+<span style="display:flex; align-items:center; color:var(--muted);">Imports</span>
+<span style="display:flex; align-items:center; color:var(--muted);">Connecteurs</span>
+<span style="display:flex; align-items:center; color:var(--muted);">Utilisateurs</span>
+<span style="display:flex; align-items:center; color:var(--muted);">Connecter un téléphone</span>
+</nav>
+<span style="margin-left:auto; font-size:14px; color:var(--muted);">Connecté en tant que akira</span>
+</header>
+<div style="flex:none; display:flex; align-items:center; gap:12px; padding:16px 32px;">
+<div style="display:flex; padding:3px; border:1px solid var(--border); border-radius:999px; font-size:13px; background:color-mix(in oklab, var(--bg) 70%, transparent);"><span style="padding:6px 14px; border-radius:999px; background:var(--surface-2); font-weight:600;">Films et séries</span><span style="padding:6px 14px; color:var(--muted);">Films</span><span style="padding:6px 14px; color:var(--muted);">Séries</span></div>
+<div style="display:flex; padding:3px; border:1px solid var(--border); border-radius:999px; font-size:13px; background:color-mix(in oklab, var(--bg) 70%, transparent);"><span style="padding:6px 14px; color:var(--muted);">Sûr</span><span style="padding:6px 14px; color:var(--muted);">Équilibré</span><span style="padding:6px 14px; border-radius:999px; background:var(--surface-2); font-weight:600;">Audacieux</span></div>
+<div style="flex:0 1 380px; height:38px; display:flex; align-items:center; padding:0 16px; border:1px solid var(--border); border-radius:999px; font-size:14px; color:var(--muted); background:color-mix(in oklab, var(--bg) 70%, transparent);">Ce soir j’ai envie de…</div>
+<span style="margin-left:auto; font-size:13px; color:var(--muted);">Encore 4 lots aujourd’hui.</span>
+</div>
+
+<main style="flex:1; display:flex; justify-content:center; padding-top:18px;">
+<article style="width:1120px; display:grid; grid-template-columns:340px minmax(0,1fr); gap:56px; align-items:start;">
+<div style="position:relative; margin:6px;">
+<div style="position:absolute; inset:-7px; border:1.5px solid var(--bet); border-radius:12px;"></div>
+<div style="position:relative; aspect-ratio:2/3; border-radius:8px; background:repeating-linear-gradient(135deg, #2a2520 0 10px, #332d27 10px 20px); box-shadow:var(--shadow); display:flex; align-items:flex-end; padding:14px;"><span style="font-family:ui-monospace,Menlo,monospace; font-size:12px; color:var(--muted);">poster_path · w342 · 2:3</span></div>
+</div>
+<div style="display:flex; flex-direction:column; gap:18px; padding-top:8px; min-width:0;">
+<div style="display:flex; align-items:center; justify-content:space-between;"><span style="display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--bet); border:1px solid var(--bet); padding:5px 12px 5px 10px; border-radius:999px;"><span style="width:9px; height:9px; background:var(--bet); transform:rotate(45deg);"></span>Un pas de côté</span><span style="font-size:13px; color:var(--muted);">Carte 1 sur 12</span></div>
+<div style="display:flex; flex-direction:column; gap:8px;">
+<h2 style="margin:0; font-family:Newsreader,Georgia,serif; font-weight:500; font-size:56px; line-height:1.02; letter-spacing:-.015em;">Aftersun</h2>
+<p style="margin:0; font-size:15px; color:var(--muted); display:flex; gap:10px;"><span>Film</span><span>·</span><span>2022</span><span>·</span><span>1 h 42</span><span>·</span><span>Drame</span></p>
+</div>
+<figure style="margin:6px 0 0; display:flex; flex-direction:column; gap:10px; max-width:640px;">
+<figcaption style="font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted);">Pourquoi celui-ci</figcaption>
+<blockquote style="margin:0; position:relative; font-family:Newsreader,Georgia,serif; font-style:italic; font-size:27px; line-height:1.3; text-wrap:pretty;"><span style="position:absolute; left:-30px; top:-8px; font-size:56px; line-height:1; color:var(--bet); font-style:normal;">“</span>Vous notez très haut les drames retenus comme Past Lives, mais vous n’avez presque rien vu de britannique récent. C’est le pari de ce lot.</blockquote>
+</figure>
+<p style="margin:0; font-size:15px; line-height:1.55; color:var(--muted); max-width:62ch;">Vingt ans plus tard, Sophie repense aux vacances passées en Turquie avec son père quand elle avait onze ans, et à ce qu’elle ne voyait pas encore de lui.</p>
+<div style="display:flex; flex-wrap:wrap; align-items:center; gap:28px; border-top:1px solid var(--border); padding-top:18px; margin-top:4px;">
+<div style="display:flex; gap:24px;">
+<div style="display:flex; flex-direction:column;"><span style="font-size:12px; color:var(--muted);">TMDb</span><span style="font-size:18px; font-weight:600; font-variant-numeric:tabular-nums;">7,7<span style="font-size:13px; color:var(--muted); font-weight:400;">/10</span></span></div>
+<div style="display:flex; flex-direction:column;"><span style="font-size:12px; color:var(--muted);">IMDb</span><span style="font-size:18px; font-weight:600; font-variant-numeric:tabular-nums;">7,6<span style="font-size:13px; color:var(--muted); font-weight:400;">/10</span></span></div>
+<div style="display:flex; flex-direction:column;"><span style="font-size:12px; color:var(--muted);">Rotten Tomatoes</span><span style="font-size:18px; font-weight:600; font-variant-numeric:tabular-nums;">96 %</span></div>
+<div style="display:flex; flex-direction:column;"><span style="font-size:12px; color:var(--muted);">Metacritic</span><span style="font-size:18px; font-weight:600; font-variant-numeric:tabular-nums;">95<span style="font-size:13px; color:var(--muted); font-weight:400;">/100</span></span></div>
+</div>
+<div style="display:flex; flex-wrap:wrap; gap:8px;">
+<span style="display:inline-flex; align-items:center; gap:8px; height:32px; padding:0 6px 0 12px; border-radius:999px; border:1px solid var(--text); font-size:14px;"><strong style="font-weight:600;">MUBI</strong><span style="color:var(--muted);">Abonnement</span><span style="background:var(--text); color:var(--bg); font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; padding:3px 8px; border-radius:999px;">Sur vos services</span></span>
+<span style="display:inline-flex; align-items:center; gap:8px; height:32px; padding:0 12px; border-radius:999px; border:1px solid var(--border); font-size:14px;"><strong style="font-weight:600;">Canal+</strong><span style="color:var(--muted);">Location</span></span>
+</div>
+</div>
+<span style="align-self:flex-start; display:inline-flex; align-items:center; gap:10px; height:40px; padding:0 10px 0 16px; border-radius:999px; border:1px solid var(--border); font-size:14px; color:var(--text);">Voir la bande-annonce <span style="min-width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:12px; color:var(--muted);">T</span></span>
+</div>
+</article>
+</main>
+
+<div style="position:absolute; left:50%; bottom:28px; transform:translateX(-50%); width:max-content; white-space:nowrap; display:flex; align-items:center; gap:8px; padding:8px; border-radius:999px; background:color-mix(in oklab, var(--surface) 92%, transparent); border:1px solid var(--border); box-shadow:0 18px 40px -16px rgb(0 0 0 / .7);">
+<span style="display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 10px 0 16px; border-radius:999px; font-size:14px; color:var(--muted);">Annuler « Paterson » <span style="min-width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:13px;">U</span></span>
+<span style="width:1px; height:28px; background:var(--border);"></span>
+<span style="display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 10px 0 18px; border-radius:999px; background:var(--surface-2); border:1px solid var(--border-strong); font-size:15px; font-weight:500;">Pas pour moi <span style="min-width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:13px; color:var(--muted);">←</span></span>
+<span style="display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 10px 0 18px; border-radius:999px; border:1px dashed var(--border-strong); font-size:15px; font-weight:500;">Déjà vu, pas pour moi <span style="min-width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:13px; color:var(--muted);">↓</span></span>
+<span style="display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 10px 0 18px; border-radius:999px; background:var(--surface-2); border:1px solid var(--border-strong); font-size:15px; font-weight:500;">Plus tard <span style="min-width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:13px; color:var(--muted);">N</span></span>
+<span style="display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 10px 0 18px; border-radius:999px; border:1px dashed var(--border-strong); font-size:15px; font-weight:500;">Déjà vu, aimé <span style="min-width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:13px; color:var(--muted);">↑</span></span>
+<span style="display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 10px 0 22px; border-radius:999px; background:var(--accent); color:var(--on-accent); font-size:15px; font-weight:600; outline:2px solid var(--focus); outline-offset:3px;">J'aime <span style="min-width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border:1px solid rgb(26 18 9 / .4); border-radius:4px; font-size:13px;">→</span></span>
+</div>
+</div>
+</div>
+</div>
+
+<div style="display:flex; flex-direction:column; gap:16px;">
+<span style="font-size:15px; color:#b5aa9c;"><strong style="color:#f3eee7; font-weight:600;">Deck · bureau · clair</strong> — 1440 × 900, carte « dans vos goûts », déjà sur le serveur</span>
+
+<div data-screen-label="Deck bureau clair" style="--bg:#f5f1ea; --surface:#fffdf9; --surface-2:#ece6dc; --border:#dcd3c6; --border-strong:#a99d8c; --text:#1c1813; --muted:#5f564b; --accent:#eaa546; --on-accent:#1c1813; --accent-ink:#8a5300; --bet:#5b4fc4; --success:#1f6b3f; --focus:#1c1813; --sa:#e4dccf; --sb:#dcd2c3; --shadow:0 30px 60px -30px rgb(70 45 20 / .35), 0 0 0 1px rgb(28 24 19 / .08); width:1440px; height:900px; position:relative; overflow:hidden; background:var(--bg); color:var(--text); border-radius:6px;">
+<div style="position:absolute; left:0; right:0; top:0; height:560px; background:repeating-linear-gradient(135deg, var(--sa) 0 14px, var(--sb) 14px 28px);"></div>
+<div style="position:absolute; left:0; right:0; top:0; height:560px; background:linear-gradient(to bottom, color-mix(in oklab, var(--bg) 45%, transparent) 0%, var(--bg) 100%);"></div>
+<span style="position:absolute; top:128px; right:32px; font-family:ui-monospace,Menlo,monospace; font-size:12px; color:var(--muted);">backdrop_path · w1280, fondu vers --bg</span>
+<div style="position:relative; display:flex; flex-direction:column; height:100%;">
+<header style="height:60px; flex:none; display:flex; align-items:center; gap:40px; padding:0 32px; border-bottom:1px solid var(--border); background:color-mix(in oklab, var(--bg) 80%, transparent);">
+<span style="font-family:Newsreader,Georgia,serif; font-size:24px; font-weight:600; letter-spacing:-.01em;">Tindarr</span>
+<nav style="display:flex; gap:28px; font-size:14px; height:100%;">
+<span style="display:flex; align-items:center; color:var(--text); font-weight:600; box-shadow:inset 0 -2px 0 var(--accent-ink);">Swiper</span>
+<span style="display:flex; align-items:center; color:var(--muted);">Déjà vus</span>
+<span style="display:flex; align-items:center; color:var(--muted);">Imports</span>
+<span style="display:flex; align-items:center; color:var(--muted);">Connecteurs</span>
+<span style="display:flex; align-items:center; color:var(--muted);">Utilisateurs</span>
+<span style="display:flex; align-items:center; color:var(--muted);">Connecter un téléphone</span>
+</nav>
+<span style="margin-left:auto; font-size:14px; color:var(--muted);">Connecté en tant que akira</span>
+</header>
+<div style="flex:none; display:flex; align-items:center; gap:12px; padding:16px 32px;">
+<div style="display:flex; padding:3px; border:1px solid var(--border-strong); border-radius:999px; font-size:13px; background:var(--surface);"><span style="padding:6px 14px; border-radius:999px; background:var(--text); color:var(--bg); font-weight:600;">Films et séries</span><span style="padding:6px 14px; color:var(--muted);">Films</span><span style="padding:6px 14px; color:var(--muted);">Séries</span></div>
+<div style="display:flex; padding:3px; border:1px solid var(--border-strong); border-radius:999px; font-size:13px; background:var(--surface);"><span style="padding:6px 14px; color:var(--muted);">Sûr</span><span style="padding:6px 14px; border-radius:999px; background:var(--text); color:var(--bg); font-weight:600;">Équilibré</span><span style="padding:6px 14px; color:var(--muted);">Audacieux</span></div>
+<div style="flex:0 1 380px; height:38px; display:flex; align-items:center; padding:0 16px; border:1px solid var(--border-strong); border-radius:999px; font-size:14px; color:var(--muted); background:var(--surface);">Ce soir j’ai envie de…</div>
+<span style="margin-left:auto; font-size:13px; color:var(--muted);">Encore 4 lots aujourd’hui.</span>
+</div>
+
+<main style="flex:1; display:flex; justify-content:center; padding-top:18px;">
+<article style="width:1120px; display:grid; grid-template-columns:340px minmax(0,1fr); gap:56px; align-items:start;">
+<div style="position:relative; margin:6px;">
+<div style="position:relative; aspect-ratio:2/3; border-radius:8px; background:repeating-linear-gradient(135deg, #d6ccbc 0 10px, #cdc2b1 10px 20px); box-shadow:var(--shadow); display:flex; align-items:flex-end; padding:14px;"><span style="font-family:ui-monospace,Menlo,monospace; font-size:12px; color:var(--muted);">poster_path · w342 · 2:3</span></div>
+</div>
+<div style="display:flex; flex-direction:column; gap:18px; padding-top:8px; min-width:0;">
+<div style="display:flex; align-items:center; justify-content:space-between;"><span style="display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--accent-ink);"><span style="width:9px; height:9px; border-radius:50%; background:var(--accent-ink);"></span>Dans vos goûts</span><span style="font-size:13px; color:var(--muted);">Carte 1 sur 9</span></div>
+<div style="display:flex; flex-direction:column; gap:8px;">
+<h2 style="margin:0; font-family:Newsreader,Georgia,serif; font-weight:500; font-size:52px; line-height:1.04; letter-spacing:-.015em; text-wrap:balance;">Le Seigneur des anneaux : La Communauté de l’anneau</h2>
+<p style="margin:0; font-family:Newsreader,Georgia,serif; font-style:italic; font-size:17px; color:var(--muted);">The Lord of the Rings: The Fellowship of the Ring</p>
+<p style="margin:0; font-size:15px; color:var(--muted); display:flex; gap:10px;"><span>Film</span><span>·</span><span>2001</span><span>·</span><span>2 h 58</span><span>·</span><span>Aventure, Fantastique</span></p>
+</div>
+<figure style="margin:6px 0 0; display:flex; flex-direction:column; gap:10px; max-width:640px;">
+<figcaption style="font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted);">Pourquoi celui-ci</figcaption>
+<blockquote style="margin:0; position:relative; font-family:Newsreader,Georgia,serif; font-style:italic; font-size:27px; line-height:1.3; text-wrap:pretty;"><span style="position:absolute; left:-30px; top:-8px; font-size:56px; line-height:1; color:var(--accent-ink); font-style:normal;">“</span>Vous avez aimé Dune deux fois et votre profil dit « les longues épopées, sans cynisme ». Il est déjà sur votre serveur.</blockquote>
+</figure>
+<p style="margin:0; font-size:15px; line-height:1.55; color:var(--muted); max-width:62ch; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">Un hobbit hérite d’un anneau qu’il faut détruire avant que son créateur ne le retrouve, et part avec huit compagnons vers le seul endroit où c’est possible.</p>
+<div style="display:flex; flex-wrap:wrap; align-items:center; gap:28px; border-top:1px solid var(--border); padding-top:18px; margin-top:4px;">
+<div style="display:flex; gap:24px;">
+<div style="display:flex; flex-direction:column;"><span style="font-size:12px; color:var(--muted);">TMDb</span><span style="font-size:18px; font-weight:600; font-variant-numeric:tabular-nums;">8,4<span style="font-size:13px; color:var(--muted); font-weight:400;">/10</span></span></div>
+<div style="display:flex; flex-direction:column;"><span style="font-size:12px; color:var(--muted);">IMDb</span><span style="font-size:18px; font-weight:600; font-variant-numeric:tabular-nums;">8,9<span style="font-size:13px; color:var(--muted); font-weight:400;">/10</span></span></div>
+</div>
+<span style="display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 12px; border-radius:999px; border:1px solid var(--success); color:var(--success); font-size:13px; font-weight:500;"><span style="width:8px; height:8px; border-radius:50%; background:var(--success);"></span>Sur votre serveur</span>
+<div style="display:flex; flex-wrap:wrap; gap:8px;">
+<span style="display:inline-flex; align-items:center; gap:8px; height:32px; padding:0 6px 0 12px; border-radius:999px; border:1px solid var(--text); font-size:14px; background:var(--surface);"><strong style="font-weight:600;">Prime Video</strong><span style="color:var(--muted);">Abonnement</span><span style="background:var(--text); color:var(--bg); font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; padding:3px 8px; border-radius:999px;">Sur vos services</span></span>
+<span style="display:inline-flex; align-items:center; gap:8px; height:32px; padding:0 12px; border-radius:999px; border:1px solid var(--border-strong); font-size:14px; background:var(--surface);"><strong style="font-weight:600;">Netflix</strong><span style="color:var(--muted);">Abonnement</span></span>
+</div>
+</div>
+</div>
+</article>
+</main>
+
+<div style="position:absolute; left:50%; bottom:28px; transform:translateX(-50%); width:max-content; white-space:nowrap; display:flex; align-items:center; gap:8px; padding:8px; border-radius:999px; background:var(--surface); border:1px solid var(--border); box-shadow:0 14px 30px -16px rgb(70 45 20 / .3);">
+<span style="display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 10px 0 16px; border-radius:999px; font-size:14px; color:var(--muted);">Annuler « Aftersun » <span style="min-width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:13px;">U</span></span>
+<span style="width:1px; height:28px; background:var(--border);"></span>
+<span style="display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 10px 0 18px; border-radius:999px; background:var(--surface-2); border:1px solid var(--border-strong); font-size:15px; font-weight:500;">Pas pour moi <span style="min-width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:13px; color:var(--muted);">←</span></span>
+<span style="display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 10px 0 18px; border-radius:999px; border:1px dashed var(--border-strong); font-size:15px; font-weight:500;">Déjà vu, pas pour moi <span style="min-width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:13px; color:var(--muted);">↓</span></span>
+<span style="display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 10px 0 18px; border-radius:999px; background:var(--surface-2); border:1px solid var(--border-strong); font-size:15px; font-weight:500;">Plus tard <span style="min-width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:13px; color:var(--muted);">N</span></span>
+<span style="display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 10px 0 18px; border-radius:999px; border:1px dashed var(--border-strong); font-size:15px; font-weight:500;">Déjà vu, aimé <span style="min-width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:13px; color:var(--muted);">↑</span></span>
+<span style="display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 10px 0 22px; border-radius:999px; background:var(--accent); color:var(--on-accent); font-size:15px; font-weight:600;">J'aime <span style="min-width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border:1px solid rgb(28 24 19 / .4); border-radius:4px; font-size:13px;">→</span></span>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+<div style="display:flex; gap:64px; align-items:flex-start;">
+
+<div style="display:flex; flex-direction:column; gap:16px;">
+<span style="font-size:15px; color:#b5aa9c;"><strong style="color:#f3eee7; font-weight:600;">Téléphone · sombre</strong> — 390 × 844, série, pari</span>
+<div data-screen-label="Deck téléphone sombre" style="--bg:#0f0d0b; --surface:#1a1714; --surface-2:#24201c; --border:#37312b; --border-strong:#5a5148; --text:#f3eee7; --muted:#b5aa9c; --accent:#f2b35a; --on-accent:#1a1209; --bet:#b9b5ff; --success:#8fd4a4; width:390px; height:844px; position:relative; overflow:hidden; background:var(--bg); color:var(--text); border-radius:32px; border:1px solid #37312b; display:flex; flex-direction:column;">
+<header style="height:56px; flex:none; display:flex; align-items:center; gap:4px; padding:0 8px 0 16px;">
+<span style="font-family:Newsreader,Georgia,serif; font-size:22px; font-weight:600;">Tindarr</span>
+<span style="margin-left:auto; display:inline-flex; align-items:center; height:44px; padding:0 12px; font-size:14px; color:var(--muted);">Annuler</span>
+<span style="width:44px; height:44px; display:inline-flex; flex-direction:column; align-items:center; justify-content:center; gap:5px;"><span style="width:18px; height:1.5px; background:var(--text);"></span><span style="width:18px; height:1.5px; background:var(--text);"></span><span style="width:18px; height:1.5px; background:var(--text);"></span></span>
+</header>
+<div style="flex:none; display:flex; gap:8px; padding:0 16px 12px;">
+<span style="height:36px; display:inline-flex; align-items:center; padding:0 14px; border:1px solid var(--border); border-radius:999px; font-size:13px;">Films et séries</span>
+<span style="height:36px; display:inline-flex; align-items:center; padding:0 14px; border:1px solid var(--border); border-radius:999px; font-size:13px;">Audacieux</span>
+<span style="height:36px; flex:1; display:inline-flex; align-items:center; padding:0 14px; border:1px solid var(--border); border-radius:999px; font-size:13px; color:var(--muted);">Envie…</span>
+</div>
+<div style="flex:none; margin:0 16px; position:relative; height:540px; border-radius:14px; overflow:hidden; background:repeating-linear-gradient(135deg, #2a2520 0 10px, #332d27 10px 20px); box-shadow:0 0 0 1.5px var(--bet);">
+<span style="position:absolute; top:14px; left:14px; font-family:ui-monospace,Menlo,monospace; font-size:11px; color:var(--muted);">poster_path · w500 · 2:3</span>
+<div style="position:absolute; left:0; right:0; bottom:0; height:78%; background:linear-gradient(to top, rgb(10 8 6 / .97) 0%, rgb(10 8 6 / .88) 55%, rgb(10 8 6 / 0) 100%);"></div>
+<div style="position:absolute; left:0; right:0; bottom:0; padding:20px; display:flex; flex-direction:column; gap:10px; color:#f3eee7;">
+<span style="align-self:flex-start; display:inline-flex; align-items:center; gap:7px; font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:#b9b5ff; border:1px solid #b9b5ff; padding:4px 10px 4px 8px; border-radius:999px;"><span style="width:8px; height:8px; background:#b9b5ff; transform:rotate(45deg);"></span>Un pas de côté</span>
+<h2 style="margin:0; font-family:Newsreader,Georgia,serif; font-weight:500; font-size:32px; line-height:1.05;">Severance</h2>
+<p style="margin:0; font-size:13px; color:#b5aa9c; display:flex; flex-wrap:wrap; gap:6px;"><span>Série</span><span>·</span><span>2 saisons</span><span>·</span><span>Drame, Science-Fiction</span></p>
+<p style="margin:4px 0 0; font-family:Newsreader,Georgia,serif; font-style:italic; font-size:19px; line-height:1.32; text-wrap:pretty;"><span style="color:#b9b5ff; font-style:normal;">“ </span>Rien de ce genre dans vos votes, mais vous avez tout aimé de The Office. Même bureau, autre lumière.</p>
+<div style="display:flex; align-items:center; gap:10px; margin-top:6px; font-size:13px; color:#b5aa9c;"><span style="font-variant-numeric:tabular-nums;"><strong style="color:#f3eee7;">8,4</strong> TMDb</span><span>·</span><span>Apple TV+</span><span style="background:#f3eee7; color:#0f0d0b; font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; padding:3px 7px; border-radius:999px;">Sur vos services</span></div>
+</div>
+</div>
+<div style="margin-top:auto; flex:none; padding:12px 16px 22px; display:flex; flex-direction:column; gap:8px;">
+<div style="display:flex; gap:8px;"><span style="flex:1; height:44px; display:inline-flex; align-items:center; justify-content:center; border-radius:999px; border:1px dashed var(--border-strong); font-size:13px; font-weight:500;">Déjà vu, pas pour moi</span><span style="flex:1; height:44px; display:inline-flex; align-items:center; justify-content:center; border-radius:999px; border:1px dashed var(--border-strong); font-size:13px; font-weight:500;">Déjà vu, aimé</span></div>
+<div style="display:flex; gap:8px;"><span style="flex:1.2; height:56px; display:inline-flex; align-items:center; justify-content:center; border-radius:999px; background:var(--surface-2); border:1px solid var(--border-strong); font-size:15px; font-weight:500;">Pas pour moi</span><span style="flex:.9; height:56px; display:inline-flex; align-items:center; justify-content:center; border-radius:999px; border:1px solid var(--border-strong); font-size:15px; font-weight:500;">Plus tard</span><span style="flex:1.2; height:56px; display:inline-flex; align-items:center; justify-content:center; border-radius:999px; background:var(--accent); color:var(--on-accent); font-size:15px; font-weight:600;">J'aime</span></div>
+</div>
+</div>
+</div>
+
+<div style="display:flex; flex-direction:column; gap:16px;">
+<span style="font-size:15px; color:#b5aa9c;"><strong style="color:#f3eee7; font-weight:600;">Téléphone · clair</strong> — 390 × 844, calibrage 4/15</span>
+<div data-screen-label="Deck téléphone clair" style="--bg:#f5f1ea; --surface:#fffdf9; --surface-2:#ece6dc; --border:#dcd3c6; --border-strong:#a99d8c; --text:#1c1813; --muted:#5f564b; --accent:#eaa546; --on-accent:#1c1813; width:390px; height:844px; position:relative; overflow:hidden; background:var(--bg); color:var(--text); border-radius:32px; border:1px solid #37312b; display:flex; flex-direction:column;">
+<header style="height:56px; flex:none; display:flex; align-items:center; gap:4px; padding:0 8px 0 16px;">
+<span style="font-family:Newsreader,Georgia,serif; font-size:22px; font-weight:600;">Tindarr</span>
+<span style="margin-left:auto; display:inline-flex; align-items:center; height:44px; padding:0 12px; font-size:14px; color:var(--muted);">Annuler</span>
+<span style="width:44px; height:44px; display:inline-flex; flex-direction:column; align-items:center; justify-content:center; gap:5px;"><span style="width:18px; height:1.5px; background:var(--text);"></span><span style="width:18px; height:1.5px; background:var(--text);"></span><span style="width:18px; height:1.5px; background:var(--text);"></span></span>
+</header>
+<div style="flex:none; display:flex; flex-direction:column; gap:8px; padding:0 16px 12px;">
+<div style="display:flex; justify-content:space-between; font-size:12px;"><span style="display:inline-flex; align-items:center; gap:7px; font-weight:600; letter-spacing:.08em; text-transform:uppercase;"><span style="width:8px; height:8px; border:1.5px solid var(--text);"></span>Pour vous cerner</span><span style="color:var(--muted);">4 sur 15 répondues</span></div>
+<div style="display:grid; grid-template-columns:repeat(15, 1fr); gap:3px;">
+<span style="height:4px; border-radius:2px; background:var(--text);"></span><span style="height:4px; border-radius:2px; background:var(--text);"></span><span style="height:4px; border-radius:2px; background:var(--text);"></span><span style="height:4px; border-radius:2px; background:var(--text);"></span><span style="height:4px; border-radius:2px; background:var(--border-strong);"></span><span style="height:4px; border-radius:2px; background:var(--border);"></span><span style="height:4px; border-radius:2px; background:var(--border);"></span><span style="height:4px; border-radius:2px; background:var(--border);"></span><span style="height:4px; border-radius:2px; background:var(--border);"></span><span style="height:4px; border-radius:2px; background:var(--border);"></span><span style="height:4px; border-radius:2px; background:var(--border);"></span><span style="height:4px; border-radius:2px; background:var(--border);"></span><span style="height:4px; border-radius:2px; background:var(--border);"></span><span style="height:4px; border-radius:2px; background:var(--border);"></span><span style="height:4px; border-radius:2px; background:var(--border);"></span>
+</div>
+</div>
+<div style="flex:none; margin:0 16px; position:relative; height:540px; border-radius:14px; overflow:hidden; background:repeating-linear-gradient(135deg, #d6ccbc 0 10px, #cdc2b1 10px 20px); box-shadow:0 30px 60px -30px rgb(70 45 20 / .35), 0 0 0 1px rgb(28 24 19 / .08);">
+<span style="position:absolute; top:14px; left:14px; font-family:ui-monospace,Menlo,monospace; font-size:11px; color:#5f564b;">poster_path · w500 · 2:3</span>
+<div style="position:absolute; left:0; right:0; bottom:0; height:78%; background:linear-gradient(to top, rgb(10 8 6 / .97) 0%, rgb(10 8 6 / .88) 55%, rgb(10 8 6 / 0) 100%);"></div>
+<div style="position:absolute; left:0; right:0; bottom:0; padding:20px; display:flex; flex-direction:column; gap:10px; color:#f3eee7;">
+<h2 style="margin:0; font-family:Newsreader,Georgia,serif; font-weight:500; font-size:30px; line-height:1.06; text-wrap:balance;">Le Fabuleux Destin d’Amélie Poulain</h2>
+<p style="margin:0; font-size:13px; color:#b5aa9c; display:flex; flex-wrap:wrap; gap:6px;"><span>Film</span><span>·</span><span>2001</span><span>·</span><span>2 h 02</span><span>·</span><span>Comédie, Romance</span></p>
+<p style="margin:4px 0 0; font-family:Newsreader,Georgia,serif; font-style:italic; font-size:19px; line-height:1.32; text-wrap:pretty;"><span style="color:#f3eee7; font-style:normal;">“ </span>Un film que presque tout le monde a vu : votre réponse dit d’où partir.</p>
+<div style="display:flex; align-items:center; gap:10px; margin-top:6px; font-size:13px; color:#b5aa9c;"><span style="font-variant-numeric:tabular-nums;"><strong style="color:#f3eee7;">7,9</strong> TMDb</span><span>·</span><span style="display:inline-flex; align-items:center; gap:6px; color:#8fd4a4;"><span style="width:7px; height:7px; border-radius:50%; background:#8fd4a4;"></span>Sur votre serveur</span></div>
+</div>
+</div>
+<div style="margin-top:auto; flex:none; padding:12px 16px 22px; display:flex; flex-direction:column; gap:8px;">
+<div style="display:flex; gap:8px;"><span style="flex:1; height:44px; display:inline-flex; align-items:center; justify-content:center; border-radius:999px; border:1px dashed var(--border-strong); font-size:13px; font-weight:500; background:var(--surface);">Déjà vu, pas pour moi</span><span style="flex:1; height:44px; display:inline-flex; align-items:center; justify-content:center; border-radius:999px; border:1px dashed var(--border-strong); font-size:13px; font-weight:500; background:var(--surface);">Déjà vu, aimé</span></div>
+<div style="display:flex; gap:8px;"><span style="flex:1.2; height:56px; display:inline-flex; align-items:center; justify-content:center; border-radius:999px; background:var(--surface-2); border:1px solid var(--border-strong); font-size:15px; font-weight:500;">Pas pour moi</span><span style="flex:.9; height:56px; display:inline-flex; align-items:center; justify-content:center; border-radius:999px; border:1px solid var(--border-strong); font-size:15px; font-weight:500; background:var(--surface);">Plus tard</span><span style="flex:1.2; height:56px; display:inline-flex; align-items:center; justify-content:center; border-radius:999px; background:var(--accent); color:var(--on-accent); font-size:15px; font-weight:600;">J'aime</span></div>
+</div>
+</div>
+</div>
+
+<div style="display:flex; flex-direction:column; gap:16px;">
+<span style="font-size:15px; color:#b5aa9c;"><strong style="color:#f3eee7; font-weight:600;">Attente · bureau · sombre</strong> — 1440 × 900, premier lot en cours</span>
+<div data-screen-label="Attente bureau" style="--bg:#0f0d0b; --surface:#1a1714; --surface-2:#24201c; --border:#37312b; --border-strong:#5a5148; --text:#f3eee7; --muted:#b5aa9c; --accent:#f2b35a; width:1440px; height:900px; position:relative; overflow:hidden; background:var(--bg); color:var(--text); border-radius:6px; display:flex; flex-direction:column;">
+<header style="height:60px; flex:none; display:flex; align-items:center; gap:40px; padding:0 32px; border-bottom:1px solid var(--border);">
+<span style="font-family:Newsreader,Georgia,serif; font-size:24px; font-weight:600;">Tindarr</span>
+<nav style="display:flex; gap:28px; font-size:14px; height:100%;">
+<span style="display:flex; align-items:center; font-weight:600; box-shadow:inset 0 -2px 0 var(--accent);">Swiper</span>
+<span style="display:flex; align-items:center; color:var(--muted);">Déjà vus</span>
+<span style="display:flex; align-items:center; color:var(--muted);">Imports</span>
+<span style="display:flex; align-items:center; color:var(--muted);">Connecter un téléphone</span>
+</nav>
+<span style="margin-left:auto; font-size:14px; color:var(--muted);">Connecté en tant que akira</span>
+</header>
+<div style="flex:none; display:flex; align-items:center; gap:12px; padding:16px 32px; opacity:.45;">
+<div style="display:flex; padding:3px; border:1px solid var(--border); border-radius:999px; font-size:13px;"><span style="padding:6px 14px; border-radius:999px; background:var(--surface-2); font-weight:600;">Films et séries</span><span style="padding:6px 14px; color:var(--muted);">Films</span><span style="padding:6px 14px; color:var(--muted);">Séries</span></div>
+<div style="display:flex; padding:3px; border:1px solid var(--border); border-radius:999px; font-size:13px;"><span style="padding:6px 14px; color:var(--muted);">Sûr</span><span style="padding:6px 14px; border-radius:999px; background:var(--surface-2); font-weight:600;">Équilibré</span><span style="padding:6px 14px; color:var(--muted);">Audacieux</span></div>
+<div style="flex:0 1 380px; height:38px; display:flex; align-items:center; padding:0 16px; border:1px solid var(--border); border-radius:999px; font-size:14px; color:var(--muted);">Ce soir j’ai envie de…</div>
+</div>
+<main style="flex:1; display:flex; justify-content:center; align-items:flex-start; padding-top:56px;">
+<div style="width:1040px; display:grid; grid-template-columns:340px minmax(0,1fr); gap:80px; align-items:center;">
+<div style="height:510px; display:flex; align-items:center; justify-content:center;">{{ ghostStack }}</div>
+<div role="status" style="display:flex; flex-direction:column; gap:22px;">
+<span style="font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted);">Premier lot</span>
+<h2 style="margin:0; font-family:Newsreader,Georgia,serif; font-weight:500; font-size:52px; line-height:1.04; letter-spacing:-.015em;">Constitution de votre paquet…</h2>
+<p style="margin:0; font-size:18px; line-height:1.5; color:var(--muted); max-width:48ch;">Le modèle choisit et explique. Le premier lot demande quelques secondes.</p>
+<div style="display:flex; flex-direction:column; gap:8px; max-width:520px; margin-top:6px;">
+<div style="position:relative; height:6px; border-radius:3px; background:var(--surface-2);">
+<span style="position:absolute; left:50%; right:16.7%; top:0; bottom:0; background:var(--border-strong); border-radius:3px;"></span>
+<span style="position:absolute; left:0; top:0; bottom:0; width:{{ elapsedPct }}; background:var(--accent); border-radius:3px;"></span>
+</div>
+<div style="display:flex; justify-content:space-between; font-size:13px; color:var(--muted); font-variant-numeric:tabular-nums;"><span><strong style="color:var(--text);">{{ elapsed }} s</strong></span><span>d’habitude 15 à 25 s</span></div>
+</div>
+<div style="display:flex; flex-direction:column; gap:12px; margin-top:22px; padding-top:22px; border-top:1px solid var(--border); max-width:560px;">
+<span style="font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted);">Le deck se joue au clavier</span>
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:10px 32px; font-size:15px;">
+<span style="display:flex; align-items:center; gap:12px;"><span style="min-width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:14px;">→</span>J’aime</span>
+<span style="display:flex; align-items:center; gap:12px;"><span style="min-width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:14px;">←</span>Pas pour moi</span>
+<span style="display:flex; align-items:center; gap:12px;"><span style="min-width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:14px;">↑</span>Déjà vu, aimé</span>
+<span style="display:flex; align-items:center; gap:12px;"><span style="min-width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:14px;">↓</span>Déjà vu, pas pour moi</span>
+<span style="display:flex; align-items:center; gap:12px;"><span style="min-width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:14px;">N</span>Plus tard</span>
+<span style="display:flex; align-items:center; gap:12px;"><span style="min-width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:14px;">U</span>Annuler</span>
+<span style="display:flex; align-items:center; gap:12px;"><span style="min-width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border-strong); border-radius:4px; font-size:14px;">T</span>Voir la bande-annonce</span>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+</div>
+
+</div>
+
+<p style="margin:0; max-width:1100px; font-size:15px; line-height:1.55; color:#b5aa9c;">Textes repris tels quels de <code style="font-family:ui-monospace,Menlo,monospace; color:#f3eee7;">shared/i18n/fr/console.json</code>. Nouveaux textes proposés : « d’habitude 15 à 25 s », « Le deck se joue au clavier », « Premier lot », et les catégories des impasses. Les raisons, résumés et notes des cartes sont des exemples.</p>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;animateWait&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;elapsed&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:12,&quot;min&quot;:0,&quot;max&quot;:30,&quot;step&quot;:1,&quot;unit&quot;:&quot;s&quot;,&quot;tsType&quot;:&quot;number&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const animate = this.props.animateWait ?? true;
+    const elapsed = Math.max(0, Math.min(30, this.props.elapsed ?? 12));
+    const card = (r, delay, z) => React.createElement('div', {
+      key: z,
+      style: {
+        position: 'absolute', width: 240, height: 360, borderRadius: 8,
+        background: 'repeating-linear-gradient(135deg, #1d1a16 0 10px, #25201b 10px 20px)',
+        boxShadow: '0 30px 60px -24px rgb(0 0 0 / .8), 0 0 0 1px rgb(255 255 255 / .06)',
+        '--r': r + 'deg', transform: `rotate(${r}deg)`, zIndex: z,
+        animation: animate ? `tdDeal 2.7s cubic-bezier(.2,.8,.2,1) ${delay}s infinite both` : 'none'
+      }
+    });
+    const ghostStack = React.createElement('div', { style: { position: 'relative', width: 240, height: 360 } },
+      card(-5, 0, 1), card(3, 0.9, 2), card(-1, 1.8, 3));
+    return {
+      ghostStack,
+      elapsed,
+      elapsedPct: (elapsed / 30 * 100).toFixed(1) + '%',
+      colors: [
+        { n: '--bg', d: '#0f0d0b', l: '#f5f1ea', note: 'fond de page' },
+        { n: '--surface', d: '#1a1714', l: '#fffdf9', note: 'barres, champs' },
+        { n: '--surface-2', d: '#24201c', l: '#ece6dc', note: 'segment actif, bouton' },
+        { n: '--border', d: '#37312b', l: '#dcd3c6', note: 'filets' },
+        { n: '--border-strong', d: '#5a5148', l: '#a99d8c', note: 'contours de bouton' },
+        { n: '--text', d: '#f3eee7', l: '#1c1813', note: 'texte' },
+        { n: '--muted', d: '#b5aa9c', l: '#5f564b', note: 'texte second · AA' },
+        { n: '--accent', d: '#f2b35a', l: '#eaa546', note: 'remplissage J’aime' },
+        { n: '--on-accent', d: '#1a1209', l: '#1c1813', note: 'texte sur accent' },
+        { n: '--accent-ink', d: '#f2b35a', l: '#8a5300', note: 'accent en texte' },
+        { n: '--bet', d: '#b9b5ff', l: '#5b4fc4', note: 'pick_type explore' },
+        { n: '--success', d: '#8fd4a4', l: '#1f6b3f', note: 'sur votre serveur' },
+        { n: '--warning', d: '#f2c46b', l: '#8a5a00', note: 'votes non envoyés' },
+        { n: '--danger', d: '#ff8f7f', l: '#b3261e', note: 'erreurs, zone danger' },
+        { n: '--focus', d: '#f3eee7', l: '#1c1813', note: 'anneau de focus' }
+      ],
+      typeScale: [
+        { n: '--text-3xl', px: '52px', f: 'Newsreader, Georgia, serif', s: 'normal', w: 500, sample: 'Titre de carte' },
+        { n: '--text-2xl', px: '36px', f: 'Newsreader, Georgia, serif', s: 'normal', w: 500, sample: 'Titre d’état' },
+        { n: '--title-phone', px: '30px', f: 'Newsreader, Georgia, serif', s: 'normal', w: 500, sample: 'Titre téléphone' },
+        { n: '--text-xl', px: '26px', f: 'Newsreader, Georgia, serif', s: 'italic', w: 400, sample: 'La raison, en italique' },
+        { n: '--text-lg', px: '18px', f: 'Instrument Sans, sans-serif', s: 'normal', w: 600, sample: 'Valeur de note 8,4' },
+        { n: '--text-md', px: '15px', f: 'Instrument Sans, sans-serif', s: 'normal', w: 400, sample: 'Texte courant, boutons, résumé' },
+        { n: '--text-sm', px: '14px', f: 'Instrument Sans, sans-serif', s: 'normal', w: 400, sample: 'Navigation, puces, indices' },
+        { n: '--text-xs', px: '12px', f: 'Instrument Sans, sans-serif', s: 'normal', w: 600, sample: 'POURQUOI CELUI-CI' },
+        { n: '--text-2xs', px: '11px', f: 'Instrument Sans, sans-serif', s: 'normal', w: 700, sample: 'SUR VOS SERVICES' }
+      ],
+      spaces: [
+        { n: '--space-1', v: '4px' }, { n: '--space-2', v: '8px' }, { n: '--space-3', v: '12px' },
+        { n: '--space-4', v: '16px' }, { n: '--space-5', v: '24px' }, { n: '--space-6', v: '32px' },
+        { n: '--space-7', v: '48px' }, { n: '--space-8', v: '64px' }
+      ],
+      radii: [
+        { n: '--radius-sm', v: '4px', use: 'touches' }, { n: '--radius-md', v: '8px', use: 'affiches' },
+        { n: '--radius-lg', v: '14px', use: 'carte tél.' }, { n: '--radius-pill', v: '999px', use: 'boutons' }
+      ],
+      motion: [
+        { n: '--dur-fast', v: '120 ms', use: 'survol, pression' },
+        { n: '--dur-base', v: '200 ms', use: 'changement d’état' },
+        { n: '--dur-swipe', v: '320 ms', use: 'la carte part' },
+        { n: '--dur-deal', v: '420 ms', use: 'la suivante arrive, ressort léger' },
+        { n: '--ease-out', v: '.2 .8 .2 1', use: 'par défaut' },
+        { n: '--ease-spring', v: '.34 1.56 .64 1', use: 'arrivée de carte seulement' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

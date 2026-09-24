@@ -1,0 +1,172 @@
+/*
+ * Tindarr — design tokens (refonte).
+ * Remplace le bloc :root de web/src/styles/index.css. CSP-safe : aucune règle en ligne,
+ * les polices sont servies par le serveur (font-src 'self').
+ * Thème : sombre par défaut ; [data-theme="light"] ou prefers-color-scheme: light.
+ */
+
+@font-face {
+  font-family: "Newsreader";
+  src: url("/fonts/newsreader-var.woff2") format("woff2");
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Newsreader";
+  src: url("/fonts/newsreader-italic-var.woff2") format("woff2");
+  font-weight: 300 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Instrument Sans";
+  src: url("/fonts/instrument-sans-var.woff2") format("woff2");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* --- couleur : sombre (défaut) --- */
+  --bg: #0f0d0b;
+  --surface: #1a1714;
+  --surface-2: #24201c;
+  --border: #37312b;
+  --border-strong: #5a5148;
+  --text: #f3eee7;
+  --muted: #b5aa9c;          /* 8,9:1 sur --bg, 7,6:1 sur --surface */
+  --accent: #f2b35a;         /* remplissage : J'aime, onglet actif */
+  --on-accent: #1a1209;
+  --accent-ink: #f2b35a;     /* accent utilisé comme texte */
+  --bet: #b9b5ff;            /* pick_type = explore */
+  --bet-ink: #b9b5ff;
+  --success: #8fd4a4;
+  --warning: #f2c46b;
+  --danger: #ff8f7f;
+  --focus: #f3eee7;
+  --scrim: linear-gradient(to top, rgb(10 8 6 / 96%) 0%, rgb(10 8 6 / 86%) 45%, rgb(10 8 6 / 0%) 100%);
+  --on-scrim: #f3eee7;       /* toujours sombre sous le texte, dans les deux thèmes */
+  --poster-empty: #24201c;
+
+  /* --- typographie --- */
+  --font-display: "Newsreader", Georgia, "Times New Roman", serif;
+  --font-ui: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --text-2xs: 0.6875rem;  /* 11 — clés, micro-étiquettes */
+  --text-xs: 0.75rem;     /* 12 — étiquettes de section, capitales */
+  --text-sm: 0.875rem;    /* 14 — nav, puces, indices */
+  --text-md: 0.9375rem;   /* 15 — texte courant, boutons */
+  --text-lg: 1.125rem;    /* 18 — raison (téléphone), valeurs de note */
+  --text-xl: 1.625rem;    /* 26 — raison (bureau) */
+  --text-2xl: 2.25rem;    /* 36 — titre d'état */
+  --text-3xl: 3.25rem;    /* 52 — titre de carte (bureau) */
+  --title-phone: 1.875rem;/* 30 — titre de carte (téléphone) */
+  --leading-tight: 1.05;
+  --leading-snug: 1.3;
+  --leading-body: 1.55;
+  --tracking-caps: 0.08em;
+
+  /* --- espacement (base 4 px) --- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;       /* gouttière téléphone */
+  --space-5: 1.5rem;
+  --space-6: 2rem;       /* gouttière bureau */
+  --space-7: 3rem;
+  --space-8: 4rem;
+
+  /* --- rayons --- */
+  --radius-sm: 4px;      /* touches */
+  --radius-md: 8px;      /* affiches, champs */
+  --radius-lg: 14px;     /* carte téléphone, dialogues */
+  --radius-pill: 999px;  /* boutons, puces */
+
+  /* --- élévation --- */
+  --shadow-poster: 0 40px 90px -30px rgb(0 0 0 / 80%), 0 0 0 1px rgb(255 255 255 / 6%);
+  --shadow-float: 0 18px 40px -16px rgb(0 0 0 / 70%);
+
+  /* --- focus --- */
+  --focus-ring: 2px solid var(--focus);
+  --focus-offset: 3px;
+
+  /* --- mouvement --- */
+  --dur-fast: 120ms;     /* survol, pression */
+  --dur-base: 200ms;     /* changement d'état */
+  --dur-swipe: 320ms;    /* carte qui part */
+  --dur-deal: 420ms;     /* carte qui arrive */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --swipe-tilt: 8deg;
+
+  font-family: var(--font-ui);
+  font-size: 100%;
+  line-height: var(--leading-body);
+}
+
+/* --- couleur : clair --- */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f5f1ea;
+  --surface: #fffdf9;
+  --surface-2: #ece6dc;
+  --border: #dcd3c6;
+  --border-strong: #a99d8c;
+  --text: #1c1813;
+  --muted: #5f564b;          /* 6,6:1 sur --bg */
+  --accent: #eaa546;
+  --on-accent: #1c1813;
+  --accent-ink: #8a5300;     /* 6,1:1 sur --surface */
+  --bet: #5b4fc4;
+  --bet-ink: #5b4fc4;        /* 6,3:1 sur --surface */
+  --success: #1f6b3f;
+  --warning: #8a5a00;
+  --danger: #b3261e;
+  --focus: #1c1813;
+  --poster-empty: #ece6dc;
+  --shadow-poster: 0 30px 60px -30px rgb(70 45 20 / 35%), 0 0 0 1px rgb(28 24 19 / 8%);
+  --shadow-float: 0 14px 30px -16px rgb(70 45 20 / 30%);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f5f1ea;
+    --surface: #fffdf9;
+    --surface-2: #ece6dc;
+    --border: #dcd3c6;
+    --border-strong: #a99d8c;
+    --text: #1c1813;
+    --muted: #5f564b;
+    --accent: #eaa546;
+    --on-accent: #1c1813;
+    --accent-ink: #8a5300;
+    --bet: #5b4fc4;
+    --bet-ink: #5b4fc4;
+    --success: #1f6b3f;
+    --warning: #8a5a00;
+    --danger: #b3261e;
+    --focus: #1c1813;
+    --poster-empty: #ece6dc;
+    --shadow-poster: 0 30px 60px -30px rgb(70 45 20 / 35%), 0 0 0 1px rgb(28 24 19 / 8%);
+    --shadow-float: 0 14px 30px -16px rgb(70 45 20 / 30%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-swipe: 0ms;
+    --dur-deal: 0ms;
+    --swipe-tilt: 0deg;
+  }
+}
+
+:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
