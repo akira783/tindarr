@@ -466,19 +466,25 @@ _REPORTED_FAILURES: Final = {
 }
 
 
+#: Failures the deck latches without telling anybody. See ``_failure_problem``.
+_SILENT_FAILURES: Final = frozenset({"interrupted", "internal_error"})
+
+
 def _failure_problem(code: str) -> ProblemError | None:
     """Turn a stored job failure into the problem to raise, or ``None`` to stay quiet.
 
-    ``interrupted`` is the one that is deliberately silent. A restart is not something
-    the user did, nothing about it will be different next time, and the poll that found
-    it is one generation away from a deck: reporting it would cost somebody an error
-    screen for a server that is already fine. It is still latched as reported, so the
-    next poll starts a batch instead of looking at it again.
+    Two are deliberately silent. ``interrupted`` is a restart: not something the user
+    did, nothing that will be different next time, and the poll that found it is one
+    generation away from a deck. ``internal_error`` is a bug on this side that has
+    already been logged with its traceback — and, if a request was in flight when it
+    happened, already answered with a ``500``; a second error screen on the next poll
+    would report one event twice. Both are still latched as reported, so the next poll
+    starts a batch rather than looking at them again.
     """
     build = _REPORTED_FAILURES.get(code)
     if build is not None:
         return build()
-    if code == "interrupted":
+    if code in _SILENT_FAILURES:
         return None
     return ProblemError(
         HTTPStatus.BAD_GATEWAY,

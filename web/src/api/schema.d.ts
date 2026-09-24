@@ -3982,8 +3982,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description `metadata_unreachable` and nothing cached. */
-            502: {
+            /**
+             * @description `metadata_unreachable`, and nothing cached. A list up to a fortnight old
+             *     is served instead whenever there is one: it is still the right set of
+             *     logos, and a preferences screen that cannot be opened because TMDb is
+             *     slow is worse than one that is a release behind.
+             */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
