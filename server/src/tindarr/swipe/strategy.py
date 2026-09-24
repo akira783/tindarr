@@ -90,8 +90,18 @@ class StrategyContext:
     history: tuple[Vote, ...] = ()
     #: What the household already owns.
     library: LibraryIndex = field(default_factory=LibraryIndex)
-    #: What this user has watched on the media server.
+    #: What this user has watched on the media server, and — since lot 4c — whatever a
+    #: file import said they watched elsewhere (``tindarr.swipe.history``). One tuple,
+    #: because the engine reads "they finished this and gave up on that" the same way
+    #: wherever it was learned; ADR 0013's point 4 is that an import is exactly this
+    #: signal over the titles a media server cannot see.
     engagement: tuple[Engagement, ...] = ()
+    #: Titles this person has already watched, learned outside the deck: an import, a
+    #: tick on the calibration grid. They are **not** votes — no strategy replays them,
+    #: no rate counts them — and they are not the library either, since nothing here is
+    #: owned. They exist so that ``excluded`` can take them out of the pool, which is
+    #: the only thing ADR 0013 asks an import to do to a batch.
+    known: frozenset[TitleRef] = frozenset()
     #: Cards already served to this user, voted on or not.
     served: frozenset[TitleRef] = frozenset()
     #: What the household refuses to be shown.
@@ -132,11 +142,12 @@ class StrategyContext:
     def excluded(self) -> frozenset[TitleRef]:
         """Everything a batch must not contain, for reasons the strategy can see.
 
-        Voted on, already served, or already owned. ADR 0013 asks for these to be
-        applied to the candidate pool rather than to the model's answer, which is why
-        they are handed to the strategy instead of being filtered out behind its back.
+        Voted on, already served, already owned, or already watched somewhere this
+        deck never saw. ADR 0013 asks for these to be applied to the candidate pool
+        rather than to the model's answer, which is why they are handed to the strategy
+        instead of being filtered out behind its back.
         """
-        return self.voted | self.served | self.library.refs
+        return self.voted | self.served | self.library.refs | self.known
 
 
 class Strategy(Protocol):

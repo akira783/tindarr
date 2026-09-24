@@ -72,6 +72,26 @@ class TitleDetails:
 
 
 @dataclass(frozen=True, slots=True)
+class ExternalMatch:
+    """What TMDb answered for an id from somewhere else (an IMDb ``tt…``).
+
+    An id is not a string that resembles a title: an IMDb ratings export carries the
+    exact identity of every row, so a file import resolves those through ``/find`` and
+    never through a search. Nothing here is ranked, nothing is abstained from, and
+    nothing lands in a review queue — there is one answer or none.
+    """
+
+    ref: TitleRef
+    title: str
+    year: int | None = None
+    poster_path: str | None = None
+    #: ``True`` when the id named an **episode** and ``ref`` is the series it belongs
+    #: to. An IMDb export rates episodes one by one, and a card is never an episode, so
+    #: the caller counts it as one episode of that series rather than as a title.
+    episode: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class Provider:
     """One streaming offer for a title in one region."""
 
@@ -208,6 +228,10 @@ class Metadata(Protocol):
 
     async def related(self, ref: TitleRef, language: str, page: int = 1) -> list[Title]:
         """Return the titles TMDb recommends to somebody who liked ``ref``."""
+        ...
+
+    async def find_imdb(self, imdb_id: str, language: str) -> ExternalMatch | None:
+        """Resolve an IMDb id exactly, or return ``None`` when TMDb does not know it."""
         ...
 
     async def excluded_genre_ids(self, filters: TitleFilters) -> frozenset[int]:

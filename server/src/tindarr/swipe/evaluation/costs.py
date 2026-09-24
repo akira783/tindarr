@@ -33,6 +33,7 @@ from tindarr.ports.connectors import ConnectionCheck
 from tindarr.ports.llm import Generation, LlmCapabilities, LlmProvider, LlmProviderKind, Prompt
 from tindarr.ports.metadata import (
     DiscoverQuery,
+    ExternalMatch,
     Metadata,
     Provider,
     SearchQuery,
@@ -227,6 +228,11 @@ class CountingMetadata:
         """Read one recommendations page, counted."""
         self._count("related")
         return await self._inner.related(ref, language, page)
+
+    async def find_imdb(self, imdb_id: str, language: str) -> ExternalMatch | None:
+        """Resolve an external id, counted. A replay never makes one; an import does."""
+        self._count("find_imdb")
+        return await self._inner.find_imdb(imdb_id, language)
 
     async def excluded_genre_ids(self, filters: TitleFilters) -> frozenset[int]:
         """Resolve the excluded genres, counted once however many pages it reads.

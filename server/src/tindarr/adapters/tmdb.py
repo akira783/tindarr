@@ -52,6 +52,7 @@ from tindarr.ports.connectors import ConnectionCheck, ConnectorHealth
 from tindarr.ports.metadata import (
     DiscoverOrder,
     DiscoverQuery,
+    ExternalMatch,
     OfferKind,
     Provider,
     SearchQuery,
@@ -87,6 +88,8 @@ _YOUTUBE_KEY: Final = re.compile(r"[A-Za-z0-9_-]{6,20}")
 #: else is dropped, because the API turns a path into a URL under TMDb's image host and
 #: a path with ``..`` or a scheme in it would not stay under it.
 _IMAGE_PATH: Final = re.compile(r"/[A-Za-z0-9._-]{1,128}")
+#: An IMDb id, checked before it becomes a URL path segment.
+_IMDB_ID: Final = re.compile(r"tt[0-9]{1,12}")
 #: A v4 read access token is a JWT; a v3 key is not.
 _BEARER_PREFIX: Final = "eyJ"
 _JWT_PARTS: Final = 3
@@ -490,6 +493,45 @@ class TmdbMetadata:
             raise self._unreachable("trailer", failure) from None
         return _best_trailer(_rows(payload), iso)
 
+    # --- external ids -----------------------------------------------------------------
+
+    async def find_imdb(self, imdb_id: str, language: str) -> ExternalMatch | None:
+        """Resolve an ``tt…`` id through ``/find``, exactly, or answer ``None``.
+
+        An IMDb ratings export carries the identity of every row, so there is nothing
+        here to rank and nothing to abstain from: TMDb either holds that id or it does
+        not. The three result lists are read in the order a card cares about — a film,
+        a series, then an **episode**, whose ``show_id`` is the series it belongs to,
+        because IMDb rates episodes one by one and a card is never an episode.
+
+        The id is checked before it travels: it reaches a URL path, and the one thing
+        that must never be true of a value in a URL path is that the caller chose its
+        shape.
+        """
+        if not _IMDB_ID.fullmatch(imdb_id):
+            return None
+        try:
+            async with self._session() as session:
+                params = {"external_source": "imdb_id", "language": language}
+                payload = await self._get(session, f"/find/{imdb_id}", params)
+        except RemoteCallError as failure:
+            raise self._unreachable("find", failure) from None
+        pairs: tuple[tuple[str, MediaKind], ...] = (
+            ("movie_results", "movie"),
+            ("tv_results", "tv"),
+        )
+        for key, kind in pairs:
+            for row in _rows(payload, key):
+                found = title_of(row, kind)
+                if found is not None:
+                    return ExternalMatch(
+                        ref=found.ref,
+                        title=found.title,
+                        year=found.year,
+                        poster_path=found.poster_path,
+                    )
+        return _episode_match(_rows(payload, "tv_episode_results"))
+
     # --- content filters ------------------------------------------------------------
 
     async def excluded_genre_ids(self, filters: TitleFilters) -> frozenset[int]:
@@ -544,6 +586,21 @@ class TmdbMetadata:
         for genre_id, name in by_id.items():
             found.setdefault(normalize_title(name), genre_id)
         return found
+
+
+def _episode_match(rows: Sequence[Mapping[str, Any]]) -> ExternalMatch | None:
+    """Return the **series** an episode row belongs to, which is what a card can be."""
+    for row in rows:
+        show_id = _int(row.get("show_id"))
+        if show_id is not None and show_id > 0:
+            return ExternalMatch(
+                ref=TitleRef("tv", show_id),
+                title=as_text(row.get("name")) or "",
+                year=_year_of(row.get("air_date")),
+                poster_path=image_path(row.get("still_path")),
+                episode=True,
+            )
+    return None
 
 
 def _row_kind(row: Mapping[str, Any], fallback: MediaKind) -> MediaKind:

@@ -21,6 +21,7 @@ from tindarr.ports.llm import (
 )
 from tindarr.ports.metadata import (
     DiscoverQuery,
+    ExternalMatch,
     Provider,
     SearchQuery,
     Title,
@@ -72,6 +73,15 @@ class InMemoryMetadata:
     )
     #: TMDb's genre list, as ``id -> name``.
     genre_names: Mapping[int, str] = field(default_factory=lambda: {878: "Science Fiction"})
+    #: What ``search`` answers for one query text, when the exact-title rule below is
+    #: not what a test wants (an import searches for spellings, not for exact titles).
+    search_results: Mapping[str, Sequence[Title]] = field(
+        default_factory=dict[str, Sequence[Title]]
+    )
+    #: What ``find_imdb`` answers for an ``tt…`` id.
+    external: Mapping[str, ExternalMatch] = field(default_factory=dict[str, ExternalMatch])
+    #: How many episodes ``details`` reports for a series.
+    episode_counts: Mapping[TitleRef, int] = field(default_factory=dict[TitleRef, int])
 
     async def test(self) -> ConnectionCheck:
         self.calls.append("test")
@@ -79,8 +89,15 @@ class InMemoryMetadata:
 
     async def search(self, query: SearchQuery) -> list[Title]:
         self.calls.append(f"search:{query.title}")
+        scripted = self.search_results.get(query.title)
+        if scripted is not None:
+            return list(scripted)
         wanted = query.title.casefold()
         return [row for row in self.titles if row.title.casefold() == wanted]
+
+    async def find_imdb(self, imdb_id: str, language: str) -> ExternalMatch | None:
+        self.calls.append(f"find:{imdb_id}:{language}")
+        return self.external.get(imdb_id)
 
     async def match(self, query: SearchQuery) -> Title | None:
         return next(iter(await self.search(query)), None)
@@ -111,7 +128,12 @@ class InMemoryMetadata:
         self.calls.append(f"details:{ref.kind}:{ref.tmdb_id}:{language}")
         found = next((row for row in self.titles if row.ref == ref), None)
         name = found.title if found is not None else f"{ref.kind} {ref.tmdb_id}"
-        return TitleDetails(ref=ref, title=name, year=found.year if found else None)
+        return TitleDetails(
+            ref=ref,
+            title=name,
+            year=found.year if found else None,
+            episodes=self.episode_counts.get(ref),
+        )
 
     async def watch_providers(self, ref: TitleRef, region: str) -> list[Provider]:
         self.calls.append(f"providers:{ref.tmdb_id}:{region}")
