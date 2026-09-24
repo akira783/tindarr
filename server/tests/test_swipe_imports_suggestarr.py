@@ -417,3 +417,23 @@ def test_skips_a_linked_profile_that_names_nothing(tmp_path: Path) -> None:
     connection.close()
 
     assert suggestarr.read_identities(database) == ()
+
+
+async def test_a_refusal_names_the_accounts_on_offer(engine: AsyncEngine, tmp_path: Path) -> None:
+    """There is no other way to discover a user id, so the error carries them."""
+    user_id = await _user(engine)
+    identities = suggestarr.read_identities(fork_database(tmp_path / "requests.db"))
+
+    async with write_transaction(engine) as connection:
+        with pytest.raises(suggestarr.MappingError, match=f"{user_id} \\(alex\\)"):
+            await suggestarr.resolve_target(connection, identities, 1, override=None)
+
+
+async def test_a_refusal_says_so_when_there_are_no_accounts_at_all(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    identities = suggestarr.read_identities(fork_database(tmp_path / "requests.db"))
+
+    async with write_transaction(engine) as connection:
+        with pytest.raises(suggestarr.MappingError, match="no users yet"):
+            await suggestarr.resolve_target(connection, identities, 1, override=None)

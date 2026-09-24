@@ -278,14 +278,15 @@ async def resolve_target(
     if override is not None:
         user = await user_repository.get(connection, override)
         if user is None:
-            msg = f"no Tindarr user has the id '{override}'"
+            msg = f"no Tindarr user has the id '{override}'.{await _on_offer(connection)}"
             raise MappingError(msg)
         return user.id
     linked = [identity for identity in identities if identity.fork_user_id == fork_user_id]
     if not linked:
         msg = (
             f"the fork's user {fork_user_id} has no linked media server account, so there "
-            "is nothing to match a Tindarr account on. Name one with --user <user-id>."
+            f"is nothing to match a Tindarr account on. Name one with "
+            f"--user <user-id>.{await _on_offer(connection)}"
         )
         raise MappingError(msg)
     matched: set[str] = set()
@@ -298,9 +299,24 @@ async def resolve_target(
     tried = ", ".join(sorted(identity.external_user_id for identity in linked))
     msg = (
         f"the fork's user {fork_user_id} maps to {len(matched)} Tindarr accounts "
-        f"(media server ids tried: {tried}). Name one with --user <user-id>."
+        f"(media server ids tried: {tried}). Name one with "
+        f"--user <user-id>.{await _on_offer(connection)}"
     )
     raise MappingError(msg)
+
+
+async def _on_offer(connection: AsyncConnection) -> str:
+    """Return the accounts ``--user`` could name, for the end of a refusal message.
+
+    A refusal that says "name an account" and then makes the operator go and find the id
+    in a database is a refusal that will be answered with a guess. There is no console
+    page and no other command that lists these, so the error itself carries them.
+    """
+    found = await user_repository.list_all(connection)
+    if not found:
+        return " This instance has no users yet: set it up and sign in once first."
+    listed = ", ".join(f"{user.id} ({user.name})" for user in found)
+    return f" The accounts on this instance are: {listed}."
 
 
 async def store_votes(
