@@ -190,11 +190,15 @@ def test_the_jobs_are_started_with_the_application(app: FastAPI) -> None:
 
     with console_client(app) as client:
         names = run(client, running)
-    # Purge, user sync, handle sweep and the Quick Connect probe.
+    # Purge, user sync, handle sweep, the Quick Connect probe, and the swipe engine's
+    # two schedules. The import and generation runners own no task until somebody hands
+    # them work, so they are deliberately absent here.
     assert sorted(name for name in names if name.startswith("tindarr.jobs.")) == [
         "tindarr.jobs.handle_sweep",
         "tindarr.jobs.purge",
         "tindarr.jobs.quick_connect_probe",
+        "tindarr.jobs.swipe_purge",
+        "tindarr.jobs.swipe_warm_up",
         "tindarr.jobs.user_sync",
     ]
 

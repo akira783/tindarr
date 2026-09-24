@@ -1330,7 +1330,18 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
         "502":
-          description: "The last generation failed: `llm_auth_failed`, `llm_quota`, `llm_model_not_found`, `llm_unreachable`, `llm_invalid_output`. Reported once."
+          description: "The last generation failed: `llm_auth_failed`, `llm_quota`, `llm_model_not_found`, `llm_invalid_output`, `llm_unreachable`. Reported once."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "503":
+          description: |
+            The last generation failed because TMDb did not answer
+            (`metadata_unreachable`). Reported once, like the `502`. A model that
+            fails costs the rationales and not the batch — the retrieved pool is
+            served in its own order — so an AI provider is rarely why a generation
+            produces nothing; TMDb is, because a pool it will not answer for is not
+            a pool.
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }

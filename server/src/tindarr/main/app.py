@@ -49,6 +49,13 @@ from tindarr.jobs.media_server import (
 )
 from tindarr.jobs.publicurl import public_url_check_job
 from tindarr.jobs.purge import BackgroundJob, purge_job
+from tindarr.jobs.swipe import (
+    BatchRunner,
+    ProfileRunner,
+    close_abandoned_jobs,
+    swipe_purge_job,
+    warm_up_job,
+)
 from tindarr.ports.factories import ConnectorFactories
 from tindarr.ports.media_server import MediaServerFactory
 from tindarr.ports.plextv import PlexTv
@@ -57,6 +64,12 @@ from tindarr.storage.db import create_async_db_engine, database_path
 from tindarr.storage.migrate import upgrade_database
 from tindarr.storage.server_state import ServerStateRepository
 from tindarr.storage.settings import SettingsStore, environment_overrides
+from tindarr.swipe.deck import DeckService
+from tindarr.swipe.engine import SwipeEngine
+from tindarr.swipe.generation import BatchGenerator
+from tindarr.swipe.profile import ProfileService
+from tindarr.swipe.requesting import RequestService
+from tindarr.swipe.voting import VoteService
 from tindarr.swipe.watched import GridService, ImportService
 
 BACKUPS_DIR_NAME = "backups"
@@ -79,6 +92,55 @@ class Wiring:
     public_url_probe: PublicUrlProbe | None = None
     #: Builds TMDb, OMDb, the request backend and the AI providers (step 3).
     connectors: ConnectorFactories | None = None
+
+
+@dataclass(frozen=True)
+class SwipeServices:
+    """The swipe engine's objects, built together because they share one graph."""
+
+    swipe: SwipeEngine
+    generator: BatchGenerator
+    deck: DeckService
+    votes: VoteService
+    requests: RequestService
+    profiles: ProfileService
+    batch_runner: BatchRunner
+    profile_runner: ProfileRunner
+
+
+def build_swipe(  # noqa: PLR0913 - one argument per collaborator the engine needs
+    engine: AsyncEngine,
+    *,
+    settings: SettingsStore,
+    connectors: ConnectorService,
+    connector: MediaServerConnector,
+    install_id: str,
+    clock: Clock,
+) -> SwipeServices:
+    """Build the swipe engine (roadmap 4.5).
+
+    The media server reaches it through a closure rather than an import:
+    ``tindarr.auth`` and ``tindarr.swipe`` sit side by side in the layer order, so the
+    composition root is the only place that may hold both — and the deck is one of the
+    two callers that should keep working when the media server does not answer, which a
+    direct dependency would have made easy to forget.
+    """
+    swipe = SwipeEngine(engine, settings, connectors, lambda: connector.usable(install_id), clock)
+    generator = BatchGenerator(engine, swipe, clock)
+    batch_runner = BatchRunner(generator)
+    profiles = ProfileService(engine, swipe, clock)
+    profile_runner = ProfileRunner(profiles)
+    requests = RequestService(engine, swipe, clock)
+    return SwipeServices(
+        swipe=swipe,
+        generator=generator,
+        deck=DeckService(engine, swipe, generator, batch_runner, clock),
+        votes=VoteService(engine, swipe, requests, profile_runner, clock),
+        requests=requests,
+        profiles=profiles,
+        batch_runner=batch_runner,
+        profile_runner=profile_runner,
+    )
 
 
 @dataclass(frozen=True)
@@ -171,9 +233,19 @@ async def start(
     await setup.ensure_setup_code()
     imports = ImportService(engine, settings, connectors, wiring.clock)
     import_runner = ImportRunner(imports)
-    # An import lives in an asyncio task, and a task does not survive a restart: a row
-    # still claiming to be running is a status the console would poll for ever.
+    deck = build_swipe(
+        engine,
+        settings=settings,
+        connectors=connectors,
+        connector=connector,
+        install_id=state.install_id,
+        clock=wiring.clock,
+    )
+    # An import and a generation both live in asyncio tasks, and a task does not survive
+    # a restart: a row still claiming to run is a status the console would poll for ever
+    # — and, for a generation, a lock on that user's next batch nothing would release.
     await close_abandoned_imports(engine, wiring.clock)
+    await close_abandoned_jobs(engine, wiring.clock)
 
     services = AppServices(
         config=config,
@@ -193,6 +265,13 @@ async def start(
         imports=imports,
         grid=GridService(engine, settings, connectors, wiring.clock),
         import_runner=import_runner,
+        swipe=deck.swipe,
+        deck=deck.deck,
+        votes=deck.votes,
+        requests=deck.requests,
+        profiles=deck.profiles,
+        batch_runner=deck.batch_runner,
+        profile_runner=deck.profile_runner,
         limits=limits,
         hosts=hosts,
         install_id=state.install_id,
@@ -204,6 +283,17 @@ async def start(
         handle_sweep_job(quick_connect),
         quick_connect_probe_job(quick_connect),
         import_runner,
+        deck.batch_runner,
+        deck.profile_runner,
+        swipe_purge_job(engine, wiring.clock),
+        warm_up_job(
+            engine,
+            swipe=deck.swipe,
+            deck=deck.deck,
+            generator=deck.generator,
+            runner=deck.batch_runner,
+            clock=wiring.clock,
+        ),
     )
     public_url_host = host_of(public_url)
     if public_url is not None and public_url_host is not None and public_url_setting.locked:

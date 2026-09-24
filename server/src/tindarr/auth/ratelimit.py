@@ -391,3 +391,18 @@ class RateLimits:
         # standing between a household member and a database full of history rows is
         # this: twenty walls an hour, two hundred answers each.
         self.calibration = SlidingWindow(Limit("calibration_grid", 20, timedelta(hours=1)), clock)
+        # The swipe engine's four post-authentication limits, all keyed by the account
+        # rather than the address (``tindarr.api.v1.swipe``). The deck is polled every
+        # couple of seconds while a batch is generated, so its budget fits that cadence
+        # for a household swiping at once; a vote submission carries up to a hundred
+        # queued items, so a phone coming back online is one call and not a hundred.
+        self.deck = SlidingWindow(Limit("swipe_deck", 120, minute), clock)
+        self.votes = SlidingWindow(Limit("swipe_votes", 120, minute), clock)
+        # A request is a row in somebody else's download queue and a call to a service
+        # this server does not own; nobody fills a watchlist thirty titles a minute by
+        # hand, and auto-request goes through the vote limit above instead.
+        self.requests = SlidingWindow(Limit("swipe_requests", 30, minute), clock)
+        # A rewrite is a model call somebody did not have to pay for deliberately.
+        self.profile_refresh = SlidingWindow(
+            Limit("swipe_profile_refresh", 5, timedelta(hours=1)), clock
+        )

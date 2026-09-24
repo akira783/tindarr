@@ -183,6 +183,15 @@ class DeckService:
         async with self._engine.connect() as connection:
             return await profile_repository.read_preferences(connection, user_id)
 
+    async def update_preferences(
+        self, user_id: str, patch: profile_repository.PreferencesPatch
+    ) -> DeckPreferences:
+        """Apply a partial change and return the whole of what the deck will now read."""
+        async with write_transaction(self._engine) as connection:
+            return await profile_repository.update_preferences(
+                connection, user_id, patch, now=self._clock.now()
+            )
+
     async def resolve(
         self,
         user_id: str,

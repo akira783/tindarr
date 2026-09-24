@@ -5,8 +5,9 @@ the console and the app see stay identical whichever endpoint answered.
 """
 
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Final, Literal
+from uuid import UUID
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
@@ -18,12 +19,14 @@ from tindarr.auth.sessions import CookieGrant
 from tindarr.auth.sessions import TokenPair as TokenPairValue
 from tindarr.connectors import ConnectorInput
 from tindarr.core.net import normalize_public_url
+from tindarr.ports.deck import MediaFilter, Novelty, PickKind, VoteValue
 from tindarr.ports.llm import LlmProviderKind, ReasoningEffort
 from tindarr.ports.media_server import ConnectionCheck, ConnectorHealth, MediaServerKind
-from tindarr.ports.request_backend import SeasonPolicy
+from tindarr.ports.request_backend import Availability, RequestStatus, SeasonPolicy
 from tindarr.ports.titles import MediaKind, TitleRef
 from tindarr.storage.imports import ImportRecord, ReviewCandidate, ReviewEntryRecord
 from tindarr.storage.pairings import Pairing, PairingState
+from tindarr.storage.profiles import MAX_PROFILE_CHARS, DeckPreferences, PreferencesPatch
 from tindarr.storage.sessions import Device, Session
 from tindarr.storage.settings import (
     ContentFilters,
@@ -31,9 +34,13 @@ from tindarr.storage.settings import (
     SettingsStore,
     StreamingRegion,
 )
+from tindarr.storage.usage import ProviderOption, UsageRow
 from tindarr.storage.users import DisabledReason, Role, User
 from tindarr.swipe.calibration import GridTick, GridTitle
+from tindarr.swipe.deck import Calibration, DeckView, ServedCard, SwipeStatus
 from tindarr.swipe.imports import IMPORT_FORMATS, ImportFormat
+from tindarr.swipe.profile import ProfileState
+from tindarr.swipe.voting import LikeEntry, Stats, SubmittedVote, VoteOutcome
 
 #: A Plex PIN or Quick Connect handle, and the pairing code: 128 bits, base64url.
 Handle = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{22,64}$")]
@@ -1035,3 +1042,502 @@ class GridSubmitResponse(BaseModel):
     """Answer of ``POST /swipe/calibration/grid``."""
 
     recorded: int
+
+
+# --- the deck, the votes and what they produce (roadmap 4.5) ---------------------------
+
+
+class RatingsResponse(BaseModel):
+    """Contract schema ``Ratings``: the four scores a card can show."""
+
+    tmdb: float | None = None
+    imdb: float | None = None
+    rotten_tomatoes: int | None = None
+    metacritic: int | None = None
+
+
+class StreamingProviderResponse(BaseModel):
+    """Contract schema ``StreamingProvider``: one offer, and whether it is the user's.
+
+    ``subscribed`` is computed when the card is returned, from the preferences as they
+    stand: ticking a service updates cards somebody is already holding.
+    """
+
+    provider_id: int
+    name: str
+    logo_path: str | None = None
+    offer: Literal["subscription", "free", "ads", "rent", "buy"]
+    subscribed: bool
+
+
+class ProviderOptionResponse(BaseModel):
+    """Contract schema ``ProviderOption``: one service a user can say they pay for."""
+
+    provider_id: int
+    name: str
+    logo_path: str | None = None
+
+    @classmethod
+    def of(cls, option: ProviderOption) -> "ProviderOptionResponse":
+        """Build one option from the cached region list."""
+        return cls(provider_id=option.provider_id, name=option.name, logo_path=option.logo_path)
+
+
+class ProviderListResponse(BaseModel):
+    """Answer of ``GET /swipe/providers``."""
+
+    region: str
+    providers: list[ProviderOptionResponse]
+
+
+class TrailerResponse(BaseModel):
+    """Contract schema ``Trailer``: a YouTube key, never a URL this server built."""
+
+    site: Literal["youtube"] = "youtube"
+    key: str
+    name: str | None = None
+    language: str | None = None
+
+
+class CardResponse(BaseModel):
+    """Contract schema ``Card``: one card, exactly as the server stored it.
+
+    The ``id`` is the only thing a client needs in order to vote, and the only thing it
+    can send back about the card. Everything else here is read off this server's own
+    row, which is the whole of ADR 0007.
+    """
+
+    id: str
+    media_type: MediaKind
+    tmdb_id: int
+    title: str
+    original_title: str | None = None
+    year: int | None = None
+    overview: str | None = None
+    genres: list[str] = []
+    runtime_minutes: int | None = None
+    seasons: int | None = None
+    poster_path: str | None = None
+    backdrop_path: str | None = None
+    ratings: RatingsResponse = RatingsResponse()
+    providers: list[StreamingProviderResponse] = []
+    trailer: TrailerResponse | None = None
+    rationale: str | None = None
+    pick_type: PickKind
+    availability: Availability
+    expires_at: datetime
+
+    @classmethod
+    def of(cls, served: ServedCard) -> "CardResponse":
+        """Build the answer from a stored card and what is true of it right now."""
+        card = served.card
+        return cls(
+            id=card.id,
+            media_type=card.ref.kind,
+            tmdb_id=card.ref.tmdb_id,
+            title=card.title,
+            original_title=card.original_title,
+            year=card.year,
+            overview=card.overview,
+            genres=list(card.genres),
+            runtime_minutes=card.runtime_minutes,
+            seasons=card.seasons,
+            poster_path=card.poster_path,
+            backdrop_path=card.backdrop_path,
+            ratings=RatingsResponse(
+                tmdb=card.ratings.tmdb,
+                imdb=card.ratings.imdb,
+                rotten_tomatoes=card.ratings.rotten_tomatoes,
+                metacritic=card.ratings.metacritic,
+            ),
+            providers=[
+                StreamingProviderResponse(
+                    provider_id=offer.provider_id,
+                    name=offer.name,
+                    logo_path=offer.logo_path,
+                    offer=offer.offer,
+                    subscribed=offer.provider_id in served.subscribed,
+                )
+                for offer in card.providers
+            ],
+            trailer=(
+                None
+                if card.trailer is None
+                else TrailerResponse(
+                    key=card.trailer.key,
+                    name=card.trailer.name,
+                    language=card.trailer.language,
+                )
+            ),
+            rationale=card.rationale,
+            pick_type=card.pick_type,
+            availability=served.availability,
+            # A served card always has one; the type says so and the check constraint
+            # enforces it, so a row without it is a bug worth a 500 rather than a null.
+            expires_at=_expiry(card.expires_at),
+        )
+
+
+class CalibrationResponse(BaseModel):
+    """Contract schema ``Calibration``: how far the deck has got with this person."""
+
+    done: int
+    target: int
+    complete: bool
+
+    @classmethod
+    def of(cls, calibration: Calibration) -> "CalibrationResponse":
+        """Build the progress the deck reports."""
+        return cls(done=calibration.done, target=calibration.target, complete=calibration.complete)
+
+
+class DeckResponse(BaseModel):
+    """Contract schema ``Deck``: what to show next."""
+
+    mode: Literal["normal", "calibration"]
+    novelty: Novelty
+    cards: list[CardResponse]
+    calibration: CalibrationResponse
+    seen_ratio_warning: bool = False
+
+    @classmethod
+    def of(cls, view: DeckView) -> "DeckResponse":
+        """Build the answer from the deck the service assembled."""
+        return cls(
+            mode=view.mode,
+            novelty=view.novelty,
+            cards=[CardResponse.of(card) for card in view.cards],
+            calibration=CalibrationResponse.of(view.calibration),
+            seen_ratio_warning=view.seen_ratio_warning,
+        )
+
+
+class SwipeStatusResponse(BaseModel):
+    """Contract schema ``SwipeStatus``: what a client needs before its first card."""
+
+    llm_configured: bool
+    llm_provider: str | None = None
+    tmdb_configured: bool
+    requests_enabled: bool
+    media_history: bool
+    streaming_region: str | None = None
+    ratings_enabled: bool
+    votes: int
+    calibration: CalibrationResponse
+    profile_ready: bool
+    generations_left_today: int | None = None
+
+    @classmethod
+    def of(cls, status: SwipeStatus) -> "SwipeStatusResponse":
+        """Build the answer from what the deck service read."""
+        return cls(
+            llm_configured=status.llm_configured,
+            llm_provider=status.llm_provider,
+            tmdb_configured=status.tmdb_configured,
+            requests_enabled=status.requests_enabled,
+            media_history=status.media_history,
+            streaming_region=status.streaming_region,
+            ratings_enabled=status.ratings_enabled,
+            votes=status.votes,
+            calibration=CalibrationResponse.of(status.calibration),
+            profile_ready=status.profile_ready,
+            generations_left_today=status.generations_left_today,
+        )
+
+
+class VoteInput(BaseModel):
+    """Contract schema ``VoteInput``: one item of a queue, or one swipe."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    client_vote_id: UUID
+    card_id: Annotated[str, Field(min_length=1, max_length=64)]
+    vote: VoteValue
+    voted_at: datetime | None = None
+
+    @property
+    def submitted(self) -> SubmittedVote:
+        """The domain's own item. The id is normalised, so two spellings are one item."""
+        return SubmittedVote(
+            client_vote_id=str(self.client_vote_id),
+            card_id=self.card_id,
+            value=self.vote,
+            voted_at=self.voted_at,
+        )
+
+
+class VoteSubmitInput(BaseModel):
+    """Body of ``POST /swipe/votes``: one swipe, or a queue a phone held offline."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    votes: Annotated[list[VoteInput], Field(min_length=1, max_length=100)]
+
+
+class VoteResultResponse(BaseModel):
+    """Contract schema ``VoteResult``: what became of one item."""
+
+    client_vote_id: UUID
+    outcome: Literal["stored", "duplicate", "rejected"]
+    code: str | None = None
+    request_status: RequestStatus | None = None
+
+    @classmethod
+    def of(cls, outcome: VoteOutcome) -> "VoteResultResponse":
+        """Build one item's answer."""
+        return cls(
+            client_vote_id=UUID(outcome.client_vote_id),
+            outcome=outcome.outcome,
+            code=outcome.code,
+            request_status=outcome.request_status,
+        )
+
+
+class VoteSubmitResponse(BaseModel):
+    """Answer of ``POST /swipe/votes``: one result per item, in the order they came."""
+
+    results: list[VoteResultResponse]
+    profile_refresh_started: bool = False
+
+
+class VoteResetResponse(BaseModel):
+    """Answer of ``DELETE /swipe/votes``."""
+
+    deleted: int
+
+
+class RequestTitleResponse(BaseModel):
+    """Answer of ``POST /swipe/requests``."""
+
+    request_status: RequestStatus
+
+
+class LikeResponse(BaseModel):
+    """Contract schema ``Like``: a title whose current vote is ``like``."""
+
+    media_type: MediaKind
+    tmdb_id: int
+    title: str
+    year: int | None = None
+    poster_path: str | None = None
+    pick_type: PickKind
+    liked_at: datetime
+    requested: bool
+    availability: Availability
+    watch_url: str | None = None
+
+    @classmethod
+    def of(cls, entry: LikeEntry) -> "LikeResponse":
+        """Build one like from the stored vote and what is true of it now."""
+        vote = entry.vote
+        return cls(
+            media_type=vote.ref.kind,
+            tmdb_id=vote.ref.tmdb_id,
+            title=vote.title,
+            year=vote.year,
+            poster_path=vote.poster_path,
+            pick_type=vote.pick_type,
+            liked_at=vote.voted_at,
+            # Requested from here, or already known to the backend: both are "there is
+            # nothing left for this person to do about it".
+            requested=vote.requested or entry.availability != "none",
+            availability=entry.availability,
+            watch_url=entry.watch_url,
+        )
+
+
+class LikeListResponse(BaseModel):
+    """Answer of ``GET /swipe/likes``."""
+
+    likes: list[LikeResponse]
+    next_cursor: str | None = None
+
+
+class ProfileTextResponse(BaseModel):
+    """The profile itself, inside ``ProfileState``."""
+
+    text: str
+    user_edited: bool
+    updated_at: datetime
+    votes_since_update: int
+
+
+class ProfileStateResponse(BaseModel):
+    """Contract schema ``ProfileState``."""
+
+    profile: ProfileTextResponse | None = None
+    refreshing: bool = False
+    refresh_error: str | None = None
+
+    @classmethod
+    def of(cls, state: ProfileState) -> "ProfileStateResponse":
+        """Build the answer from what the profile service read."""
+        found = state.profile
+        return cls(
+            profile=(
+                None
+                if found is None
+                else ProfileTextResponse(
+                    text=found.text,
+                    user_edited=found.user_edited,
+                    updated_at=found.updated_at,
+                    votes_since_update=max(state.votes - found.votes_at_update, 0),
+                )
+            ),
+            refreshing=state.refreshing,
+            refresh_error=state.refresh_error,
+        )
+
+
+class ProfileSaveInput(BaseModel):
+    """Body of ``PUT /swipe/profile``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: Annotated[str, Field(max_length=MAX_PROFILE_CHARS)]
+
+
+class ProfileRefreshResponse(BaseModel):
+    """Answer of ``POST /swipe/profile/refresh``."""
+
+    started: bool
+
+
+class PreferencesResponse(BaseModel):
+    """Contract schema ``Preferences``."""
+
+    media_type: MediaFilter
+    novelty: Novelty
+    auto_request: bool
+    language: str
+    streaming_services: list[int]
+
+    @classmethod
+    def of(cls, stored: DeckPreferences, fallback: str) -> "PreferencesResponse":
+        """Build the answer, filling the language from the server's when unset."""
+        return cls(
+            media_type=stored.media_filter,
+            novelty=stored.novelty,
+            auto_request=stored.auto_request,
+            language=stored.language or fallback,
+            streaming_services=list(stored.streaming_services),
+        )
+
+
+class PreferencesPatchInput(BaseModel):
+    """Contract schema ``PreferencesPatch``: at least one field."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    media_type: MediaFilter | None = None
+    novelty: Novelty | None = None
+    auto_request: bool | None = None
+    language: Annotated[str, Field(max_length=16)] | None = None
+    streaming_services: Annotated[list[int], Field(max_length=100)] | None = None
+
+    @model_validator(mode="after")
+    def _at_least_one_field(self) -> "PreferencesPatchInput":
+        if not self.model_fields_set:
+            msg = "send at least one preference to change"
+            raise ValueError(msg)
+        for name in ("media_type", "novelty", "auto_request", "streaming_services"):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                msg = f"{name}: null is not a value for this field"
+                raise ValueError(msg)
+        return self
+
+    def as_patch(self) -> PreferencesPatch:
+        """Turn the body into the change to apply, keeping absent and null apart.
+
+        ``language`` is the one field where null is a value: it means "follow the
+        server's language", which is what somebody who has moved house wants.
+        """
+        given = self.model_fields_set
+        return PreferencesPatch(
+            media_filter=self.media_type,
+            novelty=self.novelty,
+            auto_request=self.auto_request,
+            language=self.language,
+            streaming_services=(
+                None if self.streaming_services is None else tuple(self.streaming_services)
+            ),
+            given=frozenset({"media_filter" if name == "media_type" else name for name in given}),
+        )
+
+
+class PickStatsResponse(BaseModel):
+    """One row of ``Stats.by_pick_type``."""
+
+    total: int
+    likes: int
+
+
+class StatsResponse(BaseModel):
+    """Contract schema ``Stats``: with ``skip`` counted apart from every rate."""
+
+    total: int
+    likes: int
+    dislikes: int
+    seen_liked: int
+    seen_disliked: int
+    skips: int
+    requested: int
+    like_rate: float
+    request_rate: float
+    by_pick_type: dict[str, PickStatsResponse]
+
+    @classmethod
+    def of(cls, stats: Stats) -> "StatsResponse":
+        """Build the answer from the counted votes."""
+        return cls(
+            total=stats.total,
+            likes=stats.likes,
+            dislikes=stats.dislikes,
+            seen_liked=stats.seen_liked,
+            seen_disliked=stats.seen_disliked,
+            skips=stats.skips,
+            requested=stats.requested,
+            like_rate=round(stats.like_rate, 4),
+            request_rate=round(stats.request_rate, 4),
+            by_pick_type={
+                pick: PickStatsResponse(total=row.total, likes=row.likes)
+                for pick, row in sorted(stats.by_pick_type.items())
+            },
+        )
+
+
+class UsageDayResponse(BaseModel):
+    """Contract schema ``UsageDay``: one user's AI usage on one UTC day."""
+
+    date: date
+    user_id: str
+    generations: int
+    input_tokens: int
+    output_tokens: int
+    failures: int
+
+    @classmethod
+    def of(cls, row: UsageRow) -> "UsageDayResponse":
+        """Build one row of the administrator's usage page."""
+        return cls(
+            date=row.day,
+            user_id=row.user_id,
+            generations=row.generations,
+            input_tokens=row.input_tokens,
+            output_tokens=row.output_tokens,
+            failures=row.failures,
+        )
+
+
+class UsageResponse(BaseModel):
+    """Answer of ``GET /admin/usage``."""
+
+    days: list[UsageDayResponse]
+
+
+def _expiry(expires_at: datetime | None) -> datetime:
+    """Return a served card's expiry; a card without one was never served."""
+    if expires_at is None:  # pragma: no cover - the CHECK constraint forbids it
+        msg = "a served card has no expiry"
+        raise ValueError(msg)
+    return expires_at

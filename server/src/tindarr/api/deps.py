@@ -20,8 +20,14 @@ from tindarr.connectors import ConnectorService
 from tindarr.core.clock import Clock
 from tindarr.core.config import ServerConfig
 from tindarr.jobs.imports import ImportRunner
+from tindarr.jobs.swipe import BatchRunner, ProfileRunner
 from tindarr.storage.server_state import ServerStateRepository
 from tindarr.storage.settings import SettingsStore
+from tindarr.swipe.deck import DeckService
+from tindarr.swipe.engine import SwipeEngine
+from tindarr.swipe.profile import ProfileService
+from tindarr.swipe.requesting import RequestService
+from tindarr.swipe.voting import VoteService
 from tindarr.swipe.watched import GridService, ImportService
 
 
@@ -54,6 +60,17 @@ class AppServices:
     grid: GridService
     #: Where an accepted upload's TMDb lookups actually run.
     import_runner: ImportRunner
+    #: The swipe engine (roadmap 4.5). ``swipe`` reads the ports and one user's whole
+    #: context; the four services above it are the deck, the votes, the requests and
+    #: the taste profile, and the two runners own the tasks their background work runs
+    #: in.
+    swipe: SwipeEngine
+    deck: DeckService
+    votes: VoteService
+    requests: RequestService
+    profiles: ProfileService
+    batch_runner: BatchRunner
+    profile_runner: ProfileRunner
     limits: RateLimits
     hosts: HostPolicy
     #: Checks that ``public_url`` really reaches this server (docs/auth.md, section 10).
