@@ -161,14 +161,15 @@ async def decide_import_review(
 ) -> None:
     """Accept one of the entry's own candidates, or reject the row.
 
-    ``import_id`` is in the path for the client's sake; the entry is looked up by its
-    own id **scoped to the caller**, so neither id can be used to reach another account.
+    The entry is looked up by its own id, scoped to the caller **and** to the import in
+    the path: neither id reaches another account, and an entry answered through another
+    queue's path is a ``404`` rather than a quiet success.
     """
     user_id = session.signed_in_user.id
     if body.decision == "reject" or body.title is None:
-        await services.imports.reject(user_id, entry_id)
+        await services.imports.reject(user_id, entry_id, import_id)
         return
-    await services.imports.accept(user_id, entry_id, body.title.ref)
+    await services.imports.accept(user_id, entry_id, body.title.ref, import_id)
 
 
 @router.get(
@@ -190,9 +191,10 @@ async def get_calibration_grid(
     summary="Record what the caller ticked on a wall",
 )
 async def submit_calibration_grid(
-    body: GridSubmitInput, services: Services, session: SharedSession
+    body: GridSubmitInput, services: Services, context: Context, session: SharedSession
 ) -> GridSubmitResponse:
     """Write the answers as history. Neither answer is a vote."""
+    services.limits.calibration.hit(context.rate_limit_key)
     ticks = [answer.tick for answer in body.answers]
     recorded = await services.grid.submit(session.signed_in_user.id, ticks)
     return GridSubmitResponse(recorded=recorded)

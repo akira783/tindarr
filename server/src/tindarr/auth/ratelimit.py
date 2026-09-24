@@ -385,3 +385,9 @@ class RateLimits:
         # Nobody imports their Netflix export five times an hour by accident, and the
         # per-user "one at a time" rule below it only bounds what runs, not what arrives.
         self.imports = SlidingWindow(Limit("import_upload", 5, timedelta(hours=1)), clock)
+        # A calibration wall is answered a handful of times in an account's life, and
+        # each answer is a row somebody's own database keeps for ever. The endpoint
+        # takes any TMDb id, not only the ones a wall offered, so the only thing
+        # standing between a household member and a database full of history rows is
+        # this: twenty walls an hour, two hundred answers each.
+        self.calibration = SlidingWindow(Limit("calibration_grid", 20, timedelta(hours=1)), clock)

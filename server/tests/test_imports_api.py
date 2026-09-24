@@ -266,6 +266,21 @@ class TestReviewQueue:
             )
         assert_is_problem(response, 400, "validation_error")
 
+    def test_an_entry_answered_through_another_queue_s_path(self, app: FastAPI) -> None:
+        with console_client(app) as client:
+            csrf = with_tmdb(client, app)
+            created = upload(
+                client, csrf, b'Title,Date\n"Mushoku Tensei: Saison 1: A","9/10/26"\n'
+            ).json()
+            finish(client, app)
+            entry = client.get(f"{IMPORTS}/{created['id']}/review").json()["entries"][0]
+            response = client.post(
+                f"{IMPORTS}/another/review/{entry['id']}",
+                json={"decision": "reject"},
+                headers=console_headers(csrf),
+            )
+        assert_is_problem(response, 404, "not_found")
+
     def test_the_queue_of_an_import_that_is_not_theirs(self, app: FastAPI) -> None:
         with console_client(app) as client:
             with_tmdb(client, app)
@@ -371,6 +386,21 @@ class TestCalibrationGrid:
                 headers=bearer,
             )
         assert recorded.status_code == 200, recorded.text
+
+    def test_too_many_walls_in_an_hour(self, app: FastAPI) -> None:
+        # The endpoint takes any TMDb id, not only the ones a wall offered, so this is
+        # the only thing between a household member and a database of history rows.
+        with console_client(app) as client:
+            csrf = with_tmdb(client, app)
+            answer = {"media_type": "movie", "tmdb_id": 27205, "seen": True}
+            codes: set[int] = set()
+            for _ in range(25):
+                codes.add(
+                    client.post(
+                        GRID, json={"answers": [answer]}, headers=console_headers(csrf)
+                    ).status_code
+                )
+        assert 429 in codes
 
     def test_an_empty_answer_list(self, app: FastAPI) -> None:
         with console_client(app) as client:

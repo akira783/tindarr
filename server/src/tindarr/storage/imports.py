@@ -337,33 +337,48 @@ async def count_pending(connection: AsyncConnection, user_id: str, import_id: st
 
 
 async def get_review(
-    connection: AsyncConnection, user_id: str, entry_id: str
+    connection: AsyncConnection, user_id: str, entry_id: str, import_id: str | None = None
 ) -> ReviewEntryRecord | None:
-    """Return one of **this user's** review entries, or ``None``."""
+    """Return one of **this user's** review entries, or ``None``.
+
+    ``import_id`` is the path the client asked through. It is checked rather than
+    trusted: the entry id already scopes to its owner, and an entry answered under
+    another import's path is a client that has lost track of which queue it is in.
+    """
     statement = (
         import_reviews.select()
         .where(import_reviews.c.id == entry_id)
         .where(import_reviews.c.user_id == user_id)
     )
+    if import_id is not None:
+        statement = statement.where(import_reviews.c.import_id == import_id)
     row = (await connection.execute(statement)).one_or_none()
     return None if row is None else _to_review(row)
 
 
-async def decide(
-    connection: AsyncConnection, user_id: str, entry_id: str, *, status: ReviewStatus, now: datetime
+async def decide(  # noqa: PLR0913 - a compare-and-set names every part of itself
+    connection: AsyncConnection,
+    user_id: str,
+    entry_id: str,
+    *,
+    status: ReviewStatus,
+    now: datetime,
+    import_id: str | None = None,
 ) -> bool:
     """Answer one pending entry, once. Says whether it was still open.
 
     A compare-and-set, like every other state change in this package: two tabs
     answering the same question must not both write a history row.
     """
-    result = await connection.execute(
+    statement = (
         update(import_reviews)
         .where(import_reviews.c.id == entry_id)
         .where(import_reviews.c.user_id == user_id)
         .where(import_reviews.c.status == "pending")
-        .values(status=status, decided_at=now)
     )
+    if import_id is not None:
+        statement = statement.where(import_reviews.c.import_id == import_id)
+    result = await connection.execute(statement.values(status=status, decided_at=now))
     return result.rowcount == 1
 
 

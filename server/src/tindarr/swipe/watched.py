@@ -264,7 +264,9 @@ class ImportService:
             extra={"matched": len(outcome.watched), "queued": queued},
         )
 
-    async def accept(self, user_id: str, entry_id: str, ref: TitleRef) -> WatchedTitle:
+    async def accept(
+        self, user_id: str, entry_id: str, ref: TitleRef, import_id: str | None = None
+    ) -> WatchedTitle:
         """Answer one open question with one of the titles it offered.
 
         Only a candidate the entry itself carries is accepted. The row is the user's
@@ -273,7 +275,7 @@ class ImportService:
         """
         now = self._clock.now()
         async with self._engine.connect() as connection:
-            entry = await import_repository.get_review(connection, user_id, entry_id)
+            entry = await import_repository.get_review(connection, user_id, entry_id, import_id)
         if entry is None or entry.status != "pending":
             raise _no_such_entry()
         chosen = next((one for one in entry.offered if one.ref == ref), None)
@@ -294,17 +296,22 @@ class ImportService:
         )
         async with write_transaction(self._engine) as connection:
             if not await import_repository.decide(
-                connection, user_id, entry_id, status="accepted", now=now
+                connection, user_id, entry_id, status="accepted", now=now, import_id=import_id
             ):
                 raise _no_such_entry()
             await history_repository.record(connection, user_id, [row], now=now)
         return row
 
-    async def reject(self, user_id: str, entry_id: str) -> None:
+    async def reject(self, user_id: str, entry_id: str, import_id: str | None = None) -> None:
         """Answer one open question with "none of these"."""
         async with write_transaction(self._engine) as connection:
             if not await import_repository.decide(
-                connection, user_id, entry_id, status="rejected", now=self._clock.now()
+                connection,
+                user_id,
+                entry_id,
+                status="rejected",
+                now=self._clock.now(),
+                import_id=import_id,
             ):
                 raise _no_such_entry()
 
