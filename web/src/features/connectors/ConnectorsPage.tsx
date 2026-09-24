@@ -119,7 +119,7 @@ function ApiKeyCard({
 
   const body = (): ConnectorInput => ({
     connector: kind,
-    ...(apiKey === "" || locked.has("api_key") ? {} : { api_key: apiKey }),
+    ...(apiKey.trim() === "" || locked.has("api_key") ? {} : { api_key: apiKey.trim() }),
   });
 
   return (
@@ -163,8 +163,8 @@ function RequestsCard({ connector }: { connector: Connector }): ReactNode {
 
   const body = (): ConnectorInput => ({
     connector: "requests",
-    url,
-    ...(apiKey === "" || locked.has("api_key") ? {} : { api_key: apiKey }),
+    url: url.trim(),
+    ...(apiKey.trim() === "" || locked.has("api_key") ? {} : { api_key: apiKey.trim() }),
     ...(locked.has("verify_tls") ? {} : { verify_tls: verifyTls }),
     ...(locked.has("tv_seasons") ? {} : { tv_seasons: seasons }),
   });
@@ -247,9 +247,11 @@ function LlmCard({ connector }: { connector: Connector }): ReactNode {
   const settings = (): LlmSettingsInput => ({
     connector: "llm",
     provider,
-    ...(apiKey === "" || locked.has("api_key") ? {} : { api_key: apiKey }),
-    ...(NEEDS_BASE_URL.has(provider) && baseUrl !== "" ? { base_url: baseUrl } : {}),
-    ...(model === "" ? {} : { model }),
+    ...(apiKey.trim() === "" || locked.has("api_key") ? {} : { api_key: apiKey.trim() }),
+    ...(NEEDS_BASE_URL.has(provider) && baseUrl.trim() !== ""
+      ? { base_url: baseUrl.trim() }
+      : {}),
+    ...(model.trim() === "" ? {} : { model: model.trim() }),
     ...(effort === "" ? {} : { reasoning_effort: effort }),
   });
 
@@ -260,7 +262,7 @@ function LlmCard({ connector }: { connector: Connector }): ReactNode {
   const needsKey = NEEDS_API_KEY.has(provider);
   const valid =
     (!needsKey || connector.secret?.set === true || apiKey !== "") &&
-    (!NEEDS_BASE_URL.has(provider) || baseUrl !== "");
+    (!NEEDS_BASE_URL.has(provider) || baseUrl.trim() !== "");
 
   return (
     <ConnectorCard

@@ -1,6 +1,8 @@
 import { useId, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
+import { ApiError } from "../api/problem";
+
 import { asTranslate, errorMessage } from "../i18n/errors";
 
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -156,7 +158,23 @@ export function Alert({
 export function ErrorAlert({ error }: { error: unknown }): ReactNode {
   const { t } = useTranslation(["console", "common"]);
   if (error === null || error === undefined) return null;
-  return <Alert kind="error">{errorMessage(asTranslate(t), error)}</Alert>;
+  // A validation problem carries which field it rejected; saying only "some fields are
+  // invalid" leaves the reader hunting for a stray space in a pasted URL.
+  const fields = error instanceof ApiError ? error.fieldErrors : [];
+  return (
+    <Alert kind="error">
+      {errorMessage(asTranslate(t), error)}
+      {fields.length > 0 && (
+        <ul className="field-errors">
+          {fields.map((field) => (
+            <li key={field.field}>
+              <code>{field.field}</code> — {field.message}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Alert>
+  );
 }
 
 export function Loading(): ReactNode {
