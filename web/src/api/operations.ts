@@ -10,6 +10,7 @@ export type SetupState = Schemas["SetupState"];
 export type WebSession = Schemas["WebSession"];
 export type User = Schemas["User"];
 export type AdminUser = Schemas["AdminUser"];
+export type UsageDay = Schemas["UsageDay"];
 export type Session = Schemas["Session"];
 export type Pairing = Schemas["Pairing"];
 export type NewPairing = Schemas["NewPairing"];
@@ -170,6 +171,12 @@ export function listLlmModels(body: LlmSettingsInput): Promise<string[]> {
 
 export function listUsers(): Promise<AdminUser[]> {
   return unwrap(api.GET("/api/v1/admin/users")).then((result) => result.users);
+}
+
+export function getUsage(days: number): Promise<UsageDay[]> {
+  return unwrap(api.GET("/api/v1/admin/usage", { params: { query: { days } } })).then(
+    (result) => result.days,
+  );
 }
 
 export function updateUser(

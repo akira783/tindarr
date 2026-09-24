@@ -70,6 +70,18 @@ export function adminUser(overrides: Partial<Schemas["AdminUser"]> = {}): Schema
   };
 }
 
+export function usageDay(overrides: Partial<Schemas["UsageDay"]> = {}): Schemas["UsageDay"] {
+  return {
+    date: "2026-09-24",
+    user_id: "u2",
+    generations: 3,
+    input_tokens: 1200,
+    output_tokens: 340,
+    failures: 0,
+    ...overrides,
+  };
+}
+
 export function settings(
   overrides: Partial<Schemas["ServerSettings"]> = {},
 ): Schemas["ServerSettings"] {

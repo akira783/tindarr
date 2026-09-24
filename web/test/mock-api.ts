@@ -6,6 +6,8 @@ type Path = keyof paths;
 export interface Call {
   method: string;
   path: string;
+  /** The query string, parsed. A paged or filtered GET says what it asked for here. */
+  query: URLSearchParams;
   headers: Headers;
   body: unknown;
   credentials: RequestCredentials;
@@ -91,6 +93,7 @@ export class MockApi {
     const call: Call = {
       method: request.method,
       path: url.pathname,
+      query: url.searchParams,
       headers: new Headers(request.headers),
       body: text === "" ? null : parseBody(text),
       credentials: request.credentials,

@@ -486,6 +486,33 @@ select:disabled {
   color: var(--success);
 }
 
+/* The AI usage page's totals: four numbers above the day-by-day table. */
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: var(--space);
+  margin: var(--space) 0;
+  padding: 0;
+}
+
+.stat {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+}
+
+.stat dt {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.stat dd {
+  margin: 0.25rem 0 0;
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
 @media (max-width: 640px) {
   .topbar {
     align-items: start;

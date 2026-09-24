@@ -9,7 +9,8 @@
     "admin": "Administrator",
     "connectors": "Connectors",
     "imports": "Imports",
-    "calibration": "Already seen"
+    "calibration": "Already seen",
+    "usage": "AI usage"
   },
   "notFound": {
     "title": "Page not found",
@@ -370,5 +371,21 @@
     "more": "Show me others",
     "recorded": "{{count}} answer saved.",
     "recorded_other": "{{count}} answers saved."
+  },
+  "usage": {
+    "title": "AI usage",
+    "intro": "What the AI provider has been asked for, per user and per UTC day. A failure is a batch that was paid for and produced nothing.",
+    "range": "Period",
+    "rangeDays_one": "Last day",
+    "rangeDays_other": "Last {{count}} days",
+    "empty": "No batch has been generated in this period.",
+    "columns": {
+      "date": "Day",
+      "user": "User",
+      "generations": "Batches",
+      "inputTokens": "Tokens in",
+      "outputTokens": "Tokens out",
+      "failures": "Failures"
+    }
   }
 }

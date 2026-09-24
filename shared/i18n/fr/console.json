@@ -9,7 +9,8 @@
     "admin": "Administrateur",
     "connectors": "Connecteurs",
     "imports": "Imports",
-    "calibration": "Déjà vus"
+    "calibration": "Déjà vus",
+    "usage": "Usage de l'IA"
   },
   "notFound": {
     "title": "Page introuvable",
@@ -370,5 +371,21 @@
     "more": "Montrez-m'en d'autres",
     "recorded": "{{count}} réponse enregistrée.",
     "recorded_other": "{{count}} réponses enregistrées."
+  },
+  "usage": {
+    "title": "Usage de l'IA",
+    "intro": "Ce qui a été demandé au fournisseur d'IA, par utilisateur et par jour UTC. Un échec est un lot payé qui n'a rien produit.",
+    "range": "Période",
+    "rangeDays_one": "Dernier jour",
+    "rangeDays_other": "{{count}} derniers jours",
+    "empty": "Aucun lot n'a été généré sur cette période.",
+    "columns": {
+      "date": "Jour",
+      "user": "Utilisateur",
+      "generations": "Lots",
+      "inputTokens": "Jetons entrants",
+      "outputTokens": "Jetons sortants",
+      "failures": "Échecs"
+    }
   }
 }
