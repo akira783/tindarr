@@ -6,6 +6,9 @@ import {
   currentOrigin,
   isLikelyPhone,
   isPlexAuthUrl,
+  posterUrl,
+  safeHttpUrl,
+  trailerEmbedUrl,
   pairingHost,
   pairingLinkHref,
 } from "./url";
@@ -115,5 +118,60 @@ describe("environment helpers", () => {
     });
     expect(isLikelyPhone()).toBe(false);
     vi.unstubAllGlobals();
+  });
+});
+
+describe("the poster URL", () => {
+  const base = "https://image.tmdb.org/t/p/";
+
+  it("builds a sized TMDb URL from a base and a path", () => {
+    expect(posterUrl(base, "/abc123.jpg", "w342")).toBe("https://image.tmdb.org/t/p/w342/abc123.jpg");
+  });
+
+  it("has nothing to build when either half is missing", () => {
+    expect(posterUrl(base, null)).toBeNull();
+    expect(posterUrl(null, "/abc123.jpg")).toBeNull();
+    expect(posterUrl(base, "")).toBeNull();
+  });
+
+  it("refuses a path that is not one, so no src can be pointed elsewhere", () => {
+    expect(posterUrl(base, "abc.jpg")).toBeNull();
+    expect(posterUrl(base, "//evil.example/x.jpg")).toBeNull();
+    expect(posterUrl(base, "/../../etc/passwd")).toBeNull();
+    expect(posterUrl(base, "/a.jpg?x=1")).toBeNull();
+  });
+
+  it("refuses a base that is not https, and one that is not a URL at all", () => {
+    expect(posterUrl("http://image.tmdb.org/t/p/", "/a.jpg")).toBeNull();
+    expect(posterUrl("not a url", "/a.jpg")).toBeNull();
+  });
+});
+
+describe("the trailer URL", () => {
+  it("frames the no-cookie player for a YouTube key", () => {
+    const url = trailerEmbedUrl({ site: "youtube", key: "YoHD9XEInc0" });
+    expect(url).toBe("https://www.youtube-nocookie.com/embed/YoHD9XEInc0?rel=0&modestbranding=1");
+  });
+
+  it("refuses anything but YouTube, and anything but a key", () => {
+    expect(trailerEmbedUrl(null)).toBeNull();
+    expect(trailerEmbedUrl(undefined)).toBeNull();
+    expect(trailerEmbedUrl({ site: "vimeo", key: "YoHD9XEInc0" })).toBeNull();
+    expect(trailerEmbedUrl({ site: "youtube", key: "../../evil" })).toBeNull();
+    expect(trailerEmbedUrl({ site: "youtube", key: "a/b" })).toBeNull();
+    expect(trailerEmbedUrl({ site: "youtube", key: "short" })).toBeNull();
+  });
+});
+
+describe("a link the console may put in an href", () => {
+  it("keeps http and https and drops everything else", () => {
+    expect(safeHttpUrl("https://jellyfin.example/web/#/details")).toBe(
+      "https://jellyfin.example/web/#/details",
+    );
+    expect(safeHttpUrl("http://192.168.1.76:8096/x")).toBe("http://192.168.1.76:8096/x");
+    expect(safeHttpUrl("javascript:alert(1)")).toBeNull();
+    expect(safeHttpUrl("data:text/html,<script>")).toBeNull();
+    expect(safeHttpUrl(null)).toBeNull();
+    expect(safeHttpUrl("nonsense")).toBeNull();
   });
 });

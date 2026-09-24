@@ -73,6 +73,9 @@ export function Layout(): ReactNode {
         <p className="brand">{serverInfo?.name ?? t("common:app.console")}</p>
         <nav aria-label={t("common:app.console")}>
           <ul>
+            <li>
+              <NavLink to="/deck">{t("nav.deck")}</NavLink>
+            </li>
             {isAdmin && (
               <>
                 <li>

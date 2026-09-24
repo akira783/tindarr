@@ -159,3 +159,123 @@ export function connectors(
   const kinds: Schemas["ConnectorKind"][] = ["media_server", "requests", "tmdb", "omdb", "llm"];
   return kinds.map((kind) => connector(kind, overrides[kind] ?? {}));
 }
+
+// --- the deck (roadmap 4.6) ---------------------------------------------------------
+
+export function swipeStatus(
+  overrides: Partial<Schemas["SwipeStatus"]> = {},
+): Schemas["SwipeStatus"] {
+  return {
+    llm_configured: true,
+    llm_provider: "ChatMock",
+    tmdb_configured: true,
+    requests_enabled: true,
+    media_history: true,
+    streaming_region: "FR",
+    ratings_enabled: true,
+    votes: 12,
+    calibration: { done: 12, target: 20, complete: false },
+    profile_ready: true,
+    generations_left_today: 5,
+    ...overrides,
+  };
+}
+
+export function card(overrides: Partial<Schemas["Card"]> = {}): Schemas["Card"] {
+  return {
+    id: "card-1",
+    media_type: "movie",
+    tmdb_id: 27205,
+    title: "Inception",
+    original_title: "Inception",
+    year: 2010,
+    overview: "A thief who steals corporate secrets.",
+    genres: ["Science-Fiction", "Thriller"],
+    runtime_minutes: 148,
+    seasons: null,
+    poster_path: "/edv5CZvWj09upOsy2Y6IwDhK8bt.jpg",
+    backdrop_path: null,
+    ratings: { tmdb: 8.4, imdb: 8.8, rotten_tomatoes: 87, metacritic: 74 },
+    providers: [
+      { provider_id: 8, name: "Netflix", logo_path: null, offer: "subscription", subscribed: true },
+      { provider_id: 2, name: "Apple TV", logo_path: null, offer: "rent", subscribed: false },
+    ],
+    trailer: { site: "youtube", key: "YoHD9XEInc0", name: "Trailer", language: "en" },
+    rationale: "Heists inside dreams, which is your kind of puzzle.",
+    pick_type: "safe",
+    availability: "none",
+    expires_at: "2126-09-25T10:00:00Z",
+    ...overrides,
+  };
+}
+
+export function deck(overrides: Partial<Schemas["Deck"]> = {}): Schemas["Deck"] {
+  return {
+    mode: "normal",
+    novelty: "balanced",
+    cards: [card()],
+    calibration: { done: 12, target: 20, complete: false },
+    ...overrides,
+  };
+}
+
+export function preferences(
+  overrides: Partial<Schemas["Preferences"]> = {},
+): Schemas["Preferences"] {
+  return {
+    media_type: "both",
+    novelty: "balanced",
+    auto_request: false,
+    language: "fr-FR",
+    streaming_services: [8],
+    ...overrides,
+  };
+}
+
+export function stats(overrides: Partial<Schemas["Stats"]> = {}): Schemas["Stats"] {
+  return {
+    total: 10,
+    likes: 4,
+    dislikes: 3,
+    seen_liked: 2,
+    seen_disliked: 1,
+    skips: 2,
+    requested: 1,
+    like_rate: 0.4,
+    request_rate: 0.1,
+    by_pick_type: { safe: { total: 6, likes: 3 }, explore: { total: 4, likes: 1 } },
+    ...overrides,
+  };
+}
+
+export function profileState(
+  overrides: Partial<Schemas["ProfileState"]> = {},
+): Schemas["ProfileState"] {
+  return {
+    profile: {
+      text: "Loves: heists. Avoids: musicals.",
+      user_edited: false,
+      updated_at: "2026-09-23T20:00:00Z",
+      votes_since_update: 3,
+    },
+    refreshing: false,
+    refresh_error: null,
+    ...overrides,
+  };
+}
+
+export function like(overrides: Partial<Schemas["Like"]> = {}): Schemas["Like"] {
+  return {
+    media_type: "movie",
+    tmdb_id: 27205,
+    title: "Inception",
+    year: 2010,
+    poster_path: null,
+    pick_type: "safe",
+    liked_at: "2026-09-23T20:00:00Z",
+    requested: false,
+    availability: "none",
+    watch_url: null,
+    ...overrides,
+  };
+}

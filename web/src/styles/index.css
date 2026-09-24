@@ -522,3 +522,204 @@ select:disabled {
     margin-inline-start: 0;
   }
 }
+
+/* --- the deck (roadmap 4.6) ----------------------------------------------------- */
+
+.deck-page .deck-controls .field {
+  min-width: 12rem;
+}
+
+.deck-mood {
+  align-items: end;
+}
+
+.deck-mood .field {
+  flex: 1 1 18rem;
+}
+
+.calibration-progress progress {
+  width: 100%;
+  max-width: 24rem;
+}
+
+.deck-state {
+  min-height: 8rem;
+}
+
+/* One card: poster beside the text on a desktop, above it on a phone. */
+.deck-card {
+  display: grid;
+  grid-template-columns: minmax(10rem, 18rem) 1fr;
+  gap: var(--space);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space);
+  margin-block: var(--space);
+}
+
+.deck-card h2 {
+  margin-block: 0.25rem;
+}
+
+.deck-card h3 {
+  font-size: 0.95rem;
+  margin-block: var(--space) 0.25rem;
+}
+
+.deck-card-year {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.deck-card-facts span + span {
+  white-space: nowrap;
+}
+
+.rationale {
+  margin: 0;
+}
+
+.overview {
+  margin: 0.5rem 0 0;
+  color: var(--muted);
+}
+
+.ratings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.rating dt {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.rating dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.provider-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.provider {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+}
+
+/* "On your services" is written on the badge; the border is only a second signal. */
+.provider-mine {
+  border-color: var(--success);
+}
+
+.badge-mine {
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.provider-name {
+  font-weight: 600;
+}
+
+.trailer {
+  margin-block-start: var(--space);
+}
+
+.trailer-frame {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin-block-start: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.deck-actions {
+  margin-block: var(--space);
+}
+
+.verdicts {
+  gap: 0.5rem;
+}
+
+.verdicts .btn {
+  flex: 1 1 10rem;
+}
+
+.around-the-deck .panel summary {
+  cursor: pointer;
+}
+
+.around-the-deck .panel summary h2 {
+  display: inline;
+  font-size: 1.1rem;
+}
+
+.like-list {
+  display: grid;
+  gap: var(--space);
+}
+
+.like {
+  display: flex;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.like .poster,
+.like .poster-empty {
+  width: 4.5rem;
+  flex: 0 0 4.5rem;
+  border-radius: calc(var(--radius) - 4px);
+}
+
+.like-body {
+  min-width: 0;
+}
+
+.like-title,
+.profile-text {
+  margin: 0;
+}
+
+.profile-text {
+  white-space: pre-wrap;
+}
+
+textarea {
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem;
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .deck-card {
+    grid-template-columns: 1fr;
+  }
+
+  .deck-card-poster {
+    max-width: 14rem;
+  }
+
+  .verdicts .btn {
+    flex: 1 1 100%;
+  }
+}

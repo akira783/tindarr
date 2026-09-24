@@ -10,7 +10,8 @@
     "connectors": "Connectors",
     "imports": "Imports",
     "calibration": "Already seen",
-    "usage": "AI usage"
+    "usage": "AI usage",
+    "deck": "Swipe"
   },
   "notFound": {
     "title": "Page not found",
@@ -386,6 +387,188 @@
       "inputTokens": "Tokens in",
       "outputTokens": "Tokens out",
       "failures": "Failures"
+    }
+  },
+  "deck": {
+    "title": "Swipe",
+    "intro": "One title at a time. Say what you think of it and the next one comes up.",
+    "generationsLeft_one": "{{count}} batch left today.",
+    "generationsLeft_other": "{{count}} batches left today.",
+    "region": "Streaming region: {{region}}",
+    "verdict": {
+      "like": "Like",
+      "dislike": "Not for me",
+      "seenLiked": "Seen it, liked it",
+      "seenDisliked": "Seen it, not for me",
+      "skip": "Not now"
+    },
+    "keys": {
+      "title": "Keyboard",
+      "like": "Right arrow",
+      "dislike": "Left arrow",
+      "seenLiked": "Up arrow",
+      "seenDisliked": "Down arrow",
+      "skip": "N",
+      "undo": "U",
+      "trailer": "T",
+      "hint": "The arrow keys judge the card, N puts it off, U undoes the last verdict and T plays the trailer."
+    },
+    "undo": "Undo",
+    "undoOf": "Undo “{{title}}”",
+    "undoHint": "Puts the last card back on top of the deck.",
+    "card": {
+      "region": "Card",
+      "why": "Why this one",
+      "noRationale": "The model gave no reason for this one.",
+      "genres": "Genres",
+      "runtimeShort": "{{minutes}} min",
+      "runtimeLong": "{{hours}} h {{minutes}}",
+      "seasons_one": "{{count}} season",
+      "seasons_other": "{{count}} seasons",
+      "movie": "Film",
+      "tv": "Series",
+      "ratings": "Ratings",
+      "tmdb": "TMDb",
+      "imdb": "IMDb",
+      "rottenTomatoes": "Rotten Tomatoes",
+      "metacritic": "Metacritic",
+      "noRatings": "No rating for this one.",
+      "providers": "Where to watch",
+      "onYourServices": "On your services",
+      "noProviders": "On none of the services in your region.",
+      "offer": {
+        "subscription": "Subscription",
+        "free": "Free",
+        "ads": "With ads",
+        "rent": "Rent",
+        "buy": "Buy"
+      },
+      "pickType": {
+        "safe": "Your kind of thing",
+        "explore": "A step sideways",
+        "calibration": "Getting to know you"
+      },
+      "availability": {
+        "requested": "Already requested",
+        "processing": "Being downloaded",
+        "partially_available": "Partly on your server",
+        "available": "On your server"
+      },
+      "noPoster": "No poster",
+      "trailer": "Watch the trailer",
+      "trailerTitle": "Trailer for {{title}}",
+      "trailerNote": "The player is YouTube's, on its no-cookie address. Nothing is loaded from it until you open it.",
+      "closeTrailer": "Close the trailer",
+      "position": "Card {{position}} of {{total}}",
+      "announce": "{{title}}. {{position}}."
+    },
+    "states": {
+      "generating": "Building your deck…",
+      "generatingHint": "The model is choosing and explaining. The first batch takes a few seconds.",
+      "tooLongTitle": "Still nothing",
+      "tooLongBody": "This batch is taking longer than the console will wait. Ask again, or check the AI provider on the connectors page.",
+      "noProviderTitle": "No AI provider yet",
+      "noProviderBodyAdmin": "The deck needs a model to choose and explain. Add one on the connectors page, then come back here.",
+      "noProviderBodyUser": "The deck needs a model to choose and explain. Ask an administrator of this server to add one.",
+      "noTmdbTitle": "No TMDb key yet",
+      "noTmdbBodyAdmin": "TMDb is where the candidates come from. Add its key on the connectors page, then come back here.",
+      "noTmdbBodyUser": "TMDb is where the candidates come from. Ask an administrator of this server to add its key.",
+      "dailyLimitTitle": "That is your batches for today",
+      "dailyLimitBody": "You have reached your daily limit. Come back tomorrow, or ask an administrator to raise it.",
+      "metadataTitle": "TMDb did not answer",
+      "metadataBody": "The last batch stopped because the metadata service could not be reached. Try again in a moment.",
+      "llmTitle": "The AI provider failed",
+      "llmBody": "Try again. If it keeps failing, test the provider on the connectors page.",
+      "exhaustedTitle": "Nothing left to offer",
+      "exhaustedBody": "Every candidate has been shown or ruled out. Try a bolder setting, another media type, or come back later: the pool fills up again.",
+      "emptyTitle": "No card this time",
+      "emptyBody": "The last batch came back empty. Ask for another one.",
+      "stalledTitle": "The deck is empty",
+      "stalledBody": "Nothing new came back. Ask for another batch, or change what you are looking for.",
+      "more": "Ask for more",
+      "seenWarning": "A lot of these look like titles you have already seen. A bolder setting helps."
+    },
+    "controls": {
+      "title": "What to show",
+      "mediaType": "Films or series",
+      "media": {
+        "both": "Films and series",
+        "movie": "Films",
+        "tv": "Series"
+      },
+      "novelty": "How adventurous",
+      "noveltyLevel": {
+        "familiar": "Familiar",
+        "balanced": "Balanced",
+        "bold": "Bold"
+      },
+      "mood": "Tonight I feel like…",
+      "moodHint": "Optional, and only for this session: one sentence the model reads before it chooses.",
+      "moodApply": "Use this mood",
+      "moodClear": "Clear",
+      "calibration": "Getting to know you",
+      "calibrationProgress": "{{done}} of {{target}} answered",
+      "calibrationHint": "The first cards are here to learn what you like. Normal picks start once this is full."
+    },
+    "request": {
+      "title": "Request it?",
+      "body": "“{{title}}” will be filed on the request backend under your own account.",
+      "submit": "Request it",
+      "status": {
+        "queued": "Requested: it is on its way.",
+        "awaiting_approval": "Requested: an administrator has to approve it.",
+        "already_requested": "It had already been requested.",
+        "already_available": "It is already on your server."
+      },
+      "auto": "“{{title}}”: {{status}}"
+    },
+    "votes": {
+      "unsent_one": "{{count}} verdict has not reached the server yet. It is kept here.",
+      "unsent_other": "{{count}} verdicts have not reached the server yet. They are kept here.",
+      "retry": "Send them again",
+      "sending": "Saving…",
+      "rejected": "The server refused that verdict ({{code}})."
+    },
+    "likes": {
+      "title": "My likes",
+      "help": "What you liked and have not seen. Ask for the ones you want.",
+      "empty": "Nothing yet: like a card and it lands here.",
+      "filter": "Show",
+      "filterAll": "All",
+      "filterToRequest": "To request",
+      "filterRequested": "Requested",
+      "request": "Request",
+      "requested": "Requested",
+      "watch": "Watch it"
+    },
+    "profile": {
+      "title": "My taste",
+      "help": "What the model has understood so far. What you write here is kept, and a rewrite never contradicts it.",
+      "empty": "Nothing yet: vote on a few cards and it writes itself.",
+      "edit": "Edit",
+      "refresh": "Rewrite it from my votes",
+      "refreshing": "Being rewritten…",
+      "refreshError": "The last rewrite failed ({{code}}).",
+      "userEdited": "Written by you",
+      "updated": "Updated {{when}}",
+      "votesSince_one": "{{count}} vote since then",
+      "votesSince_other": "{{count}} votes since then"
+    },
+    "stats": {
+      "title": "My numbers",
+      "help": "This account only. “Not now” is counted apart and enters no rate.",
+      "empty": "Nothing to count yet.",
+      "total": "Votes",
+      "likes": "Likes",
+      "dislikes": "Passes",
+      "seenLiked": "Seen and liked",
+      "seenDisliked": "Seen, not for me",
+      "skips": "Put off",
+      "requested": "Requested",
+      "likeRate": "Like rate",
+      "requestRate": "Request rate",
+      "byPickType": "By pick type",
+      "pickTypeTotal": "{{likes}} liked out of {{total}}"
     }
   }
 }

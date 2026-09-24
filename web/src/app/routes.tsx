@@ -6,6 +6,7 @@ import { HomeRedirect, RequireAdmin, RequireWebSession } from "../auth/guards";
 import { Layout } from "../components/Layout";
 import { SessionsPage } from "../features/account/SessionsPage";
 import { ConnectorsPage } from "../features/connectors/ConnectorsPage";
+import { DeckPage } from "../features/deck/DeckPage";
 import { ConnectPhonePage } from "../features/pairing/ConnectPhonePage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { SetupPage } from "../features/setup/SetupPage";
@@ -34,6 +35,7 @@ export function AppRoutes(): ReactNode {
       <Route element={<RequireWebSession />}>
         <Route element={<Layout />}>
           <Route index element={<HomeRedirect />} />
+          <Route path="/deck" element={<DeckPage />} />
           <Route element={<RequireAdmin />}>
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/connectors" element={<ConnectorsPage />} />

@@ -326,3 +326,100 @@ export function submitCalibrationGrid(answers: GridAnswer[]): Promise<number> {
     (result) => result.recorded,
   );
 }
+
+// ------------------------------------------------------------------ the deck
+
+export type SwipeStatus = Schemas["SwipeStatus"];
+export type Deck = Schemas["Deck"];
+export type Card = Schemas["Card"];
+export type Calibration = Schemas["Calibration"];
+export type MediaFilter = Schemas["MediaFilter"];
+export type Novelty = Schemas["Novelty"];
+export type VoteValue = Schemas["VoteValue"];
+export type VoteInput = Schemas["VoteInput"];
+export type VoteResult = Schemas["VoteResult"];
+export type RequestStatus = Schemas["RequestStatus"];
+export type Like = Schemas["Like"];
+export type ProfileState = Schemas["ProfileState"];
+export type Preferences = Schemas["Preferences"];
+export type PreferencesPatch = Schemas["PreferencesPatch"];
+export type Stats = Schemas["Stats"];
+export type StreamingProvider = Schemas["StreamingProvider"];
+export type Availability = Schemas["Availability"];
+export type PickType = Schemas["PickType"];
+
+export function getSwipeStatus(): Promise<SwipeStatus> {
+  return unwrap(api.GET("/api/v1/swipe/status"));
+}
+
+export interface DeckQuery {
+  media_type?: MediaFilter;
+  novelty?: Novelty;
+  mood?: string;
+}
+
+/**
+ * The next cards, or `{ waiting: true }` while a batch is built.
+ *
+ * The `202` is not an error and must not be treated as one: the caller waits
+ * `retryAfterMs` and asks again (`api/openapi.yaml`, `getDeck`).
+ */
+export async function getDeck(query: DeckQuery = {}): Promise<Deck | Waiting> {
+  const { data, status } = await unwrapWithStatus(
+    api.GET("/api/v1/swipe/deck", { params: { query } }),
+  );
+  return waiting(status, data) ?? (data as Deck);
+}
+
+export interface VoteOutcome {
+  results: VoteResult[];
+  profile_refresh_started?: boolean;
+}
+
+export function submitVotes(votes: VoteInput[]): Promise<VoteOutcome> {
+  return unwrap(api.POST("/api/v1/swipe/votes", { body: { votes } }));
+}
+
+export function undoVote(mediaType: "movie" | "tv", tmdbId: number): Promise<void> {
+  return unwrap(
+    api.DELETE("/api/v1/swipe/votes/{media_type}/{tmdb_id}", {
+      params: { path: { media_type: mediaType, tmdb_id: tmdbId } },
+    }),
+  ).then(() => undefined);
+}
+
+export function requestTitle(title: TitleRef): Promise<RequestStatus> {
+  return unwrap(api.POST("/api/v1/swipe/requests", { body: title })).then(
+    (result) => result.request_status,
+  );
+}
+
+export function listLikes(
+  status: "all" | "to_request" | "requested" = "all",
+): Promise<{ likes: Like[]; next_cursor?: string | null }> {
+  return unwrap(api.GET("/api/v1/swipe/likes", { params: { query: { status } } }));
+}
+
+export function getProfile(): Promise<ProfileState> {
+  return unwrap(api.GET("/api/v1/swipe/profile"));
+}
+
+export function saveProfile(text: string): Promise<ProfileState> {
+  return unwrap(api.PUT("/api/v1/swipe/profile", { body: { text } }));
+}
+
+export function refreshProfile(): Promise<boolean> {
+  return unwrap(api.POST("/api/v1/swipe/profile/refresh")).then((result) => result.started);
+}
+
+export function getPreferences(): Promise<Preferences> {
+  return unwrap(api.GET("/api/v1/swipe/preferences"));
+}
+
+export function updatePreferences(body: PreferencesPatch): Promise<Preferences> {
+  return unwrap(api.PATCH("/api/v1/swipe/preferences", { body }));
+}
+
+export function getStats(): Promise<Stats> {
+  return unwrap(api.GET("/api/v1/swipe/stats"));
+}

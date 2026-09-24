@@ -10,7 +10,8 @@
     "connectors": "Connecteurs",
     "imports": "Imports",
     "calibration": "Déjà vus",
-    "usage": "Usage de l'IA"
+    "usage": "Usage de l'IA",
+    "deck": "Swiper"
   },
   "notFound": {
     "title": "Page introuvable",
@@ -386,6 +387,188 @@
       "inputTokens": "Jetons entrants",
       "outputTokens": "Jetons sortants",
       "failures": "Échecs"
+    }
+  },
+  "deck": {
+    "title": "Swiper",
+    "intro": "Un titre à la fois. Dites ce que vous en pensez et le suivant arrive.",
+    "generationsLeft_one": "Encore {{count}} lot aujourd’hui.",
+    "generationsLeft_other": "Encore {{count}} lots aujourd’hui.",
+    "region": "Région de streaming : {{region}}",
+    "verdict": {
+      "like": "J’aime",
+      "dislike": "Pas pour moi",
+      "seenLiked": "Déjà vu, aimé",
+      "seenDisliked": "Déjà vu, pas pour moi",
+      "skip": "Plus tard"
+    },
+    "keys": {
+      "title": "Clavier",
+      "like": "Flèche droite",
+      "dislike": "Flèche gauche",
+      "seenLiked": "Flèche haut",
+      "seenDisliked": "Flèche bas",
+      "skip": "N",
+      "undo": "U",
+      "trailer": "T",
+      "hint": "Les flèches jugent la carte, N la remet à plus tard, U annule le dernier verdict et T lance la bande-annonce."
+    },
+    "undo": "Annuler",
+    "undoOf": "Annuler « {{title}} »",
+    "undoHint": "Remet la dernière carte en haut du paquet.",
+    "card": {
+      "region": "Carte",
+      "why": "Pourquoi celui-ci",
+      "noRationale": "Le modèle n’a pas donné de raison pour celui-ci.",
+      "genres": "Genres",
+      "runtimeShort": "{{minutes}} min",
+      "runtimeLong": "{{hours}} h {{minutes}}",
+      "seasons_one": "{{count}} saison",
+      "seasons_other": "{{count}} saisons",
+      "movie": "Film",
+      "tv": "Série",
+      "ratings": "Notes",
+      "tmdb": "TMDb",
+      "imdb": "IMDb",
+      "rottenTomatoes": "Rotten Tomatoes",
+      "metacritic": "Metacritic",
+      "noRatings": "Aucune note pour celui-ci.",
+      "providers": "Où le voir",
+      "onYourServices": "Sur vos services",
+      "noProviders": "Sur aucun service de votre région.",
+      "offer": {
+        "subscription": "Abonnement",
+        "free": "Gratuit",
+        "ads": "Avec publicité",
+        "rent": "Location",
+        "buy": "Achat"
+      },
+      "pickType": {
+        "safe": "Dans vos goûts",
+        "explore": "Un pas de côté",
+        "calibration": "Pour vous cerner"
+      },
+      "availability": {
+        "requested": "Déjà demandé",
+        "processing": "En cours de téléchargement",
+        "partially_available": "En partie sur votre serveur",
+        "available": "Sur votre serveur"
+      },
+      "noPoster": "Pas d’affiche",
+      "trailer": "Voir la bande-annonce",
+      "trailerTitle": "Bande-annonce de {{title}}",
+      "trailerNote": "Le lecteur est celui de YouTube, sur son adresse sans cookie. Rien n’en est chargé tant que vous ne l’ouvrez pas.",
+      "closeTrailer": "Fermer la bande-annonce",
+      "position": "Carte {{position}} sur {{total}}",
+      "announce": "{{title}}. {{position}}."
+    },
+    "states": {
+      "generating": "Constitution de votre paquet…",
+      "generatingHint": "Le modèle choisit et explique. Le premier lot demande quelques secondes.",
+      "tooLongTitle": "Toujours rien",
+      "tooLongBody": "Ce lot dépasse le temps que la console accepte d’attendre. Redemandez-en un, ou vérifiez le fournisseur d’IA sur la page des connecteurs.",
+      "noProviderTitle": "Aucun fournisseur d’IA",
+      "noProviderBodyAdmin": "Le paquet a besoin d’un modèle pour choisir et expliquer. Ajoutez-en un sur la page des connecteurs, puis revenez ici.",
+      "noProviderBodyUser": "Le paquet a besoin d’un modèle pour choisir et expliquer. Demandez à un administrateur de ce serveur d’en ajouter un.",
+      "noTmdbTitle": "Aucune clé TMDb",
+      "noTmdbBodyAdmin": "Les candidats viennent de TMDb. Ajoutez sa clé sur la page des connecteurs, puis revenez ici.",
+      "noTmdbBodyUser": "Les candidats viennent de TMDb. Demandez à un administrateur de ce serveur d’ajouter sa clé.",
+      "dailyLimitTitle": "C’est tout pour aujourd’hui",
+      "dailyLimitBody": "Votre limite quotidienne est atteinte. Revenez demain, ou demandez à un administrateur de la relever.",
+      "metadataTitle": "TMDb n’a pas répondu",
+      "metadataBody": "Le dernier lot s’est arrêté faute d’avoir joint le service de métadonnées. Réessayez dans un instant.",
+      "llmTitle": "Le fournisseur d’IA a échoué",
+      "llmBody": "Réessayez. Si cela se répète, testez le fournisseur sur la page des connecteurs.",
+      "exhaustedTitle": "Plus rien à proposer",
+      "exhaustedBody": "Tous les candidats ont été montrés ou écartés. Essayez un réglage plus audacieux, un autre type de contenu, ou revenez plus tard : le vivier se remplit.",
+      "emptyTitle": "Aucune carte cette fois",
+      "emptyBody": "Le dernier lot est revenu vide. Demandez-en un autre.",
+      "stalledTitle": "Le paquet est vide",
+      "stalledBody": "Rien de neuf n’est revenu. Demandez un autre lot, ou changez ce que vous cherchez.",
+      "more": "Demander d’autres cartes",
+      "seenWarning": "Beaucoup de ces titres ressemblent à ce que vous avez déjà vu. Un réglage plus audacieux aide."
+    },
+    "controls": {
+      "title": "Quoi montrer",
+      "mediaType": "Films ou séries",
+      "media": {
+        "both": "Films et séries",
+        "movie": "Films",
+        "tv": "Séries"
+      },
+      "novelty": "Degré d’audace",
+      "noveltyLevel": {
+        "familiar": "Sûr",
+        "balanced": "Équilibré",
+        "bold": "Audacieux"
+      },
+      "mood": "Ce soir j’ai envie de…",
+      "moodHint": "Facultatif, et seulement pour cette session : une phrase que le modèle lit avant de choisir.",
+      "moodApply": "Utiliser cette envie",
+      "moodClear": "Effacer",
+      "calibration": "Pour vous cerner",
+      "calibrationProgress": "{{done}} sur {{target}} répondues",
+      "calibrationHint": "Les premières cartes servent à apprendre vos goûts. Les choix normaux commencent une fois la barre remplie."
+    },
+    "request": {
+      "title": "Le demander ?",
+      "body": "« {{title}} » sera demandé sur le backend de demandes sous votre propre compte.",
+      "submit": "Le demander",
+      "status": {
+        "queued": "Demandé : c’est en route.",
+        "awaiting_approval": "Demandé : un administrateur doit l’approuver.",
+        "already_requested": "Il avait déjà été demandé.",
+        "already_available": "Il est déjà sur votre serveur."
+      },
+      "auto": "« {{title}} » : {{status}}"
+    },
+    "votes": {
+      "unsent_one": "{{count}} verdict n’est pas encore arrivé au serveur. Il est conservé ici.",
+      "unsent_other": "{{count}} verdicts ne sont pas encore arrivés au serveur. Ils sont conservés ici.",
+      "retry": "Les renvoyer",
+      "sending": "Enregistrement…",
+      "rejected": "Le serveur a refusé ce verdict ({{code}})."
+    },
+    "likes": {
+      "title": "Mes coups de cœur",
+      "help": "Ce que vous avez aimé sans l’avoir vu. Demandez ceux que vous voulez.",
+      "empty": "Rien pour l’instant : aimez une carte et elle atterrit ici.",
+      "filter": "Afficher",
+      "filterAll": "Tous",
+      "filterToRequest": "À demander",
+      "filterRequested": "Demandés",
+      "request": "Demander",
+      "requested": "Demandé",
+      "watch": "Le voir"
+    },
+    "profile": {
+      "title": "Mes goûts",
+      "help": "Ce que le modèle a compris jusqu’ici. Ce que vous écrivez est conservé, et une réécriture ne le contredit jamais.",
+      "empty": "Rien pour l’instant : votez quelques cartes et cela s’écrit tout seul.",
+      "edit": "Modifier",
+      "refresh": "Réécrire à partir de mes votes",
+      "refreshing": "Réécriture en cours…",
+      "refreshError": "La dernière réécriture a échoué ({{code}}).",
+      "userEdited": "Écrit par vous",
+      "updated": "Mis à jour {{when}}",
+      "votesSince_one": "{{count}} vote depuis",
+      "votesSince_other": "{{count}} votes depuis"
+    },
+    "stats": {
+      "title": "Mes chiffres",
+      "help": "Ce compte seulement. « Plus tard » est compté à part et n’entre dans aucun taux.",
+      "empty": "Rien à compter pour l’instant.",
+      "total": "Votes",
+      "likes": "J’aime",
+      "dislikes": "Passés",
+      "seenLiked": "Vus et aimés",
+      "seenDisliked": "Vus, pas pour moi",
+      "skips": "Remis à plus tard",
+      "requested": "Demandés",
+      "likeRate": "Taux de j’aime",
+      "requestRate": "Taux de demande",
+      "byPickType": "Par type de choix",
+      "pickTypeTotal": "{{likes}} aimés sur {{total}}"
     }
   }
 }
