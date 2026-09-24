@@ -455,6 +455,27 @@ Details in [the authentication reference](auth.md), with the reasons in
   - routes: `/setup` (claim, media server, admin sign-in, `public_url`), `/sign-in`,
     `/settings`, `/users`, `/connect-phone`, `/sessions`; non-admins only reach the last
     two. Pages for connectors, AI provider and usage come in steps 3 and 4;
+- **The deck (`/deck`, roadmap 4.6).** Every signed-in user gets one; it is the only page
+  of the console that is not administration. Three rules hold it together and each exists
+  because the alternative costs money or a vote:
+  - **the `202` is polled by the query's own `refetchInterval`**, which stops with the
+    component, with a hidden tab, on the first batch, on any error and on a three-minute
+    deadline — there is no loop to forget to end;
+  - **the deck never refills itself on a timer.** It asks for more just after a vote
+    emptied it, or when the user presses the button. `GET /swipe/deck` starts a
+    generation when nothing is ready, and that generation is charged against the user's
+    daily cap, so one card the server still believes is unvoted must not become an
+    endless request;
+  - **a verdict is queued until the server stores it**, with the `client_vote_id` it was
+    born with, so a resend after a dropped connection comes back `duplicate` rather than
+    counting twice. Undoing one that never left the browser drops it locally and asks the
+    server nothing.
+
+  The trailer is the one thing on the page that is not this server's: it is framed on
+  `youtube-nocookie.com`, built by the click and not before, from a key re-checked
+  against the contract's pattern, and it is the reason the console CSP carries a
+  `frame-src` at all.
+
   - the QR code is rendered as React SVG elements or on a canvas (for example
     `qrcode.react`'s `QRCodeSVG`), never through `innerHTML`, with the host of
     `public_url` written next to it.

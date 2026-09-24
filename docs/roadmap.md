@@ -311,13 +311,55 @@ wrong rather than because it wanted room:
 
 Everything else the contract already said is what shipped.
 
-**4.6 A swipe page in the web console.** ← next. Decided on 2026-09-24, outside the original
-plan, which kept swiping for the app (steps 6–7). The console gets a deck: the four
-verdicts by keyboard and mouse, a "not now" button, provider and rating badges, the
+**4.6 A swipe page in the web console.** ✅ done. Decided on 2026-09-24, outside the
+original plan, which kept swiping for the app (steps 6–7). The console gets a deck: the
+four verdicts by keyboard and mouse, a "not now" button, provider and rating badges, the
 trailer, and the request dialog on a like. No touch gestures, no notifications — those
 stay with the app. Two reasons: the owner can swipe from a browser weeks before an APK
 exists, and every session grows the vote set the engine is judged on, which is the
 shortage ADR 0013's measurements ran into.
+
+What shipped, at `/deck` (`web/src/features/deck/`):
+
+- The card — poster, title, year, kind, length or seasons, genres, the model's one line,
+  the ratings there are, the region's providers with "on your services" **written out**
+  rather than coloured, the availability badge — and the **trailer**, framed only when
+  somebody clicks, on `youtube-nocookie.com`, from a key re-checked against the
+  contract's own pattern.
+- The five verdicts by mouse and by keyboard (the four arrows, then **N**, **U** and
+  **T**), the shortcut printed on each button, and undo of the last one — which stays
+  reachable when the deck has run dry, since a wrong verdict on the last card is exactly
+  the one somebody wants back.
+- Every empty state with a sentence that says what to do next, in both languages: the
+  `202` with its polling, the daily cap, `metadata_unreachable`, the AI provider's own
+  failures, `exhausted`, a batch that came back empty, and a first visit with no AI
+  provider or no TMDb key — which names the connectors page for an administrator and
+  says "ask one" to everybody else.
+- The request dialog on a like, or the answer of a direct request when the preference
+  says so, with a sentence per `RequestStatus`.
+- Media type and novelty (stored as preferences, so a phone gets the same deck), an
+  optional mood that lives only in the session's query string, and the calibration
+  progress as a real `<progress>`.
+- Around the deck, each in a panel that costs nothing until it is opened: "My likes"
+  (request / requested / watch), the taste profile (read, edit, ask for a rewrite) and
+  the account's own numbers.
+
+Three decisions are worth reading the code for. **Polling is the query's own
+`refetchInterval`**, so it ends with the component, with a hidden tab, on the first
+batch, on any error and on a three-minute deadline, rather than a loop that has to
+remember to stop. **Refilling is never automatic**: the deck asks for more just after a
+vote emptied it, or when the user presses the button — a card the server still believes
+is unvoted would otherwise be an endless `GET /swipe/deck`, and each of those starts a
+generation charged to the daily cap. **A verdict is kept until it is stored**, with the
+`client_vote_id` it was born with, so a resend after a dropped connection is a
+`duplicate` and never a second vote; undoing one that never left simply drops it.
+
+**One server change, and it was unavoidable.** ADR 0009 said "the console shows no
+trailers, so YouTube is not allowed". The console now shows trailers, so `CONSOLE_CSP`
+gains one directive — `frame-src https://www.youtube-nocookie.com` — and nothing else:
+`script-src` stays `'self'`, because the player runs in its own document on its own
+origin. The ADR carries the amendment. `api/openapi.yaml` did not move: no endpoint,
+request or response changed for this lot.
 
 **Check.**
 
@@ -342,6 +384,19 @@ shortage ADR 0013's measurements ran into.
   and 6 seen with no extent claimed.
 - ✅ `/status` answers while a generation is in flight: it reads rows and calls no
   service, and the generation runs in its own task.
+- ✅ **The console's deck, driven against the built console by a real browser**
+  (`web/e2e/deck.spec.ts`), with zero CSP violations as every other flow asserts. It has
+  two shapes: without keys — CI, and anybody's checkout — it checks the state a deck
+  that cannot be generated has to show; with `E2E_TMDB_KEY` and `E2E_LLM_BASE_URL` set it
+  checks a real card, a keyboard verdict, an undo that brings it back, a phone's width
+  with nothing to scroll sideways for, and the trailer frame really loaded from
+  youtube-nocookie.com. Run on 2026-09-24 against real TMDb and the author's local
+  ChatMock (`gpt-5.6-luna`, free) on a throwaway data directory: **20 s and nine polls to
+  the first card** on a server that had never generated anything, a calibration batch of
+  ten in French (Breaking Bad, Le Parrain, Forrest Gump, Matrix, Titanic, Pulp Fiction,
+  Les Évadés, Interstellar, Harry Potter, Squid Game), a one-line rationale and a trailer
+  on every one of them, French providers for the FR region on all ten, and TMDb ratings
+  only, since no OMDb key was configured.
 
 ## Step 5: packaging and first deployment
 
