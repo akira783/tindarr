@@ -40,9 +40,17 @@ What the popularity profile did find is that the hybrid's picks sit *above their
 pool's vote-count median* in eight batches of nine, while both floors sit below theirs:
 the drift is in the ranking, in vote counts, and at the top of the distribution rather
 than the bottom. ``Band.famous_share`` is the budget that answers it, spent by the
-strategy against ``CandidatePool.median_votes`` rather than filtered out here — a
+strategy against ``CandidatePool.is_famous`` rather than filtered out here — a
 candidate the band admits is a candidate somebody may legitimately be shown, and taking
 it out of the pool would take it away from every batch instead of from this one.
+
+**And a vote count alone does not know what a release season is.** A budget spent on
+vote counts charges an old cult film and waves through a blockbuster three months old,
+because a vote count measures how long a title has been available to rate as much as how
+many people saw it. ``CandidatePool.is_famous`` therefore reads a second currency for
+recent titles only — popularity, which is this week's activity — and ``RECENT_YEARS``
+says how long "recent" lasts. The numbers behind both are on ``is_famous`` and in the
+dated amendment to ADR 0013.
 
 Nothing here reads a clock, a database or a random source. Two calls with the same
 context produce the same pool, which is what lets a replay be compared with another.
@@ -88,6 +96,32 @@ MAX_SEEDS: Final = 6
 #: A seed's recommendations past this rank are the long tail of one title's page and add
 #: little the next seed does not add better.
 SEED_DEPTH: Final = 12
+#: How many years after its release a title's vote count still understates its fame.
+#:
+#: Read by ``CandidatePool.is_famous``, and counted in whole calendar years against the
+#: newest release in the pool rather than in days — a ``Title`` carries a year and not a
+#: date, which is the granularity TMDb's listings are summarised at here.
+#:
+#: **Two rather than one**, for two measured reasons. On the committed ``akira-99``
+#: cassette the upper quartile of vote counts by age is 2 155 (this year), 1 811 (one
+#: year), 3 060 (two to three) against 7 144 at four-to-ten: the deficit is still there
+#: in the second and third years, so a one-year window would hand next season a free
+#: pass for a title released fourteen months ago. And because the window is counted in
+#: calendar years, "one year" really means "between one and two", so two is what
+#: brackets the period the measurement shows. It costs almost nothing to widen: on that
+#: cassette, moving from one year to two charges three more titles out of 943.
+RECENT_YEARS: Final = 2
+
+
+def _upper_quartile(values: Sequence[float]) -> float:
+    """Return the value three quarters of the way up ``values``, or ``0.0`` when empty.
+
+    Nearest rank, rounding half up — the same definition
+    ``tindarr.swipe.evaluation.popularity.quantile`` uses, so a threshold the budget
+    spends against and a median the harness prints are computed the same way.
+    """
+    ordered = sorted(values)
+    return ordered[int(0.75 * (len(ordered) - 1) + 0.5)] if ordered else 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,10 +240,10 @@ class CandidatePool:
     def famous_votes(self) -> int:
         """The vote count that marks off the most-rated quarter of this pool.
 
-        The threshold the fame budget is spent against, and the one the prompt quotes.
-        It is a property of the **pool** rather than a constant, because what "famous"
-        means depends on what TMDb answered for this band on this day: a number written
-        into the code would be a budget that tightens and loosens on its own.
+        One of the two thresholds the fame budget is spent against. It is a property of
+        the **pool** rather than a constant, because what "famous" means depends on what
+        TMDb answered for this band on this day: a number written into the code would be
+        a budget that tightens and loosens on its own.
 
         The upper quartile rather than the median, because the fault is at the tail and
         not in the middle. The titles the author had already seen were rated by 12 000 to
@@ -218,11 +252,82 @@ class CandidatePool:
         with it, which is what the first attempt measured: fewer already-seen cards, and
         the confirmable likes gone with them.
         """
-        ordered = sorted(title.vote_count for title in self.titles)
-        return ordered[int(0.75 * (len(ordered) - 1) + 0.5)] if ordered else 0
+        return int(_upper_quartile([float(title.vote_count) for title in self.titles]))
+
+    @property
+    def famous_popularity(self) -> float:
+        """The popularity that marks off the most-watched-right-now quarter of this pool.
+
+        The second threshold, and the one that only means anything for a **recent**
+        title. TMDb's popularity is a rolling measure of this week's activity, so for an
+        old film it says nothing useful about how many people have seen it — a cult film
+        can spike on a re-release — and for a film that came out three months ago it is
+        the only fame signal that exists at all.
+
+        Expressed as the pool's own upper quartile for exactly the reason
+        ``famous_votes`` is.
+        """
+        return _upper_quartile([title.popularity for title in self.titles])
+
+    @property
+    def newest_year(self) -> int | None:
+        """The most recent release year in this pool, or ``None`` when nothing says.
+
+        This is where "recent" is measured from, rather than from a clock. The retrieval
+        layer promises that two calls with the same context build the same pool, which
+        is what lets a replay be compared with another one, and a recorded fixture whose
+        answers change meaning every 1 January is a fixture nobody can reproduce. A pool
+        drawn from TMDb's discovery always holds this season's releases, so the newest
+        year in it *is* the current year in production — and in a hand-built test pool it
+        degrades to "recent relative to what is here", which is the honest reading.
+        """
+        years = [title.year for title in self.titles if title.year is not None]
+        return max(years) if years else None
+
+    def is_recent(self, title: Title) -> bool:
+        """Whether ``title`` is young enough that its vote count understates its fame."""
+        newest = self.newest_year
+        return newest is not None and title.year is not None and newest - title.year <= RECENT_YEARS
+
+    def is_famous(self, title: Title) -> bool:
+        """Whether most people have probably already seen ``title``.
+
+        **The one definition**, read by the budget that spends it and by the prompt that
+        states it, so the filter and the sentence cannot drift apart. A candidate counts
+        as famous when either is true:
+
+        - **thousands have rated it** — it is in the most-rated quarter of the pool; or
+        - **it is recent and everybody is watching it now** — released within
+          ``RECENT_YEARS`` of the newest title in the pool *and* in the most-popular
+          quarter of it.
+
+        The second leg is the amendment of 2026-09-24 to ADR 0013, and it exists because
+        the first leg alone has a blind spot the size of a release season. A vote count
+        is an accumulation: it measures how long a title has been available to rate, not
+        only how many people saw it. Measured on the committed ``akira-99`` cassette, the
+        upper quartile of vote counts is 2 155 for titles released this year and 1 811
+        for last year's, against 7 144 at four-to-ten years old — so 99 % of the titles
+        released within a year sit under a pool-wide fame threshold, against 73 % of the
+        older ones. Everything that escaped in the author's session escaped through that
+        gap: *Spider-Man: Brand New Day* (2 828 ratings), *Coyote vs. Acme* (489),
+        *L'Odyssée* (3 864) and *Avatar: Fire and Ash* (4 359) were all free, while
+        *Mad Max: Fury Road* (24 643) and the 2009 *Avatar* (34 712) were correctly
+        charged.
+
+        **Recency alone is not the rule, deliberately.** Calling every title of the last
+        two years famous would charge the budget for the obscure ones too — the same
+        cassette holds 78 titles released within a year, most of them listings nobody has
+        heard of — and under the ``bold`` band's budget of one card in ten that would put
+        last week's releases out of reach. ADR 0013's headline gain over the fork is that
+        retrieval *can* see them. So recency does not make a title famous; it says which
+        of the two fame currencies to read.
+        """
+        return title.vote_count > self.famous_votes or (
+            self.is_recent(title) and title.popularity > self.famous_popularity
+        )
 
     def famous(self, size: int) -> int:
-        """How many of ``size`` cards may come from the most-rated quarter of the pool."""
+        """How many of ``size`` cards may be titles most people have already seen."""
         share = self.band.famous_share if self.band is not None else 1.0
         return size if share >= 1.0 else round(size * share)
 
