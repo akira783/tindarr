@@ -8,6 +8,7 @@ answer, and that an ambiguous user mapping refuses rather than guesses.
 
 import hashlib
 import sqlite3
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -54,9 +55,12 @@ CREATE TABLE user_media_profiles (
 );
 """
 
+#: One fork row as this module writes it: the nine columns ``fork_database`` inserts.
+type _Row = tuple[int, str, str, str, str | None, int | None, str, int, str]
+
 #: One row per thing worth reading differently: two verdicts, a series, a calibration
 #: pick, a requested title, and three rows nothing can be made of.
-_ROWS = [
+_ROWS: list[_Row] = [
     (1, "27205", "movie", "like", "Inception", 2010, "safe", 0, "2026-09-21 19:35:22"),
     (
         1,
@@ -72,14 +76,16 @@ _ROWS = [
     (1, "603", "movie", "dislike", "The Matrix", 1999, "explore", 0, "2026-09-21 19:35:40"),
     (1, "1396", "tv", "seen_disliked", "Breaking Bad", 2008, "safe", 0, "2026-09-21 19:35:50"),
 ]
-_JUNK = [
+_JUNK: list[_Row] = [
     (1, "0", "movie", "like", "Zero", None, "safe", 0, "2026-09-21 19:36:00"),
     (1, "77", "kangaroo", "like", "Wrong kind", None, "safe", 0, "2026-09-21 19:36:10"),
     (1, "88", "movie", "shrugged", "Unknown verdict", None, "safe", 0, "2026-09-21 19:36:20"),
 ]
 
 
-def _fork_database(path: Path, rows: list[object] | None = None, *, profiles: bool = False) -> Path:
+def fork_database(
+    path: Path, rows: Sequence[_Row] | None = None, *, profiles: bool = False
+) -> Path:
     connection = sqlite3.connect(path)
     connection.executescript(_SCHEMA)
     connection.executemany(
@@ -108,7 +114,7 @@ async def _user(engine: AsyncEngine, media_id: str = "media-1", name: str = "ale
 
 
 def test_reads_every_vote_and_counts_what_it_cannot_read(tmp_path: Path) -> None:
-    database = _fork_database(tmp_path / "requests.db", [*_ROWS, *_JUNK])
+    database = fork_database(tmp_path / "requests.db", [*_ROWS, *_JUNK])
 
     votes, unreadable = suggestarr.read_votes(database)
 
@@ -130,7 +136,7 @@ def test_reads_every_vote_and_counts_what_it_cannot_read(tmp_path: Path) -> None
 def test_a_row_without_a_title_falls_back_to_the_id_rather_than_inventing_one(
     tmp_path: Path,
 ) -> None:
-    database = _fork_database(
+    database = fork_database(
         tmp_path / "requests.db",
         [(1, "27205", "movie", "like", None, None, "safe", 0, "2026-09-21 19:35:22")],
     )
@@ -153,8 +159,8 @@ def test_refuses_a_path_that_is_not_there(tmp_path: Path) -> None:
         suggestarr.read_votes(tmp_path / "missing.db")
 
 
-def test_does_not_write_to_the_fork_database(tmp_path: Path) -> None:
-    database = _fork_database(tmp_path / "requests.db", profiles=True)
+def test_does_not_write_to_thefork_database(tmp_path: Path) -> None:
+    database = fork_database(tmp_path / "requests.db", profiles=True)
     before = hashlib.sha256(database.read_bytes()).hexdigest()
 
     suggestarr.read_votes(database)
@@ -165,12 +171,12 @@ def test_does_not_write_to_the_fork_database(tmp_path: Path) -> None:
 
 
 def test_a_receipt_is_stable_and_says_nothing_about_the_verdict(tmp_path: Path) -> None:
-    database = _fork_database(tmp_path / "requests.db")
+    database = fork_database(tmp_path / "requests.db")
     votes, _ = suggestarr.read_votes(database)
     first = suggestarr.receipt_id(votes[0])
 
     # The same row, voted the other way in the fork after the first import.
-    changed = _fork_database(
+    changed = fork_database(
         tmp_path / "changed.db",
         [(1, "27205", "movie", "dislike", "Inception", 2010, "safe", 0, "2026-09-22 10:00:00")],
     )
@@ -181,11 +187,11 @@ def test_a_receipt_is_stable_and_says_nothing_about_the_verdict(tmp_path: Path) 
 
 
 def test_reads_no_identities_when_the_fork_never_linked_one(tmp_path: Path) -> None:
-    assert suggestarr.read_identities(_fork_database(tmp_path / "requests.db")) == ()
+    assert suggestarr.read_identities(fork_database(tmp_path / "requests.db")) == ()
 
 
 def test_reads_the_linked_media_server_account(tmp_path: Path) -> None:
-    identities = suggestarr.read_identities(_fork_database(tmp_path / "requests.db", profiles=True))
+    identities = suggestarr.read_identities(fork_database(tmp_path / "requests.db", profiles=True))
 
     assert [identity.external_user_id for identity in identities] == ["media-1"]
     assert identities[0].provider == "jellyfin"
@@ -193,7 +199,7 @@ def test_reads_the_linked_media_server_account(tmp_path: Path) -> None:
 
 async def test_stores_every_vote_once(engine: AsyncEngine, tmp_path: Path) -> None:
     user_id = await _user(engine)
-    votes, unreadable = suggestarr.read_votes(_fork_database(tmp_path / "requests.db"))
+    votes, unreadable = suggestarr.read_votes(fork_database(tmp_path / "requests.db"))
 
     async with write_transaction(engine) as connection:
         report = await suggestarr.store_votes(
@@ -216,7 +222,7 @@ async def test_stores_every_vote_once(engine: AsyncEngine, tmp_path: Path) -> No
 
 async def test_a_second_run_imports_nothing(engine: AsyncEngine, tmp_path: Path) -> None:
     user_id = await _user(engine)
-    votes, _ = suggestarr.read_votes(_fork_database(tmp_path / "requests.db"))
+    votes, _ = suggestarr.read_votes(fork_database(tmp_path / "requests.db"))
 
     async with write_transaction(engine) as connection:
         await suggestarr.store_votes(connection, user_id, votes, now=NOW)
@@ -234,7 +240,7 @@ async def test_does_not_revert_an_opinion_the_person_has_since_changed(
 ) -> None:
     """A newer Tindarr vote wins, and a re-import does not put the fork's answer back."""
     user_id = await _user(engine)
-    votes, _ = suggestarr.read_votes(_fork_database(tmp_path / "requests.db"))
+    votes, _ = suggestarr.read_votes(fork_database(tmp_path / "requests.db"))
     async with write_transaction(engine) as connection:
         await suggestarr.store_votes(connection, user_id, votes, now=NOW)
     async with write_transaction(engine) as connection:
@@ -266,7 +272,7 @@ async def test_an_older_fork_vote_loses_to_a_newer_tindarr_one(
 ) -> None:
     """Counted as superseded rather than imported, so the report does not overstate."""
     user_id = await _user(engine)
-    votes, _ = suggestarr.read_votes(_fork_database(tmp_path / "requests.db"))
+    votes, _ = suggestarr.read_votes(fork_database(tmp_path / "requests.db"))
     async with write_transaction(engine) as connection:
         await vote_repository.record(
             connection,
@@ -296,7 +302,7 @@ async def test_maps_the_fork_user_by_media_server_account(
     engine: AsyncEngine, tmp_path: Path
 ) -> None:
     user_id = await _user(engine)
-    identities = suggestarr.read_identities(_fork_database(tmp_path / "requests.db", profiles=True))
+    identities = suggestarr.read_identities(fork_database(tmp_path / "requests.db", profiles=True))
 
     async with write_transaction(engine) as connection:
         assert await suggestarr.resolve_target(connection, identities, 1, override=None) == user_id
@@ -306,7 +312,7 @@ async def test_refuses_when_the_fork_linked_no_media_server_account(
     engine: AsyncEngine, tmp_path: Path
 ) -> None:
     await _user(engine)
-    identities = suggestarr.read_identities(_fork_database(tmp_path / "requests.db"))
+    identities = suggestarr.read_identities(fork_database(tmp_path / "requests.db"))
 
     async with write_transaction(engine) as connection:
         with pytest.raises(suggestarr.MappingError, match="--user"):
@@ -317,7 +323,7 @@ async def test_refuses_when_the_linked_account_is_unknown_here(
     engine: AsyncEngine, tmp_path: Path
 ) -> None:
     await _user(engine, media_id="somebody-else")
-    identities = suggestarr.read_identities(_fork_database(tmp_path / "requests.db", profiles=True))
+    identities = suggestarr.read_identities(fork_database(tmp_path / "requests.db", profiles=True))
 
     async with write_transaction(engine) as connection:
         with pytest.raises(suggestarr.MappingError, match="0 Tindarr accounts"):
@@ -337,7 +343,7 @@ async def test_the_user_override_is_checked_against_the_accounts_that_exist(
 async def test_the_user_override_wins_over_the_mapping(engine: AsyncEngine, tmp_path: Path) -> None:
     other = await _user(engine, media_id="media-2", name="sam")
     await _user(engine)
-    identities = suggestarr.read_identities(_fork_database(tmp_path / "requests.db", profiles=True))
+    identities = suggestarr.read_identities(fork_database(tmp_path / "requests.db", profiles=True))
 
     async with write_transaction(engine) as connection:
         assert await suggestarr.resolve_target(connection, identities, 1, override=other) == other
@@ -369,7 +375,7 @@ def test_reads_a_row_the_fork_wrote_with_other_column_types(tmp_path: Path) -> N
 
 def test_an_unknown_pick_type_is_read_as_a_safe_pick(tmp_path: Path) -> None:
     """The verdict is the load-bearing column; the pick kind is provenance."""
-    database = _fork_database(
+    database = fork_database(
         tmp_path / "requests.db",
         [(1, "27205", "movie", "like", "Inception", 2010, "sideways", 0, "2026-09-21 19:35:22")],
     )
@@ -400,7 +406,7 @@ def test_refuses_a_swipe_votes_table_it_cannot_read(tmp_path: Path) -> None:
 
 
 def test_skips_a_linked_profile_that_names_nothing(tmp_path: Path) -> None:
-    database = _fork_database(tmp_path / "requests.db")
+    database = fork_database(tmp_path / "requests.db")
     connection = sqlite3.connect(database)
     connection.execute(
         "INSERT INTO user_media_profiles "

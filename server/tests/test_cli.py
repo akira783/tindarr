@@ -221,9 +221,9 @@ def test_resetting_the_media_server_starts_setup_again(
 
 
 def _fork_db(path: Path) -> Path:
-    from tests.test_swipe_imports_suggestarr import _fork_database  # noqa: PLC0415
+    from tests.test_swipe_imports_suggestarr import fork_database  # noqa: PLC0415
 
-    return _fork_database(path)
+    return fork_database(path)
 
 
 def _seed_user(data_dir: Path, media_id: str = "media-1") -> str:
