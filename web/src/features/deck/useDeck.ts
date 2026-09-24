@@ -13,6 +13,7 @@ import {
 } from "../../api/operations";
 import { isApiError } from "../../api/problem";
 import {
+  DECK_MIN_POLL_MS,
   isDeck,
   isPendingBatch,
   MAX_WAIT_MS,
@@ -23,6 +24,12 @@ import {
   type DeckAnswer,
   type PendingVote,
 } from "./deck-state";
+import {
+  getVoteQueue,
+  markAttempted,
+  setVoteQueue,
+  wasAttempted,
+} from "./vote-queue";
 
 export interface DeckSettings {
   mediaType: MediaFilter;
@@ -96,7 +103,7 @@ export function useDeck(options: DeckOptions): DeckController {
   const queryClient = useQueryClient();
 
   const [voted, setVoted] = useState<ReadonlySet<string>>(() => new Set<string>());
-  const [queue, setQueue] = useState<PendingVote[]>([]);
+  const [queue, setQueue] = useState<PendingVote[]>(getVoteQueue);
   const [lastVote, setLastVote] = useState<PendingVote | null>(null);
   const [sending, setSending] = useState(false);
   const [voteError, setVoteError] = useState<unknown>(null);
@@ -104,10 +111,12 @@ export function useDeck(options: DeckOptions): DeckController {
   const [requestPrompt, setRequestPrompt] = useState<Card | null>(null);
   const [autoRequested, setAutoRequested] = useState<AutoRequestOutcome | null>(null);
   const [gaveUp, setGaveUp] = useState(false);
+  /** A refill the last verdict asked for and its submission has not released yet. */
+  const [refilling, setRefilling] = useState(false);
   /** Bumped by every manual retry, so the deadline is armed again. */
   const [attempt, setAttempt] = useState(0);
 
-  const queueRef = useRef<PendingVote[]>([]);
+  const queueRef = useRef<PendingVote[]>(getVoteQueue());
   const chainRef = useRef<Promise<void>>(Promise.resolve());
   /**
    * The same set as `voted`, kept in step but readable now.
@@ -117,8 +126,14 @@ export function useDeck(options: DeckOptions): DeckController {
    * this the second one would send a second verdict on the card the first has
    * just judged. The server would take the later one, which is not wrong, but it
    * is a vote the user did not cast.
+   *
+   * The second keystroke is dropped rather than applied to the next card: that
+   * card has not been rendered yet, so nobody has seen what they would be
+   * judging. A fast "n n" puts one card off, not two.
    */
   const votedRef = useRef<Set<string>>(new Set());
+  /** Set by the verdict that empties the deck, honoured once it is stored. */
+  const refillWantedRef = useRef(false);
 
   const mood = settings.mood.trim();
   const queryKey = useMemo(
@@ -128,16 +143,26 @@ export function useDeck(options: DeckOptions): DeckController {
 
   const query = useQuery<DeckAnswer>({
     queryKey,
-    queryFn: () =>
-      getDeck({
-        media_type: settings.mediaType,
-        novelty: settings.novelty,
-        ...(mood === "" ? {} : { mood }),
-      }),
+    queryFn: ({ signal }) =>
+      getDeck(
+        {
+          media_type: settings.mediaType,
+          novelty: settings.novelty,
+          ...(mood === "" ? {} : { mood }),
+        },
+        signal,
+      ),
     enabled,
     retry: false,
     staleTime: Number.POSITIVE_INFINITY,
     refetchOnWindowFocus: false,
+    // Nothing of this deck survives the page. Which cards have been judged is
+    // known here and not in the cache, so a cached answer read again after a
+    // detour through another page would put judged cards back on top — and a
+    // second verdict on the same title replaces the first rather than being
+    // refused. Leaving the page and coming back asks the server instead, which
+    // answers with the cards it still considers unvoted.
+    gcTime: 0,
     // The only thing that keeps this query running: a `202` that has not timed
     // out. A deck, an error or the deadline all return `false`, and a hidden tab
     // pauses it on its own (`refetchIntervalInBackground` is off by default), so
@@ -145,11 +170,17 @@ export function useDeck(options: DeckOptions): DeckController {
     refetchInterval: (current) => {
       if (gaveUp || current.state.status === "error") return false;
       const answer = current.state.data;
-      return isPendingBatch(answer) ? pollDelay(answer.retryAfterMs) : false;
+      return isPendingBatch(answer) ? pollDelay(answer.retryAfterMs, DECK_MIN_POLL_MS) : false;
     },
   });
 
   const { refetch } = query;
+  // `flush` is built once and outlives several renders of the query; it reaches
+  // the current `refetch` through this rather than being rebuilt for each one.
+  const refetchRef = useRef(refetch);
+  useEffect(() => {
+    refetchRef.current = refetch;
+  }, [refetch]);
   const answer = query.data;
   const deck = isDeck(answer) ? answer : null;
   const waitingNow = isPendingBatch(answer);
@@ -162,8 +193,11 @@ export function useDeck(options: DeckOptions): DeckController {
 
   // --- the deadline on one wait ---------------------------------------------------
 
+  // A `202` being polled, or a first request still in the air: both are "the deck
+  // is coming", and a socket that never answers must not be a spinner for ever.
+  const awaitingBatch = waitingNow || (query.isFetching && query.data === undefined);
   useEffect(() => {
-    if (!waitingNow) return undefined;
+    if (!awaitingBatch) return undefined;
     const timer = setTimeout(() => {
       setGaveUp(true);
     }, MAX_WAIT_MS);
@@ -173,12 +207,13 @@ export function useDeck(options: DeckOptions): DeckController {
       // is what clears the verdict on it. Nothing here runs during a render.
       setGaveUp(false);
     };
-  }, [waitingNow, queryKey, attempt]);
+  }, [awaitingBatch, queryKey, attempt]);
 
   // --- votes --------------------------------------------------------------------
 
   const apply = useCallback((next: PendingVote[]) => {
     queueRef.current = next;
+    setVoteQueue(next);
     setQueue(next);
   }, []);
 
@@ -188,6 +223,7 @@ export function useDeck(options: DeckOptions): DeckController {
         const batch = queueRef.current;
         if (batch.length === 0) return;
         setSending(true);
+        markAttempted(batch.map((entry) => entry.clientVoteId));
         try {
           const outcome = await submitVotes(batch.map(toVoteInput));
           const sent = new Set(batch.map((entry) => entry.clientVoteId));
@@ -212,8 +248,22 @@ export function useDeck(options: DeckOptions): DeckController {
           if (outcome.profile_refresh_started === true) {
             void queryClient.invalidateQueries({ queryKey: ["swipe", "profile"] });
           }
+
+          // The deck ran out with this verdict. Asking now, and not when the key
+          // was pressed, is what stops the server from answering with the very
+          // card it has not been told about yet — which would read as "the deck
+          // is empty" a moment before it is true.
+          if (refillWantedRef.current) {
+            refillWantedRef.current = false;
+            setRefilling(false);
+            void refetchRef.current();
+          }
         } catch (error) {
-          // The queue keeps them: same ids, so the resend is a `duplicate`.
+          // The queue keeps them: same ids, so the resend is a `duplicate`. And
+          // nothing is refilled while a verdict is unsent: the server would hand
+          // back the card that verdict is about.
+          refillWantedRef.current = false;
+          setRefilling(false);
           setVoteError(error);
         } finally {
           setSending(false);
@@ -240,12 +290,13 @@ export function useDeck(options: DeckOptions): DeckController {
       setAutoRequested(null);
       apply([...queueRef.current, entry]);
       if (value === "like" && requestsEnabled && !autoRequest) setRequestPrompt(card);
+      if (remaining.length === 1) {
+        refillWantedRef.current = true;
+        setRefilling(true);
+      }
       flush();
-      // That was the last one in hand: ask for the next batch now rather than
-      // leaving the user in front of an empty frame. Once, from a user action.
-      if (remaining.length === 1) void refetch();
     },
-    [apply, autoRequest, flush, refetch, remaining, requestsEnabled],
+    [apply, autoRequest, flush, remaining, requestsEnabled],
   );
 
   const unvote = useCallback((cardId: string) => {
@@ -284,28 +335,39 @@ export function useDeck(options: DeckOptions): DeckController {
     setAutoRequested(null);
     const stillQueued = queueRef.current.some((item) => item.clientVoteId === entry.clientVoteId);
     if (stillQueued) {
-      // It never reached the server, so there is nothing there to undo.
       apply(queueRef.current.filter((item) => item.clientVoteId !== entry.clientVoteId));
       unvote(entry.card.id);
       setLastVote(null);
       setVoteError(null);
+      // It is still queued because a submit failed — but a submit can fail on the
+      // way back, with the vote already stored. "It never reached the server" is
+      // only safe for one that was never sent; for the rest, ask the server to
+      // drop it too. `DELETE` is idempotent and its `404` is already handled.
+      if (wasAttempted(entry.clientVoteId)) undoOnServer(entry);
       return;
     }
     undoOnServer(entry);
   }, [apply, lastVote, undoOnServer, unvote]);
 
   const retry = useCallback(() => {
+    refillWantedRef.current = false;
+    setRefilling(false);
     setGaveUp(false);
     setAttempt((count) => count + 1);
     void refetch();
   }, [refetch]);
 
+  // "The deck is empty" is only true once nothing is in flight: a verdict still
+  // being sent, or a refill already asked for, is not an empty deck.
   const stalled =
     deck !== null &&
     remaining.length === 0 &&
     deck.cards.length > 0 &&
     deck.exhausted !== true &&
-    !query.isFetching;
+    !query.isFetching &&
+    !sending &&
+    queue.length === 0 &&
+    !refilling;
 
   return {
     query,

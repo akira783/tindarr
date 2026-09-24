@@ -5,6 +5,7 @@ import { afterEach, beforeAll, beforeEach, expect } from "vitest";
 
 import { resetClientHooks, resetFetchImpl, setFetchImpl } from "../src/api/client";
 import { setCsrfToken } from "../src/api/csrf";
+import { resetVoteQueue } from "../src/features/deck/vote-queue";
 import {
   clearCspViolations,
   cspViolations,
@@ -32,6 +33,9 @@ beforeAll(() => {
 beforeEach(() => {
   clearCspViolations();
   setCsrfToken(null);
+  // The deck's unsent verdicts outlive their component on purpose (see
+  // `vote-queue.ts`), which means they would also outlive a test.
+  resetVoteQueue();
   resetClientHooks();
   // No test ever reaches the network: every call goes through a MockApi.
   setFetchImpl(() => {

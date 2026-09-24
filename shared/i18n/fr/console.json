@@ -403,7 +403,6 @@
       "skip": "Plus tard"
     },
     "keys": {
-      "title": "Clavier",
       "like": "Flèche droite",
       "dislike": "Flèche gauche",
       "seenLiked": "Flèche haut",
@@ -420,7 +419,6 @@
       "region": "Carte",
       "why": "Pourquoi celui-ci",
       "noRationale": "Le modèle n’a pas donné de raison pour celui-ci.",
-      "genres": "Genres",
       "runtimeShort": "{{minutes}} min",
       "runtimeLong": "{{hours}} h {{minutes}}",
       "seasons_one": "{{count}} saison",
@@ -454,13 +452,11 @@
         "partially_available": "En partie sur votre serveur",
         "available": "Sur votre serveur"
       },
-      "noPoster": "Pas d’affiche",
       "trailer": "Voir la bande-annonce",
       "trailerTitle": "Bande-annonce de {{title}}",
       "trailerNote": "Le lecteur est celui de YouTube, sur son adresse sans cookie. Rien n’en est chargé tant que vous ne l’ouvrez pas.",
       "closeTrailer": "Fermer la bande-annonce",
-      "position": "Carte {{position}} sur {{total}}",
-      "announce": "{{title}}. {{position}}."
+      "position": "Carte {{position}} sur {{total}}"
     },
     "states": {
       "generating": "Constitution de votre paquet…",

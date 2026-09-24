@@ -83,7 +83,14 @@ export function posterUrl(
   }
 }
 
-/** The one origin the console may frame: the trailer player (ADR 0009, roadmap 4.6). */
+/**
+ * The one origin the console may frame: the trailer player (ADR 0009, roadmap 4.6).
+ *
+ * The server writes the same string into the policy it serves this page under
+ * (`TRAILER_FRAME_ORIGIN` in `server/src/tindarr/api/console.py`). Nothing links
+ * the two at build time; what catches a change to one and not the other is
+ * `web/e2e/deck.spec.ts`, which frames a real trailer in a real browser.
+ */
 export const TRAILER_ORIGIN = "https://www.youtube-nocookie.com";
 
 /**

@@ -546,6 +546,13 @@ select:disabled {
   min-height: 8rem;
 }
 
+/* The deck owns the keyboard shortcuts, so it is focusable — and says so. */
+.deck-region:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: var(--radius);
+}
+
 /* One card: poster beside the text on a desktop, above it on a phone. */
 .deck-card {
   display: grid;
@@ -633,6 +640,18 @@ select:disabled {
 
 .provider-name {
   font-weight: 600;
+}
+
+/* The pick type and the availability: text first, and a border that only repeats
+   what the text already says. */
+.badge-pick {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.badge-availability {
+  border-color: var(--success);
+  color: var(--success);
 }
 
 .trailer {

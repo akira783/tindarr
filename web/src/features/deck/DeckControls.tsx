@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { Calibration, MediaFilter, Novelty } from "../../api/operations";
-import { Button, SelectField } from "../../components/ui";
+import { Button, SelectField, TextField } from "../../components/ui";
 
 const MEDIA: readonly MediaFilter[] = ["both", "movie", "tv"];
 const NOVELTY: readonly Novelty[] = ["familiar", "balanced", "bold"];
@@ -72,18 +72,17 @@ export function DeckControls({
           onMood(draft.trim());
         }}
       >
-        <label className="field">
-          <span>{t("deck.controls.mood")}</span>
-          <input
-            type="text"
-            value={draft}
-            maxLength={200}
-            disabled={busy}
-            onChange={(event) => {
-              setDraft(event.target.value);
-            }}
-          />
-        </label>
+        <TextField
+          label={t("deck.controls.mood")}
+          hint={t("deck.controls.moodHint")}
+          type="text"
+          value={draft}
+          maxLength={200}
+          disabled={busy}
+          onChange={(event) => {
+            setDraft(event.target.value);
+          }}
+        />
         <Button type="submit" disabled={busy || draft.trim() === mood}>
           {t("deck.controls.moodApply")}
         </Button>
@@ -99,7 +98,6 @@ export function DeckControls({
           </Button>
         )}
       </form>
-      <p className="hint">{t("deck.controls.moodHint")}</p>
 
       {calibration !== null && !calibration.complete && (
         <div className="calibration-progress">

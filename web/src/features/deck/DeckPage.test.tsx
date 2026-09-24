@@ -63,7 +63,7 @@ describe("the deck's card", () => {
     renderApp({ api: deckApi(), route: "/deck" });
 
     await screen.findByRole("heading", { name: /Inception/ });
-    const live = document.querySelector("[aria-live='polite'].visually-hidden");
+    const live = document.querySelector("[aria-live='polite']");
     expect(live).toHaveTextContent("Inception (2010)");
     expect(document.querySelector("img.poster")).toHaveAttribute("alt", "");
   });
@@ -78,10 +78,9 @@ describe("the deck's card", () => {
     await user.click(screen.getByRole("button", { name: /Watch the trailer/ }));
 
     const frame = document.querySelector("iframe");
-    expect(frame).toHaveAttribute(
-      "src",
-      "https://www.youtube-nocookie.com/embed/YoHD9XEInc0?rel=0&modestbranding=1",
-    );
+    const src = new URL(frame?.getAttribute("src") ?? "");
+    expect(src.origin).toBe("https://www.youtube-nocookie.com");
+    expect(src.pathname).toBe("/embed/YoHD9XEInc0");
     expect(frame).toHaveAttribute("title", "Trailer for Inception");
   });
 
@@ -165,9 +164,14 @@ describe("the five verdicts", () => {
     await screen.findByRole("heading", { name: /Inception/ });
     // No render happens between the two: the handler's own state is a keystroke
     // behind, which is exactly the case a state-only guard misses.
+    const region = document.querySelector(".deck-region");
+    expect(region).not.toBeNull();
     await act(async () => {
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "n" }));
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "n" }));
+      const press = (): void => {
+        region?.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true }));
+      };
+      press();
+      press();
       await Promise.resolve();
     });
 
@@ -228,6 +232,81 @@ describe("undoing the last verdict", () => {
   });
 });
 
+describe("leaving the deck and coming back", () => {
+  it("does not offer a card again that this session has already judged", async () => {
+    const user = userEvent.setup();
+    const judged: string[] = [];
+    // The server answers with the cards it still believes are unvoted, which is
+    // what makes leaving and returning correct — as long as the console asks.
+    const api = deckApi({ status: { requests_enabled: false } })
+      .replace("GET", "/api/v1/swipe/deck", () =>
+        ok(
+          fixtures.deck({
+            cards: [
+              fixtures.card({ id: "a", tmdb_id: 1 }),
+              fixtures.card({ id: "b", tmdb_id: 2, title: "Arrival" }),
+            ].filter((one) => !judged.includes(one.id)),
+          }),
+        ),
+      )
+      .replace("POST", "/api/v1/swipe/votes", (call) => {
+        for (const vote of (call.body as { votes: Schemas["VoteInput"][] }).votes) {
+          judged.push(vote.card_id);
+        }
+        return ok({ results: [] });
+      });
+    renderApp({ api, route: "/deck" });
+
+    await screen.findByRole("heading", { name: /Inception/ });
+    await user.keyboard("n");
+    await screen.findByRole("heading", { name: /Arrival/ });
+
+    // Off to another page and back, well inside any cache lifetime.
+    await user.click(screen.getByRole("link", { name: "My sessions" }));
+    await screen.findByRole("heading", { name: "My sessions" });
+    await user.click(screen.getByRole("link", { name: "Swipe" }));
+
+    expect(await screen.findByRole("heading", { name: /Arrival/ })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Inception/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps a verdict the server has not stored, and sends it on the way back", async () => {
+    const user = userEvent.setup();
+    let fail = true;
+    const api = deckApi({ status: { requests_enabled: false } }).replace(
+      "POST",
+      "/api/v1/swipe/votes",
+      () => {
+        if (fail) {
+          fail = false;
+          throw new Error("the network dropped it");
+        }
+        return ok({ results: [] });
+      },
+    );
+    renderApp({ api, route: "/deck" });
+
+    await screen.findByRole("heading", { name: /Inception/ });
+    await user.keyboard("n");
+    await screen.findByText(/1 verdict has not reached the server yet/);
+
+    await user.click(screen.getByRole("link", { name: "My sessions" }));
+    await screen.findByRole("heading", { name: "My sessions" });
+    await user.click(screen.getByRole("link", { name: "Swipe" }));
+
+    // The page is new; the verdict is not. It is still here, and still its own id.
+    expect(
+      await screen.findByText(/1 verdict has not reached the server yet/),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Send them again" }));
+
+    await waitFor(() => {
+      expect(votesSent(api)).toHaveLength(2);
+    });
+    expect(votesSent(api)[1]?.client_vote_id).toBe(votesSent(api)[0]?.client_vote_id);
+  });
+});
+
 describe("a verdict the network loses", () => {
   it("keeps it, and resends it with the same id so the server counts one vote", async () => {
     const user = userEvent.setup();
@@ -264,7 +343,7 @@ describe("a verdict the network loses", () => {
     });
   });
 
-  it("undoes it without asking the server about a vote it never received", async () => {
+  it("still tells the server to undo it: the failure may have been on the way back", async () => {
     const user = userEvent.setup();
     const api = deckApi({ status: { requests_enabled: false } }).replace(
       "POST",
@@ -281,11 +360,15 @@ describe("a verdict the network loses", () => {
 
     await user.click(screen.getByRole("button", { name: /Undo “Inception”/ }));
 
+    // The card comes back at once — that is all the user asked for — and the
+    // server is told too, because a submit can fail on the response leg with the
+    // vote already stored. `DELETE` is idempotent and answers `404` when it was
+    // not.
     expect(await screen.findByRole("heading", { name: /Inception/ })).toBeInTheDocument();
-    expect(api.callsTo("DELETE", "/api/v1/swipe/votes/movie/27205")).toHaveLength(0);
     await waitFor(() => {
-      expect(screen.queryByText(/has not reached the server yet/)).not.toBeInTheDocument();
+      expect(api.callsTo("DELETE", "/api/v1/swipe/votes/movie/27205")).toHaveLength(1);
     });
+    expect(screen.queryByText(/has not reached the server yet/)).not.toBeInTheDocument();
   });
 });
 
@@ -300,11 +383,15 @@ describe("while a batch is being built", () => {
     });
     renderApp({ api, route: "/deck" });
 
-    expect(await screen.findByText("Building your deck…")).toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: /Inception/ })).toBeInTheDocument();
+    expect(await screen.findAllByText("Building your deck…")).not.toHaveLength(0);
+    // The server asked for 250 ms; the deck's own floor is a second, because each
+    // of these can start a generation (`DECK_MIN_POLL_MS`).
+    expect(
+      await screen.findByRole("heading", { name: /Inception/ }, { timeout: 4000 }),
+    ).toBeInTheDocument();
     expect(deckCalls(api)).toHaveLength(2);
 
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    await new Promise((resolve) => setTimeout(resolve, 1500));
     expect(deckCalls(api)).toHaveLength(2);
   });
 
@@ -314,7 +401,7 @@ describe("while a batch is being built", () => {
     renderApp({ api, route: "/deck" });
 
     await vi.advanceTimersByTimeAsync(200_000);
-    expect(screen.getByText("Still nothing")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Still nothing" })).toBeInTheDocument();
 
     const before = deckCalls(api).length;
     await vi.advanceTimersByTimeAsync(120_000);
@@ -329,7 +416,7 @@ describe("the states the deck cannot leave on its own", () => {
     const api = deckApi({ status: { llm_configured: false } });
     renderApp({ api, route: "/deck" });
 
-    expect(await screen.findByText("No AI provider yet")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "No AI provider yet" })).toBeInTheDocument();
     expect(
       screen.getByText(/Add one on the connectors page, then come back here/),
     ).toBeInTheDocument();
@@ -349,7 +436,7 @@ describe("the states the deck cannot leave on its own", () => {
     );
     renderApp({ api, route: "/deck" });
 
-    expect(await screen.findByText("No TMDb key yet")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "No TMDb key yet" })).toBeInTheDocument();
     expect(screen.getByText(/Ask an administrator of this server/)).toBeInTheDocument();
   });
 
@@ -359,7 +446,7 @@ describe("the states the deck cannot leave on its own", () => {
     });
     renderApp({ api, route: "/deck" });
 
-    expect(await screen.findByText("That is your batches for today")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "That is your batches for today" })).toBeInTheDocument();
     expect(screen.getByText(/Come back tomorrow/)).toBeInTheDocument();
   });
 
@@ -367,7 +454,7 @@ describe("the states the deck cannot leave on its own", () => {
     const api = deckApi({ deck: () => problem(503, "metadata_unreachable") });
     renderApp({ api, route: "/deck" });
 
-    expect(await screen.findByText("TMDb did not answer")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "TMDb did not answer" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
@@ -375,7 +462,7 @@ describe("the states the deck cannot leave on its own", () => {
     const api = deckApi({ deck: () => problem(502, "llm_quota") });
     renderApp({ api, route: "/deck" });
 
-    expect(await screen.findByText("The AI provider failed")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "The AI provider failed" })).toBeInTheDocument();
     expect(screen.getByText(/quota is exhausted/)).toBeInTheDocument();
   });
 
@@ -383,7 +470,7 @@ describe("the states the deck cannot leave on its own", () => {
     const api = deckApi({ deck: () => ok(fixtures.deck({ cards: [], exhausted: true })) });
     renderApp({ api, route: "/deck" });
 
-    expect(await screen.findByText("Nothing left to offer")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Nothing left to offer" })).toBeInTheDocument();
     expect(screen.getByText(/Try a bolder setting/)).toBeInTheDocument();
   });
 
@@ -391,7 +478,7 @@ describe("the states the deck cannot leave on its own", () => {
     const api = deckApi({ deck: () => ok(fixtures.deck({ cards: [] })) });
     renderApp({ api, route: "/deck" });
 
-    expect(await screen.findByText("No card this time")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "No card this time" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Ask for more" })).toBeInTheDocument();
     expect(deckCalls(api)).toHaveLength(1);
   });
@@ -432,7 +519,7 @@ describe("the states the deck cannot leave on its own", () => {
     await screen.findByRole("heading", { name: /Inception/ });
     await user.keyboard("n");
 
-    expect(await screen.findByText("The deck is empty")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "The deck is empty" })).toBeInTheDocument();
     const asked = deckCalls(api).length;
     expect(asked).toBe(2);
     // And it stays there: nothing asks again by itself, because every ask can cost
@@ -447,6 +534,48 @@ describe("the states the deck cannot leave on its own", () => {
     renderApp({ api, route: "/deck" });
 
     expect(await screen.findByText(/A lot of these look like titles you have already seen/)).toBeInTheDocument();
+  });
+});
+
+describe("what the deck costs", () => {
+  it("asks once, for the settings the user stored — not once for the defaults first", async () => {
+    // The preferences are part of the query key, and each `GET /swipe/deck` with
+    // nothing ready starts a generation charged to the daily cap. Answering
+    // `status` first and `preferences` after is the ordinary case on a network.
+    let releasePreferences = (): void => undefined;
+    const held = new Promise<void>((resolve) => {
+      releasePreferences = resolve;
+    });
+    const api = deckApi({ preferences: { media_type: "movie", novelty: "bold" } }).replace(
+      "GET",
+      "/api/v1/swipe/preferences",
+      async () => {
+        await held;
+        return ok(fixtures.preferences({ media_type: "movie", novelty: "bold" }));
+      },
+    );
+    renderApp({ api, route: "/deck" });
+
+    await waitFor(() => {
+      expect(api.callsTo("GET", "/api/v1/swipe/status")).toHaveLength(1);
+    });
+    expect(deckCalls(api)).toHaveLength(0);
+
+    releasePreferences();
+    await screen.findByRole("heading", { name: /Inception/ });
+    expect(deckCalls(api)).toHaveLength(1);
+    expect(deckCalls(api)[0]?.query.get("media_type")).toBe("movie");
+    expect(deckCalls(api)[0]?.query.get("novelty")).toBe("bold");
+  });
+
+  it("says so when the preferences cannot be read, rather than silently using defaults", async () => {
+    const api = deckApi().replace("GET", "/api/v1/swipe/preferences", () =>
+      problem(500, "internal_error"),
+    );
+    renderApp({ api, route: "/deck" });
+
+    expect(await screen.findByText(/unexpected error/)).toBeInTheDocument();
+    expect(deckCalls(api)).toHaveLength(0);
   });
 });
 

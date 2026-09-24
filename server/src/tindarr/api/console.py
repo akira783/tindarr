@@ -50,6 +50,12 @@ SERVED_METHODS: Final = frozenset({"GET", "HEAD"})
 #: swipe page (roadmap 4.6). ``youtube-nocookie.com`` is YouTube's own no-cookie host,
 #: and the console only builds that frame when the user asks to watch, so nothing is
 #: fetched from it while somebody is merely swiping.
+#:
+#: The console writes the same origin in ``web/src/lib/url.ts`` (``TRAILER_ORIGIN``).
+#: They are two languages and there is no shared constant to hang them on, so the
+#: pairing is held by ``web/e2e/deck.spec.ts``, which loads a real trailer in a real
+#: browser and fails on any policy violation: a change to one and not the other shows
+#: up there.
 TRAILER_FRAME_ORIGIN: Final = "https://www.youtube-nocookie.com"
 
 #: The console's policy (ADR 0009, amended by roadmap 4.6 for ``frame-src``). No

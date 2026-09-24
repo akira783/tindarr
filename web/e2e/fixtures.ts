@@ -61,7 +61,7 @@ export const test = base.extend<TargetOptions & { cspGuard: void }>({
   plainPassword: ["", { option: true }],
 
   cspGuard: [
-    async ({ page }, use, testInfo) => {
+    async ({ page, baseURL }, use, testInfo) => {
       const violations: string[] = [];
       const cspMessages: string[] = [];
       const consoleErrors: string[] = [];
@@ -74,14 +74,25 @@ export const test = base.extend<TargetOptions & { cspGuard: void }>({
       });
       await watchCspViolations(page);
 
+      // Only this origin's frames. The deck embeds a third party's player, and
+      // its own policy and its own exceptions are not the console's — the CSP
+      // collector is scoped the same way (see `csp.ts`).
+      const ours = (url: string | undefined): boolean =>
+        baseURL === undefined || url === undefined || url.startsWith(baseURL);
+
       page.on("console", (message) => {
         if (message.type() !== "error") return;
-        const text = `${message.location().url}: ${message.text()}`;
+        const where = message.location().url;
+        if (!ours(where)) return;
+        const text = `${where}: ${message.text()}`;
         consoleErrors.push(text);
         if (isCspMessage(message.text())) cspMessages.push(text);
       });
       page.on("pageerror", (error) => {
-        pageErrors.push(error.stack ?? error.message);
+        // `pageerror` carries no frame, so the stack is all there is to go on.
+        const stack = error.stack ?? error.message;
+        if (stack.includes("youtube")) return;
+        pageErrors.push(stack);
       });
 
       await use();

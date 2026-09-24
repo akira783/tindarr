@@ -23,9 +23,23 @@ export function isPendingBatch(value: DeckAnswer | undefined): value is Waiting 
   return value !== undefined && "waiting" in value;
 }
 
-/** What the server asked to wait, kept inside the bounds the console polls at. */
-export function pollDelay(retryAfterMs: number | null | undefined): number {
-  return Math.min(Math.max(retryAfterMs ?? DEFAULT_POLL_MS, MIN_POLL_MS), MAX_POLL_MS);
+/**
+ * The deck's own floor, above the console's.
+ *
+ * `MIN_POLL_MS` is 250 and exists for the pairing poller, which reads a row. A
+ * `202` from the deck is a generation in flight, and the contract allows a
+ * `retry_after_ms` of 250 — which would be 720 requests in one three-minute wait,
+ * against an endpoint that starts paid work when nothing is ready. The server's
+ * own default is a second, and a second is what this asks for at the fastest.
+ */
+export const DECK_MIN_POLL_MS = 1_000;
+
+/** What the server asked to wait, kept inside the bounds the caller polls at. */
+export function pollDelay(
+  retryAfterMs: number | null | undefined,
+  floor: number = MIN_POLL_MS,
+): number {
+  return Math.min(Math.max(retryAfterMs ?? DEFAULT_POLL_MS, floor), MAX_POLL_MS);
 }
 
 /** A vote the user has cast, whether or not the server knows about it yet. */

@@ -98,7 +98,11 @@ export async function consoleFetch(request: Request): Promise<Response> {
     const prepared = new Request(withCsrf(attempt, token), { credentials: "same-origin" });
     try {
       return await fetchImpl(prepared);
-    } catch {
+    } catch (error) {
+      // A caller that cancelled — an unmounted page, a query whose key moved on —
+      // asked for this. Turning it into a "the server could not be reached" would
+      // put an error on screen for something nobody did wrong.
+      if (error instanceof DOMException && error.name === "AbortError") throw error;
       throw new ApiError(0, "network", null);
     }
   };

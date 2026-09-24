@@ -6,6 +6,7 @@ import { useAuth } from "../../auth/AuthProvider";
 import { Button } from "../../components/ui";
 import { posterUrl, trailerEmbedUrl } from "../../lib/url";
 import { lengthOf, sortedProviders } from "./deck-state";
+import { SHORTCUTS } from "./keys";
 
 /** "1 h 52", "104 min", "3 seasons", or nothing at all. */
 function useLength(card: Card): string | null {
@@ -89,7 +90,7 @@ function Trailer({ card, open, onToggle }: { card: Card; open: boolean; onToggle
   const label = t("deck.card.trailerTitle", { title: card.title });
   return (
     <div className="trailer">
-      <Button onClick={onToggle} aria-expanded={open} aria-keyshortcuts="T">
+      <Button onClick={onToggle} aria-expanded={open} aria-keyshortcuts={SHORTCUTS.trailer}>
         {open ? t("deck.card.closeTrailer") : t("deck.card.trailer")}
       </Button>
       {open ? (
@@ -99,7 +100,7 @@ function Trailer({ card, open, onToggle }: { card: Card; open: boolean; onToggle
           title={label}
           sandbox="allow-scripts allow-same-origin allow-presentation"
           allow="encrypted-media; fullscreen; picture-in-picture"
-          referrerPolicy="strict-origin-when-cross-origin"
+          referrerPolicy="no-referrer"
           loading="lazy"
         />
       ) : (

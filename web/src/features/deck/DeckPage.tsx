@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -105,10 +106,15 @@ export function DeckPage(): ReactNode {
   const mediaType =
     overrides.mediaType ?? preferences.data?.media_type ?? "both";
   const novelty = overrides.novelty ?? preferences.data?.novelty ?? "balanced";
+  // The preferences are part of the deck's query key, so asking before they land
+  // would ask twice: once for the defaults and once for what the user chose — and
+  // each `GET /swipe/deck` with nothing ready starts a generation charged to the
+  // daily cap.
   const configured =
     swipeStatus !== undefined &&
     swipeStatus.llm_configured &&
-    swipeStatus.tmdb_configured;
+    swipeStatus.tmdb_configured &&
+    preferences.data !== undefined;
 
   const deck = useDeck({
     settings: useMemo(
@@ -141,46 +147,82 @@ export function DeckPage(): ReactNode {
     setTrailerFor((open) => (open === currentId ? null : currentId));
   }, [currentId]);
 
-  // Spoken when it changes, and nothing else changes it: the position is left out
-  // on purpose, since a count that drops with every vote would talk over the card
-  // that has just arrived.
-  const announcement =
+  // The card, spoken when it changes. Only the title: the position would make a
+  // count that drops with every vote talk over the card that has just arrived.
+  const cardName =
     current === null
       ? ""
-      : t("deck.card.announce", {
-          title:
-            current.year == null
-              ? current.title
-              : `${current.title} (${current.year})`,
-          position: t("deck.card.position", { position: 1, total }),
-        });
+      : current.year == null
+        ? current.title
+        : `${current.title} (${current.year})`;
 
   // --- keyboard -----------------------------------------------------------------
 
   // Undo stays reachable when the deck has run dry: a wrong verdict on the last
   // card is exactly the one somebody wants back.
   const interactive = requestPrompt === null && (current !== null || canUndo);
-  useEffect(() => {
-    if (!interactive) return undefined;
-    const onKey = (event: KeyboardEvent): void => {
-      const action = actionForKey(event);
+
+  /**
+   * The shortcuts belong to the deck, not to the document.
+   *
+   * A listener on `document` swallows the arrow keys everywhere, and this page is
+   * long enough that a keyboard user would lose the only way they have of
+   * scrolling it. Bound to the region instead — and the region takes focus when
+   * the first card arrives, so the keyboard still works without a click.
+   */
+  const onRegionKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLElement>): void => {
+      if (!interactive) return;
+      const action = actionForKey({
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        altKey: event.altKey,
+        target: event.target,
+        isComposing: event.nativeEvent.isComposing,
+      });
       if (action === null) return;
-      event.preventDefault();
       if (action === "undo") {
-        if (canUndo) undo();
+        if (!canUndo) return;
+        event.preventDefault();
+        undo();
         return;
       }
       if (action === "trailer") {
+        if (current?.trailer == null) return;
+        event.preventDefault();
         toggleTrailer();
         return;
       }
+      if (current === null) return;
+      event.preventDefault();
       vote(action);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [canUndo, interactive, toggleTrailer, undo, vote]);
+    },
+    [canUndo, current, interactive, toggleTrailer, undo, vote],
+  );
+
+  const regionRef = useRef<HTMLElement>(null);
+  const hadCardRef = useRef(false);
+  useEffect(() => {
+    if (currentId === null || hadCardRef.current) return;
+    hadCardRef.current = true;
+    regionRef.current?.focus({ preventScroll: true });
+  }, [currentId]);
+
+  // The verdict buttons go away with the last card, taking the focus with them.
+  // Undo is the one thing still worth doing, so it gets it.
+  const undoRef = useRef<HTMLButtonElement>(null);
+  const hadVerdictsRef = useRef(false);
+  useEffect(() => {
+    if (current !== null) {
+      hadVerdictsRef.current = true;
+      return;
+    }
+    if (!hadVerdictsRef.current) return;
+    hadVerdictsRef.current = false;
+    if (regionRef.current?.contains(document.activeElement) === true) return;
+    undoRef.current?.focus();
+  }, [current]);
 
   // The next poster, fetched while the user reads this one, so the deck never
   // shows an empty frame. It is a plain image fetch: nothing renders it.
@@ -216,10 +258,12 @@ export function DeckPage(): ReactNode {
   const code = isApiError(error) ? error.code : null;
 
   let body: ReactNode;
+  /** What the live region says: the card, or the state that replaced it. */
+  let live = cardName;
   if (status.isPending || preferences.isPending) {
     body = <Loading />;
-  } else if (swipeStatus === undefined) {
-    body = <ErrorAlert error={status.error} />;
+  } else if (swipeStatus === undefined || preferences.data === undefined) {
+    body = <ErrorAlert error={status.error ?? preferences.error} />;
   } else if (!swipeStatus.llm_configured) {
     body = <NotConfigured what="Provider" />;
   } else if (!swipeStatus.tmdb_configured) {
@@ -229,6 +273,7 @@ export function DeckPage(): ReactNode {
   } else if (code === "tmdb_not_configured") {
     body = <NotConfigured what="Tmdb" />;
   } else if (code === "daily_limit_reached") {
+    live = t("deck.states.dailyLimitTitle");
     body = (
       <DeadEnd
         title={t("deck.states.dailyLimitTitle")}
@@ -236,6 +281,7 @@ export function DeckPage(): ReactNode {
       />
     );
   } else if (code === "metadata_unreachable") {
+    live = t("deck.states.metadataTitle");
     body = (
       <DeadEnd
         title={t("deck.states.metadataTitle")}
@@ -252,6 +298,7 @@ export function DeckPage(): ReactNode {
     code === "llm_unreachable" ||
     code === "llm_invalid_output"
   ) {
+    live = t("deck.states.llmTitle");
     body = (
       <DeadEnd
         title={t("deck.states.llmTitle")}
@@ -269,6 +316,7 @@ export function DeckPage(): ReactNode {
       </section>
     );
   } else if (deck.gaveUp) {
+    live = t("deck.states.tooLongTitle");
     body = (
       <DeadEnd
         title={t("deck.states.tooLongTitle")}
@@ -279,6 +327,7 @@ export function DeckPage(): ReactNode {
       />
     );
   } else if (deck.generating || deck.query.isPending) {
+    live = t("deck.states.generating");
     body = (
       <section className="card deck-state">
         <p role="status">{t("deck.states.generating")}</p>
@@ -296,6 +345,7 @@ export function DeckPage(): ReactNode {
       />
     );
   } else if (cards?.exhausted === true) {
+    live = t("deck.states.exhaustedTitle");
     body = (
       <DeadEnd
         title={t("deck.states.exhaustedTitle")}
@@ -303,6 +353,7 @@ export function DeckPage(): ReactNode {
       />
     );
   } else if (deck.stalled) {
+    live = t("deck.states.stalledTitle");
     body = (
       <DeadEnd
         title={t("deck.states.stalledTitle")}
@@ -310,7 +361,10 @@ export function DeckPage(): ReactNode {
         action={<Button onClick={deck.retry}>{t("deck.states.more")}</Button>}
       />
     );
-  } else if (cards !== null) {
+  } else {
+    // Everything else has been named above: no data with no error and no pending
+    // query cannot happen, since a query with neither is `isPending`.
+    live = t("deck.states.emptyTitle");
     body = (
       <DeadEnd
         title={t("deck.states.emptyTitle")}
@@ -318,8 +372,6 @@ export function DeckPage(): ReactNode {
         action={<Button onClick={deck.retry}>{t("deck.states.more")}</Button>}
       />
     );
-  } else {
-    body = <Loading />;
   }
 
   const left = swipeStatus?.generations_left_today;
@@ -350,15 +402,33 @@ export function DeckPage(): ReactNode {
         <Alert kind="warning">{t("deck.states.seenWarning")}</Alert>
       )}
 
-      {/* The card's identity, spoken once per change and never shown. */}
+      {/* Always mounted, so a screen reader is already watching it when the card
+          — or the state that replaced the card — changes. A live region created
+          with its text already in it is not reliably announced. */}
       <p className="visually-hidden" role="status" aria-live="polite">
-        {announcement}
+        {live}
       </p>
 
-      {body}
+      {/* The deck itself: the card and what can be done to it. The shortcuts are
+          bound here rather than to the document, so the arrow keys still scroll
+          this long page everywhere else.
 
-      {(current !== null || deck.lastVote !== null) && (
-        <section className="deck-actions" aria-label={t("deck.controls.title")}>
+          The rule below is about listeners on elements nobody can reach. This one
+          is in the tab order, takes focus when the first card arrives, and every
+          shortcut it answers to is also a button inside it carrying the same
+          `aria-keyshortcuts` — so nothing here is reachable by keyboard only. */}
+      {/* eslint-disable-next-line jsx-a11y-x/no-noninteractive-element-interactions */}
+      <section
+        ref={regionRef}
+        className="deck-region"
+        tabIndex={-1}
+        aria-label={t("deck.card.region")}
+        onKeyDown={onRegionKeyDown}
+      >
+        {body}
+
+        {(current !== null || deck.lastVote !== null) && (
+          <div className="deck-actions">
           <div className="row verdicts">
             {current === null
               ? null
@@ -380,6 +450,7 @@ export function DeckPage(): ReactNode {
           </div>
           <div className="row">
             <Button
+              ref={undoRef}
               disabled={!canUndo}
               aria-keyshortcuts={SHORTCUTS.undo}
               onClick={() => {
@@ -393,9 +464,10 @@ export function DeckPage(): ReactNode {
             </Button>
             <span className="hint">{t("deck.undoHint")}</span>
           </div>
-          <p className="hint">{t("deck.keys.hint")}</p>
-        </section>
-      )}
+            <p className="hint">{t("deck.keys.hint")}</p>
+          </div>
+        )}
+      </section>
 
       {deck.unsent.length > 0 && (
         <Alert kind="warning">

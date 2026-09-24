@@ -5,6 +5,8 @@ import { asTranslate, errorMessage } from "../i18n/errors";
 
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "secondary" | "danger";
+  /** React 19 passes a ref through props; a caller that has to move focus needs it. */
+  ref?: React.Ref<HTMLButtonElement>;
 };
 
 export function Button({ variant = "secondary", type = "button", ...props }: ButtonProps): ReactNode {

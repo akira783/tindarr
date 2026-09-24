@@ -364,9 +364,12 @@ export interface DeckQuery {
  * The `202` is not an error and must not be treated as one: the caller waits
  * `retryAfterMs` and asks again (`api/openapi.yaml`, `getDeck`).
  */
-export async function getDeck(query: DeckQuery = {}): Promise<Deck | Waiting> {
+export async function getDeck(
+  query: DeckQuery = {},
+  signal?: AbortSignal,
+): Promise<Deck | Waiting> {
   const { data, status } = await unwrapWithStatus(
-    api.GET("/api/v1/swipe/deck", { params: { query } }),
+    api.GET("/api/v1/swipe/deck", { params: { query }, signal }),
   );
   return waiting(status, data) ?? (data as Deck);
 }

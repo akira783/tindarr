@@ -18,6 +18,26 @@ interface DialogProps {
 export function Dialog({ open, title, onClose, children, footer }: DialogProps): ReactNode {
   const { t } = useTranslation(["console", "common"]);
   const ref = useRef<HTMLDialogElement>(null);
+  const openerRef = useRef<Element | null>(null);
+
+  /**
+   * Give the focus back where it came from.
+   *
+   * `<dialog>` does that itself when it is `close()`d, but this one is unmounted
+   * instead — the effect below cannot reach an element React has already removed
+   * — so the focus would land on `<body>` and a keyboard user would start again
+   * from the top of the page. Since the deck opens one of these on every like,
+   * that is a dialog away from the card each time.
+   */
+  useEffect(() => {
+    if (!open) return undefined;
+    openerRef.current = document.activeElement;
+    return () => {
+      const opener = openerRef.current;
+      openerRef.current = null;
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
+  }, [open]);
 
   useEffect(() => {
     const element = ref.current;

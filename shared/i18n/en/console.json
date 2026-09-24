@@ -403,7 +403,6 @@
       "skip": "Not now"
     },
     "keys": {
-      "title": "Keyboard",
       "like": "Right arrow",
       "dislike": "Left arrow",
       "seenLiked": "Up arrow",
@@ -420,7 +419,6 @@
       "region": "Card",
       "why": "Why this one",
       "noRationale": "The model gave no reason for this one.",
-      "genres": "Genres",
       "runtimeShort": "{{minutes}} min",
       "runtimeLong": "{{hours}} h {{minutes}}",
       "seasons_one": "{{count}} season",
@@ -454,13 +452,11 @@
         "partially_available": "Partly on your server",
         "available": "On your server"
       },
-      "noPoster": "No poster",
       "trailer": "Watch the trailer",
       "trailerTitle": "Trailer for {{title}}",
       "trailerNote": "The player is YouTube's, on its no-cookie address. Nothing is loaded from it until you open it.",
       "closeTrailer": "Close the trailer",
-      "position": "Card {{position}} of {{total}}",
-      "announce": "{{title}}. {{position}}."
+      "position": "Card {{position}} of {{total}}"
     },
     "states": {
       "generating": "Building your deck…",
