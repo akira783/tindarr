@@ -880,6 +880,7 @@ input[aria-invalid="true"] {
   overflow: clip;
   pointer-events: none;
   border-radius: var(--radius-lg);
+  -webkit-mask-image: linear-gradient(to bottom, rgb(0 0 0 / 70%) 0%, rgb(0 0 0 / 0%) 88%);
   mask-image: linear-gradient(to bottom, rgb(0 0 0 / 70%) 0%, rgb(0 0 0 / 0%) 88%);
 }
 
@@ -888,6 +889,16 @@ input[aria-invalid="true"] {
   height: 100%;
   object-fit: cover;
   opacity: 0.3;
+}
+
+/* The wash only works because it fades out. A browser that cannot fade it would
+   put a hard-edged image behind the title instead, so it gets no wash at all. */
+@supports not (
+  (mask-image: linear-gradient(#000, #000)) or (-webkit-mask-image: linear-gradient(#000, #000))
+) {
+  .deck-backdrop {
+    display: none;
+  }
 }
 
 .deck-card-poster {
