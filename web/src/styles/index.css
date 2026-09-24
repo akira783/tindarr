@@ -375,6 +375,117 @@ select:disabled {
   white-space: nowrap;
 }
 
+/* --- what the household already watched (roadmap 4.4) --------------------------- */
+
+/* The calibration wall. Fills whatever width there is, so a phone shows two posters
+   and a desktop shows eight, without a media query per breakpoint. */
+.poster-grid {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--space);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  gap: 0.75rem;
+}
+
+.poster-tile {
+  width: 100%;
+  display: block;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.poster-tile:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Ticked posters have to be obvious at a glance and not only by colour: the border
+   thickens and the label turns solid, so the state survives a colour-blind reader. */
+.poster-tile-on {
+  border-color: var(--accent);
+}
+
+.poster-tile-on .poster-label {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.poster {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  background: var(--border);
+}
+
+.poster-empty {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  background: var(--border);
+  border-radius: calc(var(--radius) - 2px);
+}
+
+.poster-label {
+  display: block;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+
+/* The import review queue: one row of the file, and the titles it might be. */
+.candidates {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 0.75rem;
+}
+
+.candidate {
+  display: flex;
+  gap: 0.6rem;
+  align-items: start;
+}
+
+.candidate .poster,
+.candidate .poster-empty {
+  width: 4rem;
+  flex: 0 0 4rem;
+  border-radius: calc(var(--radius) - 4px);
+}
+
+.candidate-title,
+.review-query,
+.import-title {
+  font-weight: 600;
+  margin: 0;
+}
+
+.badge-running {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.badge-failed {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.badge-complete {
+  border-color: var(--success);
+  color: var(--success);
+}
+
 @media (max-width: 640px) {
   .topbar {
     align-items: start;

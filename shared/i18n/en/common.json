@@ -103,7 +103,10 @@
     "title_not_offered": "That title is not on offer.",
     "request_not_allowed": "That request is not allowed.",
     "quota_exceeded": "The request quota is exhausted.",
-    "request_backend_error": "The request backend returned an error."
+    "request_backend_error": "The request backend returned an error.",
+    "import_unreadable": "This file is not a Netflix, IMDb or Letterboxd export we can read.",
+    "import_too_large": "This file is larger than any export we accept.",
+    "import_in_progress": "An import is already running. Wait for it to finish."
   },
   "publicUrlReason": {
     "unreachable": "unreachable",

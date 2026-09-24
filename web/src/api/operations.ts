@@ -1,5 +1,5 @@
-import { api, unwrap, unwrapWithStatus } from "./client";
-import { isApiError } from "./problem";
+import { api, consoleFetch, unwrap, unwrapWithStatus } from "./client";
+import { isApiError, toApiError } from "./problem";
 import type { components } from "./schema";
 
 type Schemas = components["schemas"];
@@ -231,4 +231,99 @@ export function deleteMyData(): Promise<void> {
   return unwrap(
     api.DELETE("/api/v1/me", { params: { query: { confirm: "delete-my-data" } } }),
   ).then(() => undefined);
+}
+
+// --------------------------------------------- what the household already watched
+
+export type Import = Schemas["Import"];
+export type ImportFormat = Schemas["ImportFormat"];
+export type ImportReviewEntry = Schemas["ImportReviewEntry"];
+export type ImportCandidate = Schemas["ImportCandidate"];
+export type GridTitle = Schemas["GridTitle"];
+export type GridAnswer = Schemas["GridAnswer"];
+export type TitleRef = Schemas["TitleRef"];
+
+/**
+ * Upload one export. The file is the body, not a form: `openapi-fetch` assumes JSON, so
+ * this builds the request by hand and sends it through `consoleFetch`, which is what
+ * adds the CSRF token, keeps it same-origin and handles `401`.
+ *
+ * The bytes are read first rather than the `File` being handed to `Request` directly.
+ * An export is a megabyte, the server refuses anything past eight, and passing the
+ * handle instead would save nothing that matters while making the one interesting path
+ * here impossible to test — jsdom's `File` and the fetch implementation under it are
+ * not the same object. The `Content-Type` is set explicitly for the same reason: the
+ * server detects the format from the bytes, but a body with no type at all is a body
+ * some proxy will decide things about.
+ */
+export async function startImport(file: File): Promise<Import> {
+  const request = new Request(`${globalThis.location.origin}/api/v1/swipe/imports`, {
+    method: "POST",
+    body: await file.arrayBuffer(),
+    headers: { "Content-Type": file.type === "" ? "application/octet-stream" : file.type },
+  });
+  const response = await consoleFetch(request);
+  if (!response.ok) throw toApiError(response.status, await bodyOf(response));
+  return (await response.json()) as Import;
+}
+
+async function bodyOf(response: Response): Promise<unknown> {
+  try {
+    return (await response.json()) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+export function listImports(): Promise<Import[]> {
+  return unwrap(api.GET("/api/v1/swipe/imports")).then((result) => result.imports);
+}
+
+export function getImport(importId: string): Promise<Import> {
+  return unwrap(
+    api.GET("/api/v1/swipe/imports/{import_id}", {
+      params: { path: { import_id: importId } },
+    }),
+  );
+}
+
+export function deleteImport(importId: string): Promise<void> {
+  return unwrap(
+    api.DELETE("/api/v1/swipe/imports/{import_id}", {
+      params: { path: { import_id: importId } },
+    }),
+  ).then(() => undefined);
+}
+
+export function listImportReview(
+  importId: string,
+): Promise<{ entries: ImportReviewEntry[]; pending: number }> {
+  return unwrap(
+    api.GET("/api/v1/swipe/imports/{import_id}/review", {
+      params: { path: { import_id: importId } },
+    }),
+  );
+}
+
+export function decideImportReview(
+  importId: string,
+  entryId: string,
+  body: { decision: "accept" | "reject"; title?: TitleRef },
+): Promise<void> {
+  return unwrap(
+    api.POST("/api/v1/swipe/imports/{import_id}/review/{entry_id}", {
+      params: { path: { import_id: importId, entry_id: entryId } },
+      body,
+    }),
+  ).then(() => undefined);
+}
+
+export function getCalibrationGrid(page: number): Promise<{ page: number; titles: GridTitle[] }> {
+  return unwrap(api.GET("/api/v1/swipe/calibration/grid", { params: { query: { page } } }));
+}
+
+export function submitCalibrationGrid(answers: GridAnswer[]): Promise<number> {
+  return unwrap(api.POST("/api/v1/swipe/calibration/grid", { body: { answers } })).then(
+    (result) => result.recorded,
+  );
 }

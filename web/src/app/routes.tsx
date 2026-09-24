@@ -11,6 +11,8 @@ import { SettingsPage } from "../features/settings/SettingsPage";
 import { SetupPage } from "../features/setup/SetupPage";
 import { SignInPage } from "../features/sign-in/SignInPage";
 import { UsersPage } from "../features/users/UsersPage";
+import { CalibrationPage } from "../features/watched/CalibrationPage";
+import { ImportsPage } from "../features/watched/ImportsPage";
 
 function NotFound(): ReactNode {
   const { t } = useTranslation(["console", "common"]);
@@ -36,6 +38,8 @@ export function AppRoutes(): ReactNode {
             <Route path="/connectors" element={<ConnectorsPage />} />
             <Route path="/users" element={<UsersPage />} />
           </Route>
+          <Route path="/already-seen" element={<CalibrationPage />} />
+          <Route path="/imports" element={<ImportsPage />} />
           <Route path="/connect-phone" element={<ConnectPhonePage />} />
           <Route path="/sessions" element={<SessionsPage />} />
         </Route>

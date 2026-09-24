@@ -7,7 +7,9 @@
     "sessions": "Mes sessions",
     "signedInAs": "Connecté en tant que {{name}}",
     "admin": "Administrateur",
-    "connectors": "Connecteurs"
+    "connectors": "Connecteurs",
+    "imports": "Imports",
+    "calibration": "Déjà vus"
   },
   "notFound": {
     "title": "Page introuvable",
@@ -294,5 +296,77 @@
     "submit": "Confirmer",
     "success": "Confirmé.",
     "noMethods": "Aucun moyen de confirmation n'est disponible pour le moment."
+  },
+  "imports": {
+    "title": "Importer ce que vous avez vu",
+    "help": "Un export Netflix, IMDb ou Letterboxd dit à Tindarr ce que vous connaissez déjà — et surtout quelles séries vous avez finies et lesquelles vous avez lâchées. C'est un signal de goût, jamais un vote.",
+    "empty": "Aucun import pour l'instant.",
+    "forget": "Oublier cet import",
+    "forgetConfirm": "Tout ce que ce fichier nous a appris est supprimé. Vos autres imports et vos réponses de calibrage restent.",
+    "counts": "{{titles}} titres lus, {{matched}} identifiés, {{queued}} à vérifier.",
+    "similarity": "{{percent}} % de ressemblance",
+    "thisOne": "C'est celui-là",
+    "upload": {
+      "title": "Envoyer un export",
+      "help": "Netflix : « Activité de visionnage » → « Tout télécharger ». IMDb : votre page de notes → « Export ». Letterboxd : paramètres → « Import & export » → le ZIP. Le format est détecté, vous n'avez pas à le préciser.",
+      "field": "Fichier d'export",
+      "started": "Envoyé. L'identification des titres prend un instant.",
+      "privacy": "Le fichier est lu puis jeté : seuls les titres identifiés sont conservés, et son nom n'est jamais envoyé."
+    },
+    "format": {
+      "netflix": "Historique Netflix",
+      "imdb": "Notes IMDb",
+      "letterboxd": "Export Letterboxd"
+    },
+    "status": {
+      "running": "Identification…",
+      "complete": "Terminé",
+      "failed": "Échec"
+    },
+    "failure": {
+      "metadata_unreachable": "TMDb a cessé de répondre, le reste du fichier n'a pas été traité. Réessayez plus tard.",
+      "interrupted": "Le serveur a redémarré pendant le traitement. Renvoyez le fichier.",
+      "internal_error": "Quelque chose s'est mal passé. Renvoyez le fichier.",
+      "unknown": "Cet import n'est pas allé au bout."
+    },
+    "skipped": {
+      "supplemental": "{{count}} bande-annonce écartée",
+      "supplemental_other": "{{count}} bandes-annonces écartées",
+      "empty": "{{count}} ligne vide écartée",
+      "empty_other": "{{count}} lignes vides écartées",
+      "not_a_title": "{{count}} ligne qui n'est ni un film ni une série écartée",
+      "not_a_title_other": "{{count}} lignes qui ne sont ni des films ni des séries écartées",
+      "no_id": "{{count}} ligne sans identifiant écartée",
+      "no_id_other": "{{count}} lignes sans identifiant écartées",
+      "over_limit": "{{count}} ligne au-delà de la limite écartée",
+      "over_limit_other": "{{count}} lignes au-delà de la limite écartées",
+      "other": "{{count}} ligne écartée",
+      "other_other": "{{count}} lignes écartées"
+    },
+    "mediaType": {
+      "movie": "Film",
+      "tv": "Série"
+    },
+    "review": {
+      "open": "Vérifier {{count}} titre",
+      "open_other": "Vérifier {{count}} titres",
+      "hide": "Masquer la liste",
+      "help": "Ces lignes ne désignaient pas clairement un titre : rien n'a été enregistré. Choisissez le bon, ou dites qu'aucun ne convient.",
+      "empty": "Plus rien à vérifier.",
+      "nothingFound": "TMDb ne connaît rien qui ressemble à cette ligne.",
+      "noneOfThese": "Aucun de ceux-là",
+      "episodes": "{{count}} épisode dans votre fichier",
+      "episodes_other": "{{count}} épisodes dans votre fichier",
+      "noEpisodes": "Aucun épisode compté"
+    }
+  },
+  "calibration": {
+    "title": "Films et séries que vous connaissez déjà",
+    "help": "Cochez ceux que vous avez déjà vus. Quelques minutes ici en disent plus que n'importe quel import : c'est ce qui évite que le deck vous propose ce que vous avez vu il y a quinze ans. Rien ici ne compte comme un vote.",
+    "empty": "Aucune affiche à montrer. Vérifiez que TMDb est configuré.",
+    "submit": "Enregistrer ({{count}})",
+    "more": "Montrez-m'en d'autres",
+    "recorded": "{{count}} réponse enregistrée.",
+    "recorded_other": "{{count}} réponses enregistrées."
   }
 }

@@ -87,6 +87,12 @@ export function Layout(): ReactNode {
               </>
             )}
             <li>
+              <NavLink to="/already-seen">{t("nav.calibration")}</NavLink>
+            </li>
+            <li>
+              <NavLink to="/imports">{t("nav.imports")}</NavLink>
+            </li>
+            <li>
               <NavLink to="/connect-phone">{t("nav.connectPhone")}</NavLink>
             </li>
             <li>

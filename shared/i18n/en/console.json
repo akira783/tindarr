@@ -7,7 +7,9 @@
     "sessions": "My sessions",
     "signedInAs": "Signed in as {{name}}",
     "admin": "Administrator",
-    "connectors": "Connectors"
+    "connectors": "Connectors",
+    "imports": "Imports",
+    "calibration": "Already seen"
   },
   "notFound": {
     "title": "Page not found",
@@ -294,5 +296,77 @@
     "submit": "Confirm",
     "success": "Confirmed.",
     "noMethods": "No way to confirm is available right now."
+  },
+  "imports": {
+    "title": "Import what you have watched",
+    "help": "A Netflix, IMDb or Letterboxd export tells Tindarr what you already know about — and, more usefully, which series you finished and which you gave up on. It is a taste signal, never a vote.",
+    "empty": "No import yet.",
+    "forget": "Forget this import",
+    "forgetConfirm": "Everything this file told us is deleted. Your other imports and your calibration answers stay.",
+    "counts": "{{titles}} titles read, {{matched}} identified, {{queued}} to check.",
+    "similarity": "{{percent}} % alike",
+    "thisOne": "This one",
+    "upload": {
+      "title": "Upload an export",
+      "help": "Netflix: \"Viewing activity\" → \"Download all\". IMDb: your ratings page → \"Export\". Letterboxd: settings → \"Import & export\" → the ZIP. The format is detected; you do not have to say which it is.",
+      "field": "Export file",
+      "started": "Uploaded. Identifying the titles takes a moment.",
+      "privacy": "The file is read and thrown away: only the titles we could identify are kept, and the file name is never sent."
+    },
+    "format": {
+      "netflix": "Netflix viewing history",
+      "imdb": "IMDb ratings",
+      "letterboxd": "Letterboxd export"
+    },
+    "status": {
+      "running": "Identifying…",
+      "complete": "Done",
+      "failed": "Failed"
+    },
+    "failure": {
+      "metadata_unreachable": "TMDb stopped answering, so the rest of the file was left alone. Try again later.",
+      "interrupted": "The server restarted while this was running. Upload the file again.",
+      "internal_error": "Something went wrong. Upload the file again.",
+      "unknown": "This import did not finish."
+    },
+    "skipped": {
+      "supplemental": "{{count}} trailer dropped",
+      "supplemental_other": "{{count}} trailers dropped",
+      "empty": "{{count}} empty row dropped",
+      "empty_other": "{{count}} empty rows dropped",
+      "not_a_title": "{{count}} row that is not a film or a series dropped",
+      "not_a_title_other": "{{count}} rows that are not films or series dropped",
+      "no_id": "{{count}} row without an id dropped",
+      "no_id_other": "{{count}} rows without an id dropped",
+      "over_limit": "{{count}} row past the limit dropped",
+      "over_limit_other": "{{count}} rows past the limit dropped",
+      "other": "{{count}} row dropped",
+      "other_other": "{{count}} rows dropped"
+    },
+    "mediaType": {
+      "movie": "Film",
+      "tv": "Series"
+    },
+    "review": {
+      "open": "Check {{count}} title",
+      "open_other": "Check {{count}} titles",
+      "hide": "Hide the list",
+      "help": "These rows did not clearly name one title, so nothing was written down. Pick the right one, or say none of them is.",
+      "empty": "Nothing left to check.",
+      "nothingFound": "TMDb knew nothing like this row.",
+      "noneOfThese": "None of these",
+      "episodes": "{{count}} episode in your file",
+      "episodes_other": "{{count}} episodes in your file",
+      "noEpisodes": "No episode counted"
+    }
+  },
+  "calibration": {
+    "title": "Films and series you already know",
+    "help": "Tick the ones you have already watched. A few minutes here tells Tindarr more than any import can: it is what stops the deck offering you what you saw fifteen years ago. Nothing here counts as a vote.",
+    "empty": "No poster to show. Check that TMDb is configured.",
+    "submit": "Save ({{count}})",
+    "more": "Show me others",
+    "recorded": "{{count}} answer saved.",
+    "recorded_other": "{{count}} answers saved."
   }
 }

@@ -47,6 +47,15 @@ export function problem(
   });
 }
 
+/** JSON where there is JSON, the raw text otherwise: an import uploads a file. */
+function parseBody(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+}
+
 function toPattern(path: string): RegExp {
   const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\{[^}]+\\\}/g, "[^/]+");
   return new RegExp(`^${escaped}$`);
@@ -83,7 +92,7 @@ export class MockApi {
       method: request.method,
       path: url.pathname,
       headers: new Headers(request.headers),
-      body: text === "" ? null : (JSON.parse(text) as unknown),
+      body: text === "" ? null : parseBody(text),
       credentials: request.credentials,
     };
     this.calls.push(call);

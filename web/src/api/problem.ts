@@ -77,6 +77,10 @@ export const PROBLEM_CODES = [
   "request_not_allowed",
   "quota_exceeded",
   "request_backend_error",
+  // imports and the calibration grid
+  "import_unreadable",
+  "import_too_large",
+  "import_in_progress",
 ] as const;
 
 export type ProblemCode = (typeof PROBLEM_CODES)[number];
