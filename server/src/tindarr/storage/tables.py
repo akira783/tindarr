@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -159,5 +160,91 @@ pairings = Table(
     ),
 )
 
+#: What a user has watched anywhere but this deck: a file import, a calibration grid
+#: tick. Never a vote — the stats and the strategies read ``swipe_votes``, not this —
+#: and never the library either, since nothing here is owned (docs/architecture.md).
+#: One row per source per title, so a Netflix import and a grid tick about the same film
+#: coexist and removing one import leaves the other's answer standing.
+watch_history = Table(
+    "watch_history",
+    metadata,
+    Column("user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("source", Text, primary_key=True),
+    Column("kind", Text, primary_key=True),
+    Column("tmdb_id", Integer, primary_key=True),
+    Column("seen", Boolean, nullable=False, server_default=true()),
+    # The media server port's own EngagementState, or null when the source said only
+    # "I have seen this" (a grid tick).
+    Column("state", Text, nullable=True),
+    Column("progress", Float(), nullable=False, server_default="0"),
+    Column("episodes_played", Integer, nullable=True),
+    Column("episodes_total", Integer, nullable=True),
+    Column("rating", Float(), nullable=True),
+    Column("last_watched_at", UtcDateTime, nullable=True),
+    Column("created_at", UtcDateTime, nullable=False),
+    CheckConstraint("kind IN ('movie', 'tv')", name="kind"),
+    CheckConstraint("tmdb_id > 0", name="tmdb_id"),
+    CheckConstraint(
+        "source IN ('netflix', 'imdb', 'letterboxd', 'grid')",
+        name="source",
+    ),
+    CheckConstraint(
+        "state IS NULL OR state IN ('watched', 'mostly_watched', 'in_progress', 'paused', "
+        "'abandoned')",
+        name="state",
+    ),
+)
+
+#: One uploaded file, and what became of it. The file itself is never stored: an import
+#: is somebody's viewing history, and the only copy this server keeps is the titles it
+#: managed to identify. The uploaded name is not stored either — it is a string the
+#: user's own computer chose, it says nothing the format does not, and it would end up
+#: in a console, a log and a backup.
+imports = Table(
+    "imports",
+    metadata,
+    Column("id", Text, primary_key=True),
+    Column("user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("source", Text, nullable=False),
+    Column("status", Text, nullable=False),
+    # What the parser read, what it dropped and why, as JSON. Counts only.
+    Column("rows_read", Integer, nullable=False, server_default="0"),
+    Column("rows_skipped", Text, nullable=False, server_default="{}"),
+    Column("matched", Integer, nullable=False, server_default="0"),
+    Column("queued", Integer, nullable=False, server_default="0"),
+    # A problem code, never a message from a parser and never a line of the file.
+    Column("error_code", Text, nullable=True),
+    Column("created_at", UtcDateTime, nullable=False),
+    Column("finished_at", UtcDateTime, nullable=True),
+    CheckConstraint("source IN ('netflix', 'imdb', 'letterboxd')", name="source"),
+    CheckConstraint("status IN ('running', 'complete', 'failed')", name="status"),
+    CheckConstraint("(status = 'failed') = (error_code IS NOT NULL)", name="error_with_status"),
+)
+
+#: The rows an import refused to guess at. ``query`` is the user's own text, kept so
+#: they can recognise their own line; ``candidates`` is what TMDb offered, as JSON.
+import_reviews = Table(
+    "import_reviews",
+    metadata,
+    Column("id", Text, primary_key=True),
+    Column(
+        "import_id", Text, ForeignKey("imports.id", ondelete="CASCADE"), nullable=False, index=True
+    ),
+    Column("user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("query", Text, nullable=False),
+    Column("kind_hint", Text, nullable=True),
+    Column("episodes", Integer, nullable=False, server_default="0"),
+    Column("rating", Float(), nullable=True),
+    Column("last_watched_at", UtcDateTime, nullable=True),
+    Column("candidates", Text, nullable=False, server_default="[]"),
+    Column("status", Text, nullable=False),
+    Column("created_at", UtcDateTime, nullable=False),
+    Column("decided_at", UtcDateTime, nullable=True),
+    CheckConstraint("kind_hint IS NULL OR kind_hint IN ('movie', 'tv')", name="kind_hint"),
+    CheckConstraint("status IN ('pending', 'accepted', 'rejected')", name="status"),
+)
+
 #: Sessions of one user, most recent first (the console and the app list them).
 Index("ix_sessions_user_id_created_at", sessions.c.user_id, sessions.c.created_at)
+#: The caller's imports, most recent first.
+Index("ix_imports_user_id_created_at", imports.c.user_id, imports.c.created_at)

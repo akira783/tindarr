@@ -19,8 +19,10 @@ from tindarr.auth.signin import SignInService
 from tindarr.connectors import ConnectorService
 from tindarr.core.clock import Clock
 from tindarr.core.config import ServerConfig
+from tindarr.jobs.imports import ImportRunner
 from tindarr.storage.server_state import ServerStateRepository
 from tindarr.storage.settings import SettingsStore
+from tindarr.swipe.watched import GridService, ImportService
 
 
 @dataclass(frozen=True)
@@ -46,6 +48,12 @@ class AppServices:
     handles: HandleRegistry
     #: Connecting a phone from the console (docs/auth.md, section 9).
     pairings: PairingService
+    #: File imports and the calibration grid, the two ways a household says what it has
+    #: already watched (roadmap 4.4).
+    imports: ImportService
+    grid: GridService
+    #: Where an accepted upload's TMDb lookups actually run.
+    import_runner: ImportRunner
     limits: RateLimits
     hosts: HostPolicy
     #: Checks that ``public_url`` really reaches this server (docs/auth.md, section 10).

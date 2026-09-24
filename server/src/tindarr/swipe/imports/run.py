@@ -30,10 +30,10 @@ from datetime import datetime
 from typing import Final
 
 from tindarr.core.errors import ProblemError
+from tindarr.ports.history import HistorySource, WatchedTitle
 from tindarr.ports.media_server import film_engagement, series_engagement
 from tindarr.ports.metadata import Metadata
 from tindarr.ports.titles import MediaKind, TitleRef
-from tindarr.swipe.history import HistorySource, WatchedTitle
 from tindarr.swipe.imports.records import ImportFormat, ParsedFile, WatchedItem
 from tindarr.swipe.imports.resolve import Candidate, MetadataDownError, Resolution, TitleResolver
 

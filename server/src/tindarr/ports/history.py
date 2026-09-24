@@ -1,6 +1,6 @@
 """What somebody has already watched, learned anywhere but the deck.
 
-[ADR 0013](../../../../docs/adr/0013-recommendation-engine.md) measured the obvious
+[ADR 0013](../../../docs/adr/0013-recommendation-engine.md) measured the obvious
 idea and found it small: on the author's 99 votes, importing Netflix, Jellyfin and Seerr
 between them would have avoided **3 of the 47** already-seen cards. So nothing here is
 sold as the fix for the already-seen problem — the popularity band and the calibration
@@ -10,6 +10,10 @@ knows, reproduces the "finished / in progress / sampled and dropped" signal the 
 already derives from a media server, over everything watched outside it. Thirty series
 the author sampled and dropped are thirty high-rated series a recommender would happily
 have proposed, and no other source says so.
+
+It is a **port-level vocabulary** rather than a swipe-engine type, for the same reason
+``Engagement`` is: the storage layer writes these rows and the swipe layer reads them,
+and a type that lived above the storage layer could not be either.
 
 Two things therefore live here, and they are deliberately the same thing:
 

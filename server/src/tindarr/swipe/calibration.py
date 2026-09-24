@@ -31,7 +31,7 @@ somebody's taste actually differs across. Hence four rules:
   or ticked on an earlier grid is gone before the wall is built — including the posters
   the user answered "no" to, which is why "no" is worth storing.
 
-**A tick is not a vote.** It writes a ``WatchedTitle`` (``tindarr.swipe.history``), the
+**A tick is not a vote.** It writes a ``WatchedTitle`` (``tindarr.ports.history``), the
 retrieval layer excludes it, the stats never count it and no strategy replays it. The
 person said they have seen a film; they did not say anything about a card.
 """
@@ -43,9 +43,9 @@ from datetime import datetime
 from typing import Final
 
 from tindarr.core.errors import ProblemError
+from tindarr.ports.history import WatchedTitle
 from tindarr.ports.metadata import DiscoverQuery, Metadata, Title, TitleFilters
 from tindarr.ports.titles import MediaKind, TitleRef
-from tindarr.swipe.history import WatchedTitle
 from tindarr.swipe.retrieval import passes_filters
 
 __all__ = [

@@ -41,6 +41,7 @@ from tindarr.core.config import ServerConfig
 from tindarr.core.crypto import SecretCipher
 from tindarr.core.keys import KeyPurpose, load_key_material
 from tindarr.core.logs import register_secret
+from tindarr.jobs.imports import ImportRunner, close_abandoned_imports
 from tindarr.jobs.media_server import (
     handle_sweep_job,
     quick_connect_probe_job,
@@ -56,6 +57,7 @@ from tindarr.storage.db import create_async_db_engine, database_path
 from tindarr.storage.migrate import upgrade_database
 from tindarr.storage.server_state import ServerStateRepository
 from tindarr.storage.settings import SettingsStore, environment_overrides
+from tindarr.swipe.watched import GridService, ImportService
 
 BACKUPS_DIR_NAME = "backups"
 DOCS_URL = "/api/docs"
@@ -167,6 +169,11 @@ async def start(
     )
 
     await setup.ensure_setup_code()
+    imports = ImportService(engine, settings, connectors, wiring.clock)
+    import_runner = ImportRunner(imports)
+    # An import lives in an asyncio task, and a task does not survive a restart: a row
+    # still claiming to be running is a status the console would poll for ever.
+    await close_abandoned_imports(engine, wiring.clock)
 
     services = AppServices(
         config=config,
@@ -183,6 +190,9 @@ async def start(
         quick_connect=quick_connect,
         handles=handles,
         pairings=PairingService(engine, wiring.clock, sessions),
+        imports=imports,
+        grid=GridService(engine, settings, connectors, wiring.clock),
+        import_runner=import_runner,
         limits=limits,
         hosts=hosts,
         install_id=state.install_id,
@@ -193,6 +203,7 @@ async def start(
         user_sync_job(UserSync(engine, connector, wiring.clock, state.install_id)),
         handle_sweep_job(quick_connect),
         quick_connect_probe_job(quick_connect),
+        import_runner,
     )
     public_url_host = host_of(public_url)
     if public_url is not None and public_url_host is not None and public_url_setting.locked:

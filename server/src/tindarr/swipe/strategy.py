@@ -91,7 +91,7 @@ class StrategyContext:
     #: What the household already owns.
     library: LibraryIndex = field(default_factory=LibraryIndex)
     #: What this user has watched on the media server, and — since lot 4c — whatever a
-    #: file import said they watched elsewhere (``tindarr.swipe.history``). One tuple,
+    #: file import said they watched elsewhere (``tindarr.ports.history``). One tuple,
     #: because the engine reads "they finished this and gave up on that" the same way
     #: wherever it was learned; ADR 0013's point 4 is that an import is exactly this
     #: signal over the titles a media server cannot see.
