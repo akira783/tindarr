@@ -100,7 +100,7 @@
       "help": "L'adresse que les téléphones utilisent pour joindre ce serveur. Elle est vérifiée avant d'être enregistrée et sert aux QR codes d'appairage.",
       "label": "Adresse publique",
       "suggestion": "Utiliser l'adresse de ce navigateur ({{origin}})",
-      "checking": "Vérification : cette adresse joint-elle ce serveur ?",
+      "checking": "Vérification : cette adresse joint-elle ce serveur ?",
       "skip": "Plus tard",
       "done": "Installation terminée."
     }
@@ -188,7 +188,7 @@
     "name": "Nom du serveur",
     "publicUrl": "Adresse publique",
     "publicUrlHint": "Origine par laquelle les téléphones joignent ce serveur, utilisée dans les QR codes d'appairage. Elle est vérifiée avant d'être enregistrée.",
-    "publicUrlChecking": "Vérification : cette adresse joint-elle ce serveur ?",
+    "publicUrlChecking": "Vérification : cette adresse joint-elle ce serveur ?",
     "passwordSignIn": "Connexion par mot de passe",
     "passwordSignInOption": {
       "enabled": "Autorisée",
@@ -404,13 +404,6 @@
       "skip": "Plus tard"
     },
     "keys": {
-      "like": "Flèche droite",
-      "dislike": "Flèche gauche",
-      "seenLiked": "Flèche haut",
-      "seenDisliked": "Flèche bas",
-      "skip": "N",
-      "undo": "U",
-      "trailer": "T",
       "hint": "Les flèches jugent la carte, N la remet à plus tard, U annule le dernier verdict et T lance la bande-annonce."
     },
     "undo": "Annuler",

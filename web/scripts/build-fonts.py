@@ -11,9 +11,12 @@ per-subset slice:
     ofl/newsreader/Newsreader-Italic[opsz,wght].ttf
     ofl/instrumentsans/InstrumentSans[wdth,wght].ttf
 
-Each is cut down to the Latin characters the two catalogues need (plus the
-arrows the keyboard hints draw), its axes are limited to the ranges the
-stylesheet asks for, and it is written out as variable WOFF2. Newsreader keeps
+Each is cut down to the Latin characters the two catalogues need, its axes are
+limited to the ranges the stylesheet asks for, and it is written out as variable
+WOFF2. The arrows U+2190-2193 the keyboard hints draw only survive in Instrument
+Sans — Newsreader has no arrow to keep — which is why ``.kbd`` pins itself to
+``--font-ui``. U+202F, the French narrow no-break space, is in none of the three
+upstream fonts, so the catalogues use U+00A0 instead. Newsreader keeps
 its optical-size axis: browsers vary it by themselves, and the card title is set
 at 52 px while the rationale is set at 26 px. Instrument Sans is pinned to
 ``wdth: 100``, the only width the console uses.

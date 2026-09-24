@@ -404,13 +404,6 @@
       "skip": "Not now"
     },
     "keys": {
-      "like": "Right arrow",
-      "dislike": "Left arrow",
-      "seenLiked": "Up arrow",
-      "seenDisliked": "Down arrow",
-      "skip": "N",
-      "undo": "U",
-      "trailer": "T",
       "hint": "The arrow keys judge the card, N puts it off, U undoes the last verdict and T plays the trailer."
     },
     "undo": "Undo",

@@ -30,6 +30,8 @@ const shared = read("shared/design/tokens.css");
 const asData = JSON.parse(read("shared/design/tokens.json")) as {
   color: Record<"dark" | "light", Record<string, string>> & { scrim: string };
   shadow: Record<"dark" | "light", Record<string, string>>;
+  leading: Record<string, string>;
+  focus: { ring: string; offset: string };
   font: Record<string, string>;
   text: Record<string, string>;
   space: Record<string, string>;
@@ -99,6 +101,11 @@ describe("the tokens the two clients share", () => {
     for (const [name, value] of Object.entries(asData.shadow.dark)) {
       expect(sharedRoot.get(`--${name}`)).toBe(value);
     }
+    for (const [name, value] of Object.entries(asData.leading)) {
+      expect(`${name}=${sharedRoot.get(`--${name}`) ?? "missing"}`).toBe(`${name}=${value}`);
+    }
+    expect(sharedRoot.get("--focus-ring")).toBe(asData.focus.ring);
+    expect(sharedRoot.get("--focus-offset")).toBe(asData.focus.offset);
     expect(sharedRoot.get("--scrim")).toBe(asData.color.scrim);
   });
 
@@ -180,12 +187,9 @@ describe.each(["dark", "light"] as const)("contrast in the %s theme", (theme) =>
   const palette = asData.color[theme];
 
   it.each(PAIRS)("%s on %s reaches %d:1", (ink, paper, floor) => {
+    // No rounding before the comparison: 4,45:1 is not 4,5:1.
     const ratio = contrast(palette[ink] ?? "", palette[paper] ?? "");
-    // The ratio is in the failure message, so a regression says by how much.
-    expect([`${ink} on ${paper}`, Math.round(ratio * 10) / 10 >= floor]).toEqual([
-      `${ink} on ${paper}`,
-      true,
-    ]);
+    expect([`${ink} on ${paper}`, ratio >= floor]).toEqual([`${ink} on ${paper}`, true]);
   });
 
   it("keeps the text over a poster readable whatever the poster is", () => {
@@ -193,5 +197,31 @@ describe.each(["dark", "light"] as const)("contrast in the %s theme", (theme) =>
     // where the text sits, so that is what the reading has to survive.
     const worst = composite("#0a0806", 0.86, "#ffffff");
     expect(contrast(palette["on-scrim"] ?? "", worst)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  /*
+   * The card's backdrop wash. A TMDb backdrop is an arbitrary image, so the worst
+   * one is the one furthest from the page: white behind the dark theme, black
+   * behind the light one. `.deck-backdrop-image` is at 9 % through a mask that
+   * opens at 60 %, and everything on the card is drawn over the result.
+   */
+  it.each([
+    ["muted", 4.5],
+    ["accent-ink", 4.5],
+    ["bet-ink", 4.5],
+    ["success", 4.5],
+    ["text", 4.5],
+    ["control-border", 3],
+  ] as const)("keeps %s above %d:1 over the worst backdrop", (ink, floor) => {
+    const washed = composite(
+      theme === "dark" ? "#ffffff" : "#000000",
+      0.09 * 0.6,
+      palette["bg"] ?? "",
+    );
+    const ratio = contrast(palette[ink] ?? "", washed);
+    expect([`${ink} over the backdrop`, ratio >= floor]).toEqual([
+      `${ink} over the backdrop`,
+      true,
+    ]);
   });
 });

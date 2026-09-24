@@ -44,6 +44,7 @@ export function DeckControls({
       // Visible but inert while a batch is building: changing an envie there would
       // throw away a batch that has already been paid for (design, "Attente").
       className={busy ? "deck-controls deck-controls-busy" : "deck-controls"}
+      aria-busy={busy}
       aria-label={t("deck.controls.title")}
     >
       <div className="row">

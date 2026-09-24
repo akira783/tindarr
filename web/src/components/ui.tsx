@@ -148,6 +148,15 @@ export function CheckboxField({ label, hint, ...input }: CheckboxProps): ReactNo
   );
 }
 
+/**
+ * A message about what just happened.
+ *
+ * The four kinds differ by their colour, and in the dark theme `--success`,
+ * `--warning` and `--danger` are close in luminance: in greyscale the box would
+ * say nothing. So the severity is also written, in a word only a screen reader
+ * and a greyscale reader need — it is what tells a warning from a confirmation
+ * either way, since both are `role="status"`.
+ */
 export function Alert({
   kind = "info",
   children,
@@ -155,8 +164,10 @@ export function Alert({
   kind?: "info" | "success" | "warning" | "error";
   children: ReactNode;
 }): ReactNode {
+  const { t } = useTranslation(["console", "common"]);
   return (
     <p className={`alert alert-${kind}`} role={kind === "error" ? "alert" : "status"}>
+      <span className="visually-hidden">{t(`common:alert.${kind}`)} </span>
       {children}
     </p>
   );

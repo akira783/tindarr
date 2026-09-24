@@ -470,10 +470,11 @@ export function DeckPage(): ReactNode {
           bound here rather than to the document, so the arrow keys still scroll
           this long page everywhere else.
 
-          The rule below is about listeners on elements nobody can reach. This one
-          is in the tab order, takes focus when the first card arrives, and every
-          shortcut it answers to is also a button inside it carrying the same
-          `aria-keyshortcuts` — so nothing here is reachable by keyboard only. */}
+          The rule below is about listeners on elements nobody can reach. This
+          one takes focus when the first card arrives, and every shortcut it
+          answers to is also a button inside it carrying the same
+          `aria-keyshortcuts` — so nothing here is reachable by keyboard only. It
+          is out of the tab order on purpose: the buttons are the tab stops. */}
       {/* eslint-disable-next-line jsx-a11y-x/no-noninteractive-element-interactions */}
       <section
         ref={regionRef}
@@ -532,7 +533,8 @@ export function DeckPage(): ReactNode {
               </div>
             </div>
             <p className="hint deck-keys-hint">
-              {t("deck.keys.hint")} {t("deck.undoHint")}
+              <span className="deck-keys-keyboard">{t("deck.keys.hint")} </span>
+              {t("deck.undoHint")}
             </p>
           </>
         )}

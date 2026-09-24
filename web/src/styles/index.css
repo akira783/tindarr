@@ -297,6 +297,12 @@ input[aria-invalid="true"] {
   border-color: var(--danger);
 }
 
+/* The browser's own placeholder grey is under 4,5:1 in most engines. */
+::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
 .limit-input {
   width: 7rem;
 }
@@ -400,10 +406,11 @@ input[aria-invalid="true"] {
   flex: none;
 }
 
+/* No opacity here: --on-accent at 60 % over --accent is 3,5:1, and this glyph is
+   set at 12 px. The border carries the softening instead. */
 .btn-primary .kbd {
   color: var(--on-accent);
-  border-color: var(--on-accent);
-  opacity: 0.6;
+  border-color: rgb(0 0 0 / 35%);
 }
 
 /* A pointer that cannot press a key has no use for one. */
@@ -458,7 +465,6 @@ input[aria-invalid="true"] {
   border-radius: var(--radius-pill);
   font-size: var(--text-xs);
   color: var(--muted);
-  white-space: nowrap;
 }
 
 .badge-running {
@@ -496,6 +502,10 @@ input[aria-invalid="true"] {
      initial containing block for its own and push the whole page sideways. */
   position: relative;
   overflow-x: auto;
+  /* Room for a focus ring on a control in the first or last cell: the box clips
+     what it scrolls, and `outline-offset` would be cut off against its edge. */
+  padding: var(--space-1) var(--space-2);
+  margin-inline: calc(var(--space-2) * -1);
   max-width: 100%;
   border-radius: var(--radius-md);
 }
@@ -631,7 +641,7 @@ input[aria-invalid="true"] {
   width: 100%;
   display: block;
   padding: 0;
-  border: 2px solid var(--border);
+  border: 2px solid var(--control-border);
   border-radius: var(--radius-md);
   background: var(--surface);
   color: var(--text);
@@ -643,8 +653,10 @@ input[aria-invalid="true"] {
 
 /* Ticked posters have to be obvious at a glance and not only by colour: the border
    thickens and the label turns solid, so the state survives a colour-blind reader. */
+/* --accent as a boundary is 1,9:1 on the light page; the ink version is 5,6:1,
+   and the label below turns solid anyway. */
 .poster-tile-on {
-  border-color: var(--accent);
+  border-color: var(--accent-ink);
 }
 
 .poster-tile-on .poster-label {
@@ -791,9 +803,16 @@ input[aria-invalid="true"] {
 }
 
 /* Changing an envie would pay for another batch, so while one is being built the
-   settings stay visible and inert rather than disappearing. */
-.deck-controls-busy {
-  opacity: 0.45;
+   settings stay visible and inert rather than disappearing.
+   Only what is disabled is dimmed: the calibration bar beside them is live
+   information, and 45 % of --muted is 2,0:1 in the light theme. */
+.deck-controls-busy :is(select, input, .btn):disabled {
+  opacity: 0.4;
+}
+
+.deck-controls-busy .field > label,
+.deck-controls-busy .field > .hint {
+  color: var(--muted);
 }
 
 .calibration-progress {
@@ -813,11 +832,13 @@ input[aria-invalid="true"] {
   color: var(--muted);
 }
 
+/* The track is --surface-2 on --bg, which is 1,2:1 — invisible. Outlined, so how
+   far there is left to go can actually be seen. */
 .calibration-progress progress {
   width: 100%;
-  height: 0.375rem;
+  height: 0.5rem;
   appearance: none;
-  border: 0;
+  border: 1px solid var(--control-border);
   border-radius: var(--radius-pill);
   background: var(--surface-2);
   overflow: hidden;
@@ -883,15 +904,23 @@ input[aria-invalid="true"] {
   overflow: clip;
   pointer-events: none;
   border-radius: var(--radius-lg);
-  -webkit-mask-image: linear-gradient(to bottom, rgb(0 0 0 / 70%) 0%, rgb(0 0 0 / 0%) 88%);
-  mask-image: linear-gradient(to bottom, rgb(0 0 0 / 70%) 0%, rgb(0 0 0 / 0%) 88%);
+  -webkit-mask-image: linear-gradient(to bottom, rgb(0 0 0 / 60%) 0%, rgb(0 0 0 / 0%) 70%);
+  mask-image: linear-gradient(to bottom, rgb(0 0 0 / 60%) 0%, rgb(0 0 0 / 0%) 70%);
 }
 
+/*
+ * A TMDb backdrop is an arbitrary image, so the worst one is white in the dark
+ * theme and black in the light one, and every word of the card is drawn over it.
+ * 9 % through a mask that opens at 60 % is 5,4 % of effective cover, which is the
+ * most the card can take and keep --muted, --accent-ink, --bet-ink and --success
+ * above 4,5:1 and --control-border above 3:1 against either. Measured, with the
+ * worst poster, in web/test/tokens.test.ts.
+ */
 .deck-backdrop-image {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  opacity: 0.3;
+  opacity: 0.09;
 }
 
 /* The wash only works because it fades out. A browser that cannot fade it would
@@ -1155,16 +1184,17 @@ input[aria-invalid="true"] {
   border: 1.5px solid currentcolor;
 }
 
+/* No `nowrap`: at 200 % text zoom a 26-character pill that cannot break is what
+   makes a 320 px page scroll sideways (WCAG 1.4.10). */
 .avail {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  height: 1.75rem;
-  padding: 0 0.75rem;
+  min-height: 1.75rem;
+  padding: 0.15rem 0.75rem;
   border: 1px solid var(--control-border);
   border-radius: var(--radius-pill);
   font-size: var(--text-sm);
-  white-space: nowrap;
 }
 
 .avail-mark {
@@ -1244,7 +1274,7 @@ input[aria-invalid="true"] {
 }
 
 .deck-undo .btn {
-  border-color: transparent;
+  border-color: var(--control-border);
   background: none;
   color: var(--muted);
   font-size: var(--text-sm);
@@ -1253,7 +1283,7 @@ input[aria-invalid="true"] {
 .deck-undo .btn:hover:not(:disabled) {
   color: var(--text);
   background: var(--surface-2);
-  border-color: transparent;
+  border-color: var(--text);
 }
 
 .deck-undo::after {
@@ -1290,8 +1320,11 @@ input[aria-invalid="true"] {
   text-align: center;
 }
 
+/* A pointer that cannot press a key has no use for the keyboard sentence. What
+   undo does is not about the keyboard, so it stays. */
 @media (pointer: coarse) {
-  .deck-keys-hint {
+  .deck-keys-keyboard,
+  .deck-keymap {
     display: none;
   }
 }
@@ -1312,6 +1345,10 @@ input[aria-invalid="true"] {
   grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
   gap: var(--space-7);
   align-items: center;
+}
+
+.dead-end {
+  max-width: 44rem;
 }
 
 .deck-state-text {

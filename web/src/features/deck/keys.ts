@@ -3,9 +3,11 @@
  *
  * Arrow keys for the four verdicts — the same four directions the app will swipe
  * in (roadmap step 7), so the two clients teach the same thing — plus three
- * letters for what has no direction left. Letters are shown as letters in both
- * catalogues rather than described, because "N" means nothing in French until
- * you see it written on the button.
+ * letters for what has no direction left.
+ *
+ * The keys are drawn as glyphs (`KEY_CAPS`) rather than named in the catalogues:
+ * a key is the same shape in every language, and the name a screen reader needs
+ * is the specification's, which `SHORTCUTS` gives to `aria-keyshortcuts`.
  */
 import type { VoteValue } from "../../api/operations";
 
@@ -37,7 +39,7 @@ export const VERDICTS: readonly VoteValue[] = [
   "like",
 ];
 
-/** Catalogue suffix for a verdict: `deck.verdict.<name>` and `deck.keys.<name>`. */
+/** Catalogue suffix for a verdict: `deck.verdict.<name>`. */
 export type VerdictKey = "like" | "dislike" | "seenLiked" | "seenDisliked" | "skip";
 
 export const VERDICT_KEYS: Readonly<Record<VoteValue, VerdictKey>> = {

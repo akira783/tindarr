@@ -27,6 +27,12 @@
     "waiting": "En attente…",
     "none": "Aucun"
   },
+  "alert": {
+    "error": "Erreur :",
+    "warning": "Attention :",
+    "success": "C’est fait :",
+    "info": "À noter :"
+  },
   "language": {
     "label": "Langue",
     "en": "English",
@@ -114,6 +120,6 @@
     "redirected": "redirigée ailleurs",
     "unexpected_response": "réponse inattendue",
     "proof_mismatch": "un autre serveur a répondu",
-    "host_not_allowed": "ce serveur ne répond pas à ce nom d'hôte ; ajoutez-le à TINDARR_ALLOWED_HOSTS et redémarrez"
+    "host_not_allowed": "ce serveur ne répond pas à ce nom d'hôte ; ajoutez-le à TINDARR_ALLOWED_HOSTS et redémarrez"
   }
 }

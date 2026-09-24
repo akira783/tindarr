@@ -133,8 +133,12 @@ test("a real batch: a card, a verdict, an undo and the trailer", async ({
   expect(first.trim()).not.toBe("");
 
   // Everything the card promises is on it.
-  await expect(page.getByRole("heading", { name: "Why this one" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Where to watch" })).toBeVisible();
+  // The reason is a figure's caption since the refonte, not a heading: it is the
+  // card's line, not a section of it. "Where to watch" is still a heading, kept
+  // for a screen reader and hidden from the eye.
+  await expect(page.locator("figcaption.rationale-label")).toHaveText("Why this one");
+  await expect(page.locator("blockquote.rationale")).not.toBeEmpty();
+  await expect(page.getByRole("heading", { name: "Where to watch" })).toBeAttached();
   await expect(page.locator("img.poster").first()).toBeVisible();
 
   // The trailer: the frame is built by the click, and the browser has to accept it

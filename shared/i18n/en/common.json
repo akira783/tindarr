@@ -27,6 +27,12 @@
     "waiting": "Waiting…",
     "none": "None"
   },
+  "alert": {
+    "error": "Error:",
+    "warning": "Warning:",
+    "success": "Done:",
+    "info": "Note:"
+  },
   "language": {
     "label": "Language",
     "en": "English",
