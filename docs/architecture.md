@@ -469,7 +469,7 @@ Details in [the authentication reference](auth.md), with the reasons in
   | Path | Headers |
   |---|---|
   | `/api/…`, `/healthz`, errors | `Cache-Control: no-store`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-origin` |
-  | `index.html` (and the fallback) | `Cache-Control: no-store`, the console CSP of ADR 0009, `Cross-Origin-Opener-Policy: same-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()`, plus `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-origin` |
+  | `index.html` (and the fallback) | `Cache-Control: no-store`, the console CSP of ADR 0009 (plus `frame-src https://www.youtube-nocookie.com` for the deck's trailer, roadmap 4.6), `Cross-Origin-Opener-Policy: same-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()`, plus `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-origin` |
   | `/assets/…` | `Cache-Control: public, max-age=31536000, immutable`, `nosniff`, `Cross-Origin-Resource-Policy: same-origin` |
   | other static files (`favicon.svg`, `robots.txt`) | `Cache-Control: no-cache`, `nosniff` |
 

@@ -210,6 +210,8 @@ def test_the_console_policy_is_the_one_adr_0009_decided() -> None:
         "img-src 'self' https://image.tmdb.org",
         "connect-src 'self'",
         "font-src 'self'",
+        # Roadmap 4.6: the swipe page's trailer, and no other frame source.
+        "frame-src https://www.youtube-nocookie.com",
         "object-src 'none'",
         "base-uri 'none'",
         "form-action 'self'",
@@ -219,6 +221,9 @@ def test_the_console_policy_is_the_one_adr_0009_decided() -> None:
         assert directive in CONSOLE_CSP
     assert "'unsafe-inline'" not in CONSOLE_CSP
     assert "'unsafe-eval'" not in CONSOLE_CSP
+    # The player is framed, never scripted into this document.
+    assert "script-src 'self';" in CONSOLE_CSP
+    assert CONSOLE_CSP.count("youtube") == 1
 
 
 def test_assets_and_the_api_keep_the_strict_policy(console: TestClient) -> None:

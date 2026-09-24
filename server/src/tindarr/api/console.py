@@ -46,11 +46,20 @@ RESERVED_PATHS: Final = frozenset({"/healthz"})
 #: Methods the console serves; everything else falls through to the API's own answer.
 SERVED_METHODS: Final = frozenset({"GET", "HEAD"})
 
-#: The console's policy (ADR 0009). No inline script or style, no third-party origin;
-#: ``img-src`` allows TMDb because later steps show poster images in the console.
+#: The one origin the console may put in an ``<iframe>``: the trailer player of the
+#: swipe page (roadmap 4.6). ``youtube-nocookie.com`` is YouTube's own no-cookie host,
+#: and the console only builds that frame when the user asks to watch, so nothing is
+#: fetched from it while somebody is merely swiping.
+TRAILER_FRAME_ORIGIN: Final = "https://www.youtube-nocookie.com"
+
+#: The console's policy (ADR 0009, amended by roadmap 4.6 for ``frame-src``). No
+#: inline script or style, no third-party script; ``img-src`` allows TMDb posters and
+#: ``frame-src`` allows the trailer player and nothing else. ``script-src`` is still
+#: ``'self'``: the player runs in its own document, not in this one.
 CONSOLE_CSP: Final = (
     "default-src 'self'; script-src 'self'; style-src 'self'; "
     "img-src 'self' https://image.tmdb.org; connect-src 'self'; font-src 'self'; "
+    f"frame-src {TRAILER_FRAME_ORIGIN}; "
     "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; "
     "require-trusted-types-for 'script'"
 )

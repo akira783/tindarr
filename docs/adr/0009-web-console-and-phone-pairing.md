@@ -26,6 +26,20 @@
 > Details in [the authentication reference](../auth.md). The text below is kept as
 > decided.
 
+> **Note (2026-09-24, [roadmap 4.6](../roadmap.md#step-4-swipe-engine)):** the console
+> now has a deck, so the sentence below — "The console shows no trailers, so YouTube is
+> not allowed" — no longer holds. One directive is added and nothing else changes:
+>
+> ```
+> frame-src https://www.youtube-nocookie.com
+> ```
+>
+> `script-src` stays `'self'`: the player runs inside its own document, on its own
+> origin, and nothing of it is executed in the console's. The frame is built only when
+> the user asks to watch a trailer, so a swiping session that never clicks play makes no
+> request to that host at all. `youtube-nocookie.com` is the host YouTube itself serves
+> for embeds that set no cookie until playback starts.
+
 ## Context
 
 ADRs 0001, 0003 and 0004 put every task in the mobile app, admin work included:
