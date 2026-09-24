@@ -28,6 +28,8 @@ def upgrade() -> None:
         sa.Column("source", sa.Text(), nullable=False),
         sa.Column("kind", sa.Text(), nullable=False),
         sa.Column("tmdb_id", sa.Integer(), nullable=False),
+        sa.Column("title", sa.Text(), server_default="", nullable=False),
+        sa.Column("year", sa.Integer(), nullable=True),
         sa.Column("seen", sa.Boolean(), server_default=sa.text("1"), nullable=False),
         sa.Column("state", sa.Text(), nullable=True),
         sa.Column("progress", sa.Float(), server_default="0", nullable=False),

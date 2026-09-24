@@ -276,13 +276,16 @@ class ImportService:
             entry = await import_repository.get_review(connection, user_id, entry_id)
         if entry is None or entry.status != "pending":
             raise _no_such_entry()
-        if ref not in {candidate.ref for candidate in entry.offered}:
+        chosen = next((one for one in entry.offered if one.ref == ref), None)
+        if chosen is None:
             raise _not_offered()
         source = await self._source_of(user_id, entry.import_id)
         totals = await episode_totals(await self.metadata(), [ref]) if ref.kind == "tv" else {}
         row = watched_title(
             ref=ref,
             source=source,
+            title=chosen.title,
+            year=chosen.year,
             episodes=entry.episodes,
             episodes_total=totals.get(ref),
             rating=entry.rating,

@@ -144,7 +144,10 @@ The fork's logic, with its middle turned around by
 1. **Signals.** Engagement from the media server (watched, abandoned, in progress,
    "mostly watched" for a series at 60 % of its episodes or more), the library, past votes and the taste profile.
    Media server play counts are never used as a rewatch signal: debrid setups inflate
-   them.
+   them. From step 4.4, **what the household watched outside the media server** joins
+   the same two signals (below): imported history and calibration ticks are excluded
+   from the pool like a vote, and the imported half carries engagement like the media
+   server's.
 2. **Retrieval** (`tindarr.swipe.retrieval`). TMDb builds the candidate pool: what it
    recommends to somebody who liked this user's recent likes, plus filtered discovery
    under the **novelty band** — an adaptive popularity floor that drops as the setting
@@ -162,6 +165,42 @@ The fork's logic, with its middle turned around by
    region, ratings (OMDb), trailer.
 5. **Profile.** Rewritten in the background every N votes, as short "Loves / Avoids /
    Nuances" bullets. Text written by the user is kept and never contradicted.
+
+#### What the household has already watched, from outside the deck
+
+ADR 0013 measured the already-seen problem — 47 % of the fork's cards — and measured
+every cure. Importing what somebody watched elsewhere was worth **3 of those 47**, so
+imports are kept as a *taste* source and the already-seen problem is answered by the
+novelty band and by a **calibration grid**. Both write the same rows
+(`tindarr.ports.history`, table `watch_history`), one per source per title.
+
+- **File imports** (`tindarr.swipe.imports`). A Netflix viewing history (the short
+  export or the long GDPR one), an IMDb ratings export, a Letterboxd archive or one of
+  its CSVs. The format is detected from the header, never asked for. The upload is the
+  request body, bounded as it arrives, parsed in that request and **never stored** —
+  neither the bytes nor the file name. Identifying the titles runs in a background task
+  (`tindarr.jobs.imports`), one per user and two per server, and an interrupted one is
+  closed at the next startup.
+  - Netflix rows are prose: the title is split on `": "` and **never** on a French
+    `" : "` in any whitespace form, a season marker settles the media type, two
+    different trailing parts under one title settle it by counting, and trailers are
+    dropped (the long export's own column, the short one's vocabulary).
+  - A row that does not clearly name one title goes to a **review queue** with what
+    TMDb offered, best first. Nothing is guessed: `results[0]` is the fallback nowhere.
+    An IMDb `tt…` id is resolved exactly through `/find` and never searched for.
+  - Episodes are counted per series against TMDb's total and turned into the media
+    server port's own `EngagementState`, with its own thresholds. A series a file
+    mentions without naming an episode is recorded as seen and carries **no** state:
+    "they watched something of it" is not "they finished it".
+- **The calibration grid** (`tindarr.swipe.calibration`). A wall of famous posters to
+  tick, ranked by TMDb vote count rather than by this week's popularity, spread across
+  five decades and across what is famous in the household's own language, and capped so
+  no genre takes more than a third of it. Everything already answered — a poster the
+  user said no to included — is gone before the wall is built.
+
+Neither is a **vote**. They are read as `StrategyContext.known` (excluded from the pool)
+and as `engagement` (taste); the statistics, the vote count and the deck's calibration
+progress never see them.
 
 **Votes.** Five values:
 
@@ -218,6 +257,9 @@ the queue.
 - **Handle sweep** (from step 2). Every 30 s, in memory: drops expired sign-in handles
   and logs out Quick Connect approvals nobody collected.
 - **Purge** (from step 2). Daily: old revoked sessions, refresh tokens and pairings.
+- **File imports** (from step 4.4). Not scheduled: an upload hands one over and the task
+  runs until it is done. Two at a time for the whole server, one per user, and every row
+  left `running` by a restart is closed as failed at startup.
 
 ### Storage
 
@@ -229,7 +271,9 @@ changes.
 Main tables: `server_state` (single row: install id, setup state, media server
 identity), `settings` (secrets encrypted), `users` (with `media_server_admin` and
 `promoted`), `sessions` (`kind`: `mobile`, `web` or `setup`), `refresh_tokens`,
-`pairings`, then from step 4 `batches`, `cards`, `votes`, `taste_profiles`,
+`pairings`, `watch_history` (what a user watched outside the deck: an import, a grid
+tick), `imports` and `import_reviews`, then from step 4.5 `batches`, `cards`, `votes`,
+`taste_profiles`,
 `preferences` (including the user's streaming services), `jobs`, `llm_usage`,
 `translations`, plus a cache of the region's streaming providers. The step-2 columns
 are specified in [the authentication reference](auth.md#12-tables).

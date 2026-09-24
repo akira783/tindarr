@@ -257,8 +257,15 @@ def _spellings(query: str) -> tuple[str, ...]:
     The row as written; the part before a French `` : `` subtitle, which is how
     distributors write *The Witcher : Les sirènes des abysses*; and the row with its
     colons flattened, for a catalogue that punctuates it differently.
+
+    The last two are computed on a copy whose no-break spaces are ordinary ones. French
+    typography writes the space before a colon as U+00A0 or U+202F, so a plain
+    ``split(" : ")`` silently never fires on the rows that need it most: on the author's
+    real export it is the difference between *The Handmaid\u2019s Tale : La Servante
+    écarlate* resolving and resolving to nothing at all.
     """
-    forms = (query, query.split(" : ", maxsplit=1)[0], query.replace(":", " "))
+    plain = query.replace("\u00a0", " ").replace("\u202f", " ")
+    forms = (query, plain.split(" : ", maxsplit=1)[0], plain.replace(":", " "))
     return tuple(dict.fromkeys(form.strip() for form in forms if form.strip()))
 
 

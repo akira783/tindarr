@@ -450,7 +450,15 @@ def _engagement_lines(engagement: Sequence[Engagement]) -> str:
 
 
 def _named(item: LibraryItem) -> str:
-    """One owned or watched title, as the fork wrote it: ``Dark (tv, 2017)``."""
+    """One owned or watched title, as the fork wrote it: ``Dark (tv, 2017)``.
+
+    A row with no name renders as ``" (tv, )"``, which is worth nothing to a model.
+    Nothing the engine produces is nameless — imported history carries the title TMDb
+    matched (``tindarr.ports.history``) and the library carries the media server's — but
+    a *fixture's* library does, and giving it a fallback here would change the prompt
+    and therefore re-measure a committed baseline for a change nobody can show. It is
+    the fixture that should carry its titles; roadmap 4.5 owns that side.
+    """
     year = f", {item.year}" if item.year else ""
     return f"{item.name} ({item.kind}{year})"
 

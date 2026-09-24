@@ -2311,6 +2311,7 @@
         }
       ],
       "taste_profile": null,
+      "history": [],
       "novelty": "balanced",
       "media_kind": null,
       "mood": null
@@ -2580,6 +2581,7 @@
         }
       ],
       "taste_profile": null,
+      "history": [],
       "novelty": "familiar",
       "media_kind": null,
       "mood": null
@@ -2849,6 +2851,7 @@
         }
       ],
       "taste_profile": null,
+      "history": [],
       "novelty": "bold",
       "media_kind": null,
       "mood": null

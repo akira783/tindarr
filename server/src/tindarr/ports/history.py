@@ -78,6 +78,12 @@ class WatchedTitle:
 
     ref: TitleRef
     source: HistorySource
+    #: The title as TMDb spelled it when the row was written, and its year. Kept
+    #: because the batch prompt names what somebody watched — "Dark (tv, 2017):
+    #: finished it" — and an engagement line with no title is a line the model cannot
+    #: use. It is TMDb's own words about a public film, not a fact about the person.
+    title: str = ""
+    year: int | None = None
     #: Whether this is "I watched it". ``False`` is a grid poster the user did not know.
     seen: bool = True
     #: How the engine reads it, or ``None`` when the source says nothing about extent
@@ -107,8 +113,9 @@ class WatchedTitle:
             item=LibraryItem(
                 kind=self.ref.kind,
                 item_id=f"{self.source}:{self.ref.tmdb_id}",
-                name="",
+                name=self.title,
                 tmdb_id=self.ref.tmdb_id,
+                year=self.year,
             ),
             state=self.state,
             progress=self.progress,

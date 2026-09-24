@@ -132,7 +132,19 @@ The exact rules and numbers for this section are in
   it was served to that user or voted on by them.
 - **Cost abuse.** Each user has a daily generation cap, set by the admin, and one
   running generation at a time. Token usage is recorded in `llm_usage` and shown to the
-  admin.
+  admin. A **file import** is bounded four ways: five uploads an hour per client, eight
+  megabytes per upload (checked against the declared length *and* against the bytes as
+  they arrive), two hundred thousand rows and two thousand distinct titles per file, and
+  one running import per user with two for the whole server. An archive is refused on
+  its own declared sizes before a member is read and again on the running total as it
+  inflates, so a zip bomb never reaches a parser.
+- **Imported history.** An import is a file somebody else's computer wrote, and every
+  row it produces is keyed on the uploader: `watch_history`, `imports` and
+  `import_reviews` are read and written through queries scoped to the session's user,
+  so another user's import id or review-entry id is a `404`. There is no shared
+  catalogue to corrupt — a row is a TMDb id and a verdict about one household's
+  evening — and a review entry can only be accepted as one of the candidates it itself
+  offered, so the endpoint is an answer and not a writer.
 - **Admin rights.** A user is admin when the media server says so at their last
   sign-in (re-read at every sign-in) or when a Tindarr admin promoted them
   ([ADR 0010](adr/0010-roles-and-refresh-tokens.md)). Someone removed as administrator
@@ -346,7 +358,14 @@ URLs, and the server calls them. That is intended and restricted to admins.
   is used before the first batch.
 - **No tracking.** No telemetry and no analytics.
 - **Data control.** Users can reset their votes (app or console) and delete their
-  account's Tindarr data (console).
+  account's Tindarr data (console). An import can be forgotten on its own, which deletes
+  everything that source told the server about that user and leaves the others standing.
+- **What an import keeps.** The uploaded file is read in the request that carried it and
+  is never written to disk; its **name is never sent**, because the body is the file and
+  not a form. What is stored is the titles that could be identified, the rows that could
+  not (so somebody can come back and answer them), and counts. A failure is recorded as
+  a problem code — never a parser's words and never a line of the file — and no log line
+  carries a title, a query, a file name or a user id.
 
 ## Reporting a vulnerability
 

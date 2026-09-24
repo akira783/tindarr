@@ -256,6 +256,8 @@ async def _replay_user(  # noqa: PLR0913, PLR0917 - one call site; splitting it 
             taste_profile=user.taste_profile,
             history=history,
             library=user.library_index,
+            known=user.known,
+            engagement=user.engagements,
             served=frozenset(served),
             batch_index=index,
             seed=options.seed + position * 1_000 + index,

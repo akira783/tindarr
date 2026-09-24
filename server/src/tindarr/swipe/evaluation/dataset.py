@@ -22,7 +22,8 @@ from typing import Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from tindarr.ports.media_server import LibraryIndex, LibraryItem
+from tindarr.ports.history import WatchedTitle
+from tindarr.ports.media_server import Engagement, LibraryIndex, LibraryItem
 from tindarr.ports.metadata import Title
 from tindarr.ports.titles import MediaKind, TitleRef
 from tindarr.swipe.strategy import Novelty, PickKind
@@ -35,6 +36,7 @@ __all__ = [
     "EvalUser",
     "FixtureVote",
     "OwnedTitle",
+    "WatchedEntry",
     "load_dataset",
 ]
 
@@ -119,6 +121,49 @@ class OwnedTitle(_Model):
     kind: Literal["movie", "tv"]
 
 
+class WatchedEntry(_Model):
+    """One title this person had already watched when the votes were cast.
+
+    What a file import or a calibration grid writes (``tindarr.ports.history``), carried
+    in the vote set so the harness can answer the question lot 4c exists for: *what does
+    seeding a profile from an import do to the numbers?* It is deliberately **not** a
+    vote — no rate counts it, no recall denominator includes it — and the replay hands
+    it to the strategy exactly as the engine does: as ``known`` (excluded from the pool)
+    and, when it carries a state, as ``engagement``.
+
+    Optional and empty by default, so every committed vote set means what it meant
+    before this field existed.
+    """
+
+    tmdb_id: int = Field(gt=0)
+    kind: Literal["movie", "tv"]
+    title: str = ""
+    year: int | None = None
+    source: Literal["netflix", "imdb", "letterboxd", "grid"] = "netflix"
+    state: Literal["watched", "mostly_watched", "in_progress", "paused", "abandoned"] | None = None
+    progress: float = 0.0
+    episodes_played: int | None = None
+    episodes_total: int | None = None
+
+    @property
+    def ref(self) -> TitleRef:
+        """The title this row is about."""
+        return TitleRef(self.kind, self.tmdb_id)
+
+    def as_watched(self) -> WatchedTitle:
+        """Return the engine's own history row."""
+        return WatchedTitle(
+            ref=self.ref,
+            source=self.source,
+            title=self.title,
+            year=self.year,
+            state=self.state,
+            progress=self.progress,
+            episodes_played=self.episodes_played,
+            episodes_total=self.episodes_total,
+        )
+
+
 class EvalUser(_Model):
     """One person's vote history, and the little the engine knew about them."""
 
@@ -133,6 +178,9 @@ class EvalUser(_Model):
     #: later votes were drawn from. A strategy that reads it therefore scores better on
     #: a generated vote set than it would in life (docs/evaluation.md).
     taste_profile: str | None = None
+    #: What this person had watched **outside the deck** before the first batch: an
+    #: import, a calibration grid. Empty in both committed vote sets.
+    history: tuple[WatchedEntry, ...] = ()
     novelty: Literal["familiar", "balanced", "bold"] = "balanced"
     media_kind: Literal["movie", "tv"] | None = None
     mood: str | None = None
@@ -149,6 +197,17 @@ class EvalUser(_Model):
             LibraryItem(row.kind, f"fixture-{row.kind}-{row.tmdb_id}", "", tmdb_id=row.tmdb_id)
             for row in self.library
         )
+
+    @property
+    def known(self) -> frozenset[TitleRef]:
+        """Every title this person had already watched before the deck ever ran."""
+        return frozenset(row.ref for row in self.history)
+
+    @property
+    def engagements(self) -> tuple[Engagement, ...]:
+        """The imported history, in the engine's engagement vocabulary."""
+        found = (row.as_watched().as_engagement() for row in self.history)
+        return tuple(engagement for engagement in found if engagement is not None)
 
     @property
     def novelty_level(self) -> Novelty:

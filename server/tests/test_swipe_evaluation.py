@@ -265,6 +265,37 @@ async def test_a_strategy_only_ever_sees_the_votes_cast_before_its_batch() -> No
         assert context.voted.isdisjoint(order[revealed:])
 
 
+async def test_a_seeded_history_is_excluded_from_the_pool_and_is_never_a_vote() -> None:
+    # What a file import or a calibration grid writes, handed to a strategy the way the
+    # engine hands it: as `known`, which the retrieval layer takes out of the pool, and
+    # as `engagement`. It must move no denominator — a seeded run and an unseeded one
+    # are only comparable because `liked_recall` counts the same titles in both.
+    votes = [(index, "like") for index in range(1, 11)]
+    plain = small_dataset(votes)
+    seeded = small_dataset(
+        votes,
+        history=[
+            {"tmdb_id": 90, "kind": "movie", "title": "Seen once", "state": "watched"},
+            {"tmdb_id": 91, "kind": "movie", "source": "grid"},
+        ],
+    )
+    strategy = ScriptedStrategy([[] for _ in range(5)])
+
+    await replay(seeded, lambda: strategy, ReplayOptions(batch_size=5, warm_up=0))
+    context = strategy.seen[0]
+    assert context.known == {movie(90), movie(91)}
+    assert context.excluded >= {movie(90), movie(91)}
+    # A grid tick says "I have seen it" and nothing about extent, so it is not an
+    # engagement; the imported row is.
+    assert [row.state for row in context.engagement] == ["watched"]
+    assert [row.item.name for row in context.engagement] == ["Seen once"]
+    assert all(vote.ref not in context.known for vote in context.history)
+
+    plain_report, _ = await run(plain, ScriptedStrategy([[] for _ in range(5)]))
+    seeded_report, _ = await run(seeded, ScriptedStrategy([[] for _ in range(5)]))
+    assert plain_report.counts.liked_available == seeded_report.counts.liked_available
+
+
 async def test_a_user_whose_history_is_shorter_than_the_warm_up_is_not_replayed() -> None:
     dataset = small_dataset([(1, "like"), (2, "like")])
     batches = await replay(dataset, ScriptedStrategy, ReplayOptions(warm_up=5))

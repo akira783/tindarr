@@ -86,6 +86,8 @@ class _Merged:
     """Several rows that turned out to be one title."""
 
     ref: TitleRef
+    title: str = ""
+    year: int | None = None
     episodes: int = 0
     rating: float | None = None
     last_watched_at: datetime | None = None
@@ -119,7 +121,8 @@ async def resolve_import(
     for item in parsed.items:
         resolution = await resolver.resolve(item)
         if resolution.confident and resolution.best is not None:
-            entry = merged.setdefault(resolution.best.ref, _Merged(resolution.best.ref))
+            best = resolution.best
+            entry = merged.setdefault(best.ref, _Merged(best.ref, best.title, best.year))
             entry.absorb(item, episode=resolution.episode)
         else:
             review.append(_review_entry(resolution))
@@ -169,6 +172,8 @@ async def _history(
         watched_title(
             ref=entry.ref,
             source=source,
+            title=entry.title,
+            year=entry.year,
             episodes=entry.episodes,
             episodes_total=totals.get(entry.ref),
             rating=entry.rating,
@@ -204,6 +209,8 @@ def watched_title(  # noqa: PLR0913 - one keyword per fact a source can carry
     *,
     ref: TitleRef,
     source: HistorySource,
+    title: str = "",
+    year: int | None = None,
     episodes: int = 0,
     episodes_total: int | None = None,
     rating: float | None = None,
@@ -224,6 +231,8 @@ def watched_title(  # noqa: PLR0913 - one keyword per fact a source can carry
         return WatchedTitle(
             ref=ref,
             source=source,
+            title=title,
+            year=year,
             state=state,
             progress=min(progress, 1.0),
             episodes_played=episodes,
@@ -231,11 +240,29 @@ def watched_title(  # noqa: PLR0913 - one keyword per fact a source can carry
             rating=rating,
             last_watched_at=last_watched_at,
         )
-    # A film, or a series a source counted no episodes for: the row itself is the
-    # evidence that it was watched, and nothing here invents a fraction.
+    if ref.kind == "tv":
+        # A series the file mentions without naming an episode — one Netflix row, no
+        # season marker, and TMDb says it is a series. They watched *something* of it,
+        # and there is no honest way to say how much: the row excludes the title from
+        # the deck and carries **no** engagement, exactly like a tick on the grid.
+        # Calling it "watched" would put a series somebody sampled once into the
+        # profile as one they finished, which is the opposite of what ADR 0013 wants
+        # out of an import.
+        return WatchedTitle(
+            ref=ref,
+            source=source,
+            title=title,
+            year=year,
+            rating=rating,
+            last_watched_at=last_watched_at,
+        )
+    # A film. The row itself is the evidence: a viewing history records one once
+    # somebody has really watched it, and a rating is somebody saying they saw it.
     return WatchedTitle(
         ref=ref,
         source=source,
+        title=title,
+        year=year,
         state=film_engagement(played=True, progress=1.0, days_since=days),
         progress=1.0,
         rating=rating,

@@ -241,24 +241,36 @@ repair and the retry live in the provider adapters since step 3). What is left f
 and beyond: enrichment, the taste profile's own prompt and refresh, likes, stats, reset
 and the skip cool-down — all of which need stored batches and votes.
 
-**4.4 Knowing what the user has already seen.**
+**4.4 Knowing what the user has already seen.** ✅ done, except the request-queue badge,
+which needs the stored cards of 4.5 —
+[the architecture](architecture.md#what-the-household-has-already-watched-from-outside-the-deck).
 
 - The calibration grid: a wall of famous posters to tick, which conveys years of watching
-  in minutes.
+  in minutes. Ranked by TMDb vote count rather than by this week's popularity, spread
+  across five decades and across what is famous in the household's own language, capped
+  so no genre takes a third of the wall, and never asking twice — a poster answered "no"
+  is answered.
 - File imports as **taste** sources, not filters ([ADR 0013](adr/0013-recommendation-engine.md)
-  measured them at 6 % of the already-seen problem): Netflix viewing history, IMDb ratings,
-  Letterboxd exports. Parsing splits on `": "` but never on a French `" : "`, retries on the
-  left-hand side, treats `&` as `et`, ranks by similarity × popularity, and **abstains into
-  a review queue rather than guessing** — `results[0]` is the root cause of the false
-  matches in every comparable project.
+  measured them at 6 % of the already-seen problem): Netflix viewing history (both
+  exports), IMDb ratings, Letterboxd exports. Parsing splits on `": "` but never on a
+  French `" : "` — in any whitespace form, because French typography writes that space as
+  U+00A0 and the prototype's plain-space rule silently never fired on the rows that
+  needed it — retries on the left-hand side, treats `&` as `et`, ranks by similarity then
+  popularity, and **abstains into a review queue rather than guessing**: `results[0]` is
+  the root cause of the false matches in every comparable project. An IMDb `tt…` id is
+  resolved exactly through `/find` and never searched for.
 - Episodes watched per series, counted against the total on TMDb, give "finished / in
-  progress / sampled and dropped" for everything watched outside the media server.
+  progress / sampled and dropped" for everything watched outside the media server, with
+  the media server port's own thresholds and no others.
+- Neither an import nor a grid tick is a **vote**: they are excluded from the candidate
+  pool and read as engagement, and no statistic counts them.
 - A title already in the user's request queue is **shown as such on the card**, not
-  filtered out.
+  filtered out. *(4.5: it needs a stored card to be shown on.)*
 
 **4.5 Serving it.** Stored batches and cards, persisted jobs, warm-up, per-user daily cap
 and concurrency, the region's streaming providers (TMDb, cached), the user's own services
-and the `subscribed` flag on card providers. Console: AI usage page, and the import screen.
+and the `subscribed` flag on card providers. Console: AI usage page. *(The import and
+calibration screens shipped with 4.4.)*
 
 **Check.**
 
@@ -269,9 +281,12 @@ and the `subscribed` flag on card providers. Console: AI usage page, and the imp
   every card in it comes from the retrieved pool.
 - On the fixture votes, the share of already-seen cards is materially below the 47 %
   measured on the fork.
-- Importing a Netflix history file produces the expected split of finished, in-progress
-  and dropped series, and every uncertain match lands in the review queue rather than in
-  the profile.
+- ✅ Importing a Netflix history file produces the expected split of finished,
+  in-progress and dropped series, and every uncertain match lands in the review queue
+  rather than in the profile. Measured on the author's real five-month export: 72 titles,
+  1 trailer dropped, **71 identified and 1 queued**; 27 films watched and 44 series split
+  into 7 finished, 3 mostly watched, 3 in progress, 12 paused, 13 sampled and dropped,
+  and 6 seen with no extent claimed.
 - `/status` stays under 50 ms during a generation.
 
 ## Step 5: packaging and first deployment

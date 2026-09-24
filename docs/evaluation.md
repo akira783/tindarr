@@ -420,6 +420,28 @@ TINDARR_EVAL_TMDB_API_KEY=… uv run tindarr eval record --fixtures fixtures/eva
 uv run tindarr eval run --fixtures fixtures/eval/private/session --strategy popular
 ```
 
+### Seeding a run from what somebody already watched
+
+A vote set may carry a `history` block per user: the titles that person had already
+watched **before the first batch**, as a file import or a calibration grid writes them
+(roadmap 4.4). It is not votes and is never counted as any: the replay hands it to the
+strategy as `known`, which the retrieval layer excludes from the pool, and as
+`engagement`, which the batch prompt reads. No rate counts it, and `liked_recall`'s
+denominator does not move, which is what makes a seeded run and an unseeded one
+comparable at all.
+
+```json
+"history": [
+  {"tmdb_id": 1639, "kind": "tv", "title": "Heroes", "source": "netflix",
+   "state": "in_progress", "episodes_played": 39, "episodes_total": 78}
+]
+```
+
+Both committed vote sets carry an empty one, so every number above them means what it
+meant before the field existed. What it is for is the question lot 4c had to answer with
+a measurement rather than an opinion — *what does seeding a profile from a real import
+actually do?* — and the answer is below.
+
 ### A fourth: the one on your instance
 
 The most useful vote set you already have is the one in your database:
@@ -639,6 +661,55 @@ knows nothing about taste served 0.22. The fork's figure was measured against a 
 answering; these are measured against a fixture that can recognise 99 titles. What would
 settle it is a deck in front of a person — `tindarr eval session` is that, and it is the
 only thing here that can — or a second, larger vote set.
+
+### What seeding from a real import does (lot 4c)
+
+ADR 0013 measured the imports at **3 of the 47** already-seen cards and kept them as a
+taste source rather than a filter. Lot 4c shipped the import, so the claim could be
+checked again with the code that runs rather than with a prototype.
+
+The author's real five-month Netflix export was run through the shipped parser and
+matcher against the real TMDb: 72 distinct titles, 1 trailer dropped, **71 identified
+and 1 queued for review**. Those 71 rows were added as a `history` block to a private
+copy of `akira-99` (`fixtures/eval/private/akira-99-seeded`, beside an otherwise
+identical `akira-99-plain`), and all three strategies were replayed on both. The
+`history` is not votes: the denominators are identical on both sides.
+
+**One of the 71 imported titles is a title the author later voted on**, and it is a
+`seen_liked`. That is ADR 0013's number, reproduced by the shipping code.
+
+The two floors are deterministic, so their comparison is exact:
+
+| `akira-99`, plain → seeded | `popular` | `random` |
+|---|---|---|
+| `liked_recall` | 0.0 % → **0.0 %** | 6.7 % → **6.7 %** |
+| `liked_recall_top` | 0.0 % → **0.0 %** | 0.0 % → **0.0 %** |
+| `seen_per_batch` | 0.22 → **0.22** | 0.33 → **0.33** |
+| `disliked_per_batch` | 0.00 → **0.00** | 0.00 → **0.00** |
+| `already_seen_rate` | 100 % → **100 %** | 60.0 % → **60.0 %** |
+| `coverage` | 2.2 % → **2.2 %** | 5.6 % → **5.6 %** |
+| `vote_count_median` (pool) | 2 153 (2 799) → 1 905 (2 737) | 1 911 (2 388) → 2 451 (2 388) |
+
+**Nothing the harness grades moves.** Seventy-one titles left a pool of thousands and
+the deck served the same cards: the only rows that move at all are the fame profile,
+where `popular`'s pool loses about 2 % of its median vote count. An import is not the
+answer to the already-seen problem, and this is that sentence measured rather than
+quoted.
+
+**The hybrid cannot tell.** Two fresh live recordings of the *same* seeded
+configuration gave `seen_per_batch` 0.56 and 0.89 against 0.67 unseeded, and
+`liked_recall` 6.7 % and 3.3 % against 6.7 %. The model's own variance between
+recordings is larger than the effect, exactly as the fame-budget comparison above
+found, so the hybrid says nothing about this either way. What the import does change
+for it is the prompt: seventy-one lines of "finished it / gave up on it" that no other
+source carries, and whose value is a question for `tindarr eval session` and a person,
+not for a fixture that can recognise 99 titles.
+
+**What this does not say.** It is one person, one service and five months. An import
+that covered fifteen years — a Letterboxd diary, an IMDb ratings file — would exclude a
+different order of magnitude from the pool, and nobody has measured one. And the half
+of an import that ADR 0013 actually keeps it for is the engagement, which reaches the
+model's prompt and which no metric here scores at all.
 
 ## The strategy port
 

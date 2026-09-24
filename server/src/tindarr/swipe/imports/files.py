@@ -193,7 +193,7 @@ def _rows(reader: csv.DictReader[str]) -> Iterator[Mapping[str, str]]:
     """Yield the rows, capped, with every key folded and every value cut to length."""
     for count, row in enumerate(reader):
         if count >= MAX_ROWS:
-            logger.info("an imported file was longer than the cap and was cut", extra={})
+            logger.info("an imported file was longer than the cap and was cut")
             return
         yield {
             (key or "").strip().casefold(): _field(value)

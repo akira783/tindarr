@@ -172,6 +172,10 @@ watch_history = Table(
     Column("source", Text, primary_key=True),
     Column("kind", Text, primary_key=True),
     Column("tmdb_id", Integer, primary_key=True),
+    # TMDb's own words about a public film, kept so the batch prompt can name what
+    # somebody watched rather than list bare ids.
+    Column("title", Text, nullable=False, server_default=""),
+    Column("year", Integer, nullable=True),
     Column("seen", Boolean, nullable=False, server_default=true()),
     # The media server port's own EngagementState, or null when the source said only
     # "I have seen this" (a grid tick).

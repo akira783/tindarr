@@ -76,6 +76,20 @@ class TestRanking:
         # The row as written was tried first and found nothing.
         assert metadata.calls[0].startswith("search:The Witcher : ")
 
+    async def test_the_french_colon_the_left_hand_retry_has_to_see(self) -> None:
+        # French typography writes the space before a colon as U+00A0. A retry that
+        # splits on a plain " : " never fires on the rows that need it most, and on the
+        # author's real export that was one title resolved or lost.
+        # TMDb answers the short name with the whole French title, which is what makes
+        # the retry work: the score is still measured against the row as written.
+        full = "The Handmaid's Tale\u00a0: La Servante écarlate"
+        metadata = InMemoryMetadata(search_results={"The Handmaid's Tale": [found(1220, full)]})
+        resolution = await TitleResolver(metadata, "fr").resolve(WatchedItem(full, "tv"))
+        assert "search:The Handmaid's Tale" in metadata.calls
+        assert resolution.confident
+        assert resolution.best is not None
+        assert resolution.best.ref == TitleRef("tv", 1220)
+
     async def test_an_exact_answer_stops_the_remaining_spellings(self) -> None:
         metadata = InMemoryMetadata(search_results={"Dune: Part Two": [found(1, "Dune: Part Two")]})
         await TitleResolver(metadata, "en").resolve(WatchedItem("Dune: Part Two", "movie"))
@@ -267,6 +281,16 @@ class TestEngagement:
         )
         assert row.state == "in_progress"
         assert row.progress == 0.0
+
+    def test_a_series_with_no_episode_counted_claims_nothing(self) -> None:
+        # One Netflix row, no season marker, and TMDb says it is a series: they watched
+        # something of it and there is no honest way to say how much. Calling that
+        # "watched" would put a series somebody sampled once into the profile as one
+        # they finished — the opposite of what an import is kept for.
+        row = watched_title(ref=TitleRef("tv", 1), source="netflix", now=NOW)
+        assert row.seen
+        assert row.state is None
+        assert row.as_engagement() is None
 
     def test_a_film_row_is_a_viewing(self) -> None:
         row = watched_title(ref=TitleRef("movie", 1), source="letterboxd", now=NOW)

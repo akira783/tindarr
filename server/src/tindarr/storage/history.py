@@ -63,6 +63,8 @@ async def record(
             "source": row.source,
             "kind": row.ref.kind,
             "tmdb_id": row.ref.tmdb_id,
+            "title": row.title,
+            "year": row.year,
             "seen": row.seen,
             "state": row.state,
             "progress": row.progress,
@@ -83,6 +85,8 @@ async def record(
             set_={
                 name: statement.excluded[name]
                 for name in (
+                    "title",
+                    "year",
                     "seen",
                     "state",
                     "progress",
@@ -173,6 +177,8 @@ def _to_row(row: Row[tuple[Any, ...]]) -> WatchedTitle | None:
     return WatchedTitle(
         ref=TitleRef(kind, row.tmdb_id),
         source=source,
+        title=row.title or "",
+        year=row.year,
         seen=bool(row.seen),
         state=_as_state(row.state),
         progress=float(row.progress or 0.0),
