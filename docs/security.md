@@ -197,6 +197,16 @@ The exact rules and numbers for this section are in
   `connect-src 'self'`, `object-src 'none'`, `base-uri 'none'`,
   `form-action 'self'`, `frame-ancestors 'none'`,
   `require-trusted-types-for 'script'`. No third-party script or font.
+- **The one third-party frame.** Since the console has a deck (roadmap 4.6), the policy
+  also carries `frame-src https://www.youtube-nocookie.com`, for the trailer and nothing
+  else. `script-src` is unchanged: the player runs in its own document on its own
+  origin, and nothing of it executes in the console's. The frame is only built when the
+  user clicks, so a swiping session that never asks for a trailer makes no request to
+  that host; its `src` is rebuilt from a video key re-checked against the contract's
+  pattern, so a malformed one cannot point the frame at another path or another site;
+  and it carries `sandbox="allow-scripts allow-same-origin allow-presentation"`, which
+  is strictly more restrictive than the un-sandboxed frame it replaces — "same origin"
+  there is YouTube's, never the console's.
 - **Cookie.** `__Host-tindarr_session`: `Secure`, `HttpOnly`, `SameSite=Strict`,
   `Path=/`, no `Domain`, so a sibling subdomain cannot set or read it. It holds an
   opaque 256-bit token stored hashed. Web sessions expire after 24 h idle and 7 days
