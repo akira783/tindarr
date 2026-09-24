@@ -24,20 +24,25 @@ needs to remember something within a user's run may keep it on the instance.
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Final, Literal, Protocol
+from typing import Final, Protocol
 
+from tindarr.ports.deck import NOVELTY_LEVELS, Novelty, PickKind
 from tindarr.ports.media_server import Engagement, LibraryIndex
 from tindarr.ports.metadata import TitleDetails, TitleFilters
 from tindarr.ports.titles import MediaKind, TitleRef
 from tindarr.swipe.votes import NEGATIVE_VOTES, POSITIVE_VOTES, Vote
 
-#: Why a card is in the batch, as the fork labels its picks.
-type PickKind = Literal["safe", "explore", "calibration"]
-#: How far from the user's proven taste the batch should reach (the fork's three
-#: levels). ADR 0013 makes it drive the adaptive popularity floor in step 4.2.
-type Novelty = Literal["familiar", "balanced", "bold"]
+__all__ = [
+    "CALIBRATION_TARGET",
+    "NOVELTY_LEVELS",
+    "Candidate",
+    "Novelty",
+    "PickKind",
+    "Strategy",
+    "StrategyContext",
+    "StrategyFactory",
+]
 
-NOVELTY_LEVELS: tuple[Novelty, ...] = ("familiar", "balanced", "bold")
 #: Votes before the deck stops calibrating, as the fork counts them. It lives here
 #: rather than in one strategy because the **pool** turns on it too: a calibration batch
 #: is looking for what somebody has already watched, which is the opposite of what every

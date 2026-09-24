@@ -1,9 +1,11 @@
 """The vote vocabulary, shared by the engine, the stats and the evaluation harness.
 
 Five values (docs/architecture.md, "Swipe engine"), of which the fork only ever wrote
-four: ``skip`` is new here. The groupings below are the only place that says what a vote
-*means*, so a metric, a prompt and a stats query can never disagree about whether
-``seen_disliked`` is a dislike.
+four: ``skip`` is new here. The words themselves are spelled once, in
+``tindarr.ports.deck``, because the storage layer writes them and this layer reads them;
+what they *mean* is only here: the groupings below are the only place that says it, so a
+metric, a prompt and a stats query can never disagree about whether ``seen_disliked`` is
+a dislike.
 
 The distinction that matters for the harness is **seen against new**: ``seen_liked`` and
 ``seen_disliked`` are the user saying "I already know this one", which is exactly the
@@ -15,14 +17,24 @@ the two are counted apart.
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Final, Literal, get_args
+from typing import Final
 
+from tindarr.ports.deck import VOTE_VALUES, VoteValue, as_vote_value
 from tindarr.ports.titles import TitleRef
 
-#: What a user can say about a card.
-type VoteValue = Literal["like", "dislike", "seen_liked", "seen_disliked", "skip"]
+__all__ = [
+    "NEGATIVE_VOTES",
+    "NEW_VOTES",
+    "OPINION_VOTES",
+    "POSITIVE_VOTES",
+    "SEEN_VOTES",
+    "VOTE_VALUES",
+    "Vote",
+    "VoteValue",
+    "as_vote_value",
+    "sorted_votes",
+]
 
-VOTE_VALUES: Final[tuple[VoteValue, ...]] = get_args(VoteValue.__value__)
 #: "More of this", whether or not the title was already known.
 POSITIVE_VOTES: Final[frozenset[VoteValue]] = frozenset({"like", "seen_liked"})
 #: "Not for me".
@@ -33,15 +45,6 @@ SEEN_VOTES: Final[frozenset[VoteValue]] = frozenset({"seen_liked", "seen_dislike
 NEW_VOTES: Final[frozenset[VoteValue]] = frozenset({"like", "dislike"})
 #: Votes carrying an opinion at all; ``skip`` deliberately carries none.
 OPINION_VOTES: Final[frozenset[VoteValue]] = POSITIVE_VOTES | NEGATIVE_VOTES
-
-
-def as_vote_value(value: object) -> VoteValue | None:
-    """Return ``value`` as a vote, or ``None`` when it is not one of the five.
-
-    Vote values arrive from a database that another program wrote (the fork's
-    ``swipe_votes`` table), so they are narrowed here rather than trusted.
-    """
-    return next((vote for vote in VOTE_VALUES if vote == value), None)
 
 
 @dataclass(frozen=True, slots=True, order=True)

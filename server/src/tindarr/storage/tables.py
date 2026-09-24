@@ -259,3 +259,222 @@ import_reviews = Table(
 Index("ix_sessions_user_id_created_at", sessions.c.user_id, sessions.c.created_at)
 #: The caller's imports, most recent first.
 Index("ix_imports_user_id_created_at", imports.c.user_id, imports.c.created_at)
+
+# --- the swipe engine (roadmap 4.5) ---------------------------------------------------
+
+#: One generated batch, and the settings it was generated under
+#: ([ADR 0007](../../../../docs/adr/0007-server-side-cards.md)). A batch outlives the
+#: request that asked for it and the process that built it: the warm-up pays for one
+#: while nobody is watching, and a restart must not make the household pay again.
+batches = Table(
+    "batches",
+    metadata,
+    Column("id", Text, primary_key=True),
+    Column("user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("mode", Text, nullable=False),
+    Column("novelty", Text, nullable=False),
+    Column("media_filter", Text, nullable=False),
+    # Which strategy produced it. Stored because a deck served by the fallback pool and
+    # one chosen by a model are not the same batch, and a later measurement will ask.
+    Column("strategy", Text, nullable=False, server_default="hybrid"),
+    Column("mood", Text, nullable=True),
+    # How many cards it ended up with. Zero is a real answer — the pool can run dry —
+    # and it is what stops the deck from starting another generation for ever.
+    Column("cards_count", Integer, nullable=False, server_default="0"),
+    Column("created_at", UtcDateTime, nullable=False),
+    Column("served_at", UtcDateTime, nullable=True),
+    CheckConstraint("mode IN ('normal', 'calibration')", name="mode"),
+    CheckConstraint("novelty IN ('familiar', 'balanced', 'bold')", name="novelty"),
+    CheckConstraint("media_filter IN ('both', 'movie', 'tv')", name="media_filter"),
+    CheckConstraint("cards_count >= 0", name="cards_count"),
+)
+
+#: One card, with everything it shows, as the server built it. The client is handed an
+#: opaque ``id`` and votes with that: nothing a client sends decides what a card *was*,
+#: which is what keeps the statistics and the pick types honest (ADR 0007).
+#:
+#: The enrichment that does not move — the translation, the providers TMDb listed, the
+#: ratings, the trailer — is stored with the card, because re-reading four services
+#: every time a deck is polled would cost more than the batch. What *does* move is
+#: computed when the card is served: the "on your services" flag comes from the
+#: preferences as they stand, and the availability from the request backend.
+cards = Table(
+    "cards",
+    metadata,
+    Column("id", Text, primary_key=True),
+    Column(
+        "batch_id", Text, ForeignKey("batches.id", ondelete="CASCADE"), nullable=False, index=True
+    ),
+    Column("user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("tmdb_id", Integer, nullable=False),
+    Column("pick_type", Text, nullable=False),
+    Column("position", Integer, nullable=False, server_default="0"),
+    Column("title", Text, nullable=False),
+    Column("original_title", Text, nullable=True),
+    Column("year", Integer, nullable=True),
+    Column("overview", Text, nullable=True),
+    Column("genres", Text, nullable=False, server_default="[]"),
+    Column("runtime_minutes", Integer, nullable=True),
+    Column("seasons", Integer, nullable=True),
+    Column("poster_path", Text, nullable=True),
+    Column("backdrop_path", Text, nullable=True),
+    Column("ratings", Text, nullable=False, server_default="{}"),
+    Column("providers", Text, nullable=False, server_default="[]"),
+    Column("trailer", Text, nullable=True),
+    Column("rationale", Text, nullable=True),
+    Column("created_at", UtcDateTime, nullable=False),
+    # Set the first time the card leaves the server. Everything about the deck's memory
+    # hangs off it: the "already shown" list, the 24 h expiry, and the purge.
+    Column("served_at", UtcDateTime, nullable=True),
+    Column("expires_at", UtcDateTime, nullable=True),
+    CheckConstraint("kind IN ('movie', 'tv')", name="kind"),
+    CheckConstraint("tmdb_id > 0", name="tmdb_id"),
+    CheckConstraint("pick_type IN ('safe', 'explore', 'calibration')", name="pick_type"),
+    CheckConstraint("(served_at IS NULL) = (expires_at IS NULL)", name="expiry_with_served"),
+)
+
+#: One user's current answer about one title. Keyed by the **title** rather than by the
+#: card, because voting again on the same title replaces the previous answer and an undo
+#: works on the title (ADR 0007): two cards for one film are one opinion.
+#:
+#: The title data is copied here from the card row, so the likes list and the statistics
+#: survive the card being purged, and so nothing a client sent ever decides what was
+#: voted on.
+votes = Table(
+    "votes",
+    metadata,
+    Column("user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("kind", Text, primary_key=True),
+    Column("tmdb_id", Integer, primary_key=True),
+    Column("value", Text, nullable=False),
+    Column("card_id", Text, ForeignKey("cards.id", ondelete="SET NULL"), nullable=True),
+    Column("pick_type", Text, nullable=False, server_default="safe"),
+    Column("title", Text, nullable=False, server_default=""),
+    Column("year", Integer, nullable=True),
+    Column("poster_path", Text, nullable=True),
+    Column("voted_at", UtcDateTime, nullable=False),
+    Column("created_at", UtcDateTime, nullable=False),
+    # Filed through the request backend from this server. A title the backend already
+    # knew about is not one of these: that is read from the backend when a list is shown.
+    Column("requested_at", UtcDateTime, nullable=True),
+    Column("request_status", Text, nullable=True),
+    CheckConstraint("kind IN ('movie', 'tv')", name="kind"),
+    CheckConstraint("tmdb_id > 0", name="tmdb_id"),
+    CheckConstraint(
+        "value IN ('like', 'dislike', 'seen_liked', 'seen_disliked', 'skip')", name="value"
+    ),
+    CheckConstraint("pick_type IN ('safe', 'explore', 'calibration')", name="pick_type"),
+)
+
+#: Every ``client_vote_id`` this server has already accepted from a user.
+#:
+#: A separate table rather than a column on the vote, because the two answer different
+#: questions and outlive each other. A vote is replaced when the user changes their mind
+#: and deleted when they undo, but "have I already stored this queued item?" must stay
+#: answerable either way — otherwise a phone that comes back online and re-sends its
+#: queue would resurrect a vote the user has since undone.
+vote_receipts = Table(
+    "vote_receipts",
+    metadata,
+    Column("user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("client_vote_id", Text, primary_key=True),
+    Column("created_at", UtcDateTime, nullable=False),
+)
+
+#: Background work whose state must survive the process running it
+#: (docs/architecture.md, "Background jobs"). A generation lives in an asyncio task; the
+#: row is what the deck endpoint polls, what the one-at-a-time rule is enforced against,
+#: and what a restart closes as failed.
+jobs = Table(
+    "jobs",
+    metadata,
+    Column("id", Text, primary_key=True),
+    Column("kind", Text, nullable=False),
+    Column("user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("status", Text, nullable=False),
+    Column("error_code", Text, nullable=True),
+    # The batch a finished generation produced, so the deck can find it without
+    # guessing which of the user's batches the job it just watched belongs to.
+    Column("result_id", Text, nullable=True),
+    Column("created_at", UtcDateTime, nullable=False),
+    Column("started_at", UtcDateTime, nullable=True),
+    Column("finished_at", UtcDateTime, nullable=True),
+    # A failure is reported to the client once (the contract's 502 on the deck), then
+    # stops being news: a deck that answered 502 for ever could never recover by itself.
+    Column("reported_at", UtcDateTime, nullable=True),
+    CheckConstraint("kind IN ('batch', 'profile')", name="kind"),
+    CheckConstraint("status IN ('pending', 'running', 'done', 'failed')", name="status"),
+    CheckConstraint("(status = 'failed') = (error_code IS NOT NULL)", name="error_with_status"),
+)
+
+#: The "Loves / Avoids / Nuances" bullets, per user. ``user_edited`` is the flag a later
+#: rewrite reads and never overrules: what somebody wrote about their own taste is not
+#: something a model gets to contradict (roadmap 4.3).
+taste_profiles = Table(
+    "taste_profiles",
+    metadata,
+    Column("user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("text", Text, nullable=False),
+    Column("user_edited", Boolean, nullable=False, server_default=false()),
+    # How many votes the user had when this text was written, so the console can say
+    # "twelve votes since the last rewrite" without counting anything twice.
+    Column("votes_at_update", Integer, nullable=False, server_default="0"),
+    Column("updated_at", UtcDateTime, nullable=False),
+    Column("refresh_error", Text, nullable=True),
+)
+
+#: One user's deck preferences, including the streaming services they subscribe to.
+preferences = Table(
+    "preferences",
+    metadata,
+    Column("user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("media_filter", Text, nullable=False, server_default="both"),
+    Column("novelty", Text, nullable=False, server_default="balanced"),
+    Column("auto_request", Boolean, nullable=False, server_default=false()),
+    # Null means "whatever the server's language is", which is what a household that
+    # never opened this screen wants.
+    Column("language", Text, nullable=True),
+    Column("streaming_services", Text, nullable=False, server_default="[]"),
+    Column("updated_at", UtcDateTime, nullable=False),
+    CheckConstraint("media_filter IN ('both', 'movie', 'tv')", name="media_filter"),
+    CheckConstraint("novelty IN ('familiar', 'balanced', 'bold')", name="novelty"),
+)
+
+#: What the AI provider cost, per user and per UTC day. It is both the administrator's
+#: usage page and the counter the per-user daily cap is spent against, which is why a
+#: generation reserves its slot here **before** the provider is called: a cap counted
+#: after the fact is a cap that cannot stop the call that breaks it.
+llm_usage = Table(
+    "llm_usage",
+    metadata,
+    Column("day", Text, primary_key=True),
+    Column("user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("generations", Integer, nullable=False, server_default="0"),
+    Column("input_tokens", Integer, nullable=False, server_default="0"),
+    Column("output_tokens", Integer, nullable=False, server_default="0"),
+    Column("failures", Integer, nullable=False, server_default="0"),
+)
+
+#: TMDb's list of the streaming providers available in one region, cached for seven days
+#: (the contract's ``GET /swipe/providers``). It is the same list for the whole
+#: household and it changes about twice a year; reading it per user per visit would be a
+#: request to TMDb for a screen nobody is on.
+region_providers = Table(
+    "region_providers",
+    metadata,
+    Column("region", Text, primary_key=True),
+    Column("providers", Text, nullable=False, server_default="[]"),
+    Column("fetched_at", UtcDateTime, nullable=False),
+)
+
+#: The cards of one user, newest first: what the deck reads on every poll.
+Index("ix_cards_user_id_created_at", cards.c.user_id, cards.c.created_at)
+#: "Has this user been shown this title?", asked once per pool build.
+Index("ix_cards_user_id_kind_tmdb_id", cards.c.user_id, cards.c.kind, cards.c.tmdb_id)
+#: The user's votes in the order they were cast: the prompt's history and the stats.
+Index("ix_votes_user_id_voted_at", votes.c.user_id, votes.c.voted_at)
+#: The jobs of one user, newest first: the one-at-a-time rule and the deck's polling.
+Index("ix_jobs_user_id_created_at", jobs.c.user_id, jobs.c.created_at)
+#: The usage page reads whole days across every user.
+Index("ix_llm_usage_day", llm_usage.c.day)
