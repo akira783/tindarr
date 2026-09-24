@@ -381,3 +381,7 @@ class RateLimits:
         self.refresh = SlidingWindow(Limit("token_refresh", 30, minute), clock)
         self.public = SlidingWindow(Limit("public", 60, minute), clock)
         self.connection_tests = SlidingWindow(Limit("connection_test", 10, minute), clock)
+        # An upload is a megabyte of somebody's history and a few hundred TMDb requests.
+        # Nobody imports their Netflix export five times an hour by accident, and the
+        # per-user "one at a time" rule below it only bounds what runs, not what arrives.
+        self.imports = SlidingWindow(Limit("import_upload", 5, timedelta(hours=1)), clock)

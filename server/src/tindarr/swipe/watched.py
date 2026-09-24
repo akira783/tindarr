@@ -66,6 +66,7 @@ __all__ = [
     "ImportService",
     "household",
     "import_in_progress",
+    "import_too_large",
     "import_unreadable",
     "tmdb_not_configured",
 ]
@@ -93,6 +94,19 @@ def import_unreadable() -> ProblemError:
         HTTPStatus.BAD_REQUEST,
         "import_unreadable",
         "This file is not a Netflix, IMDb or Letterboxd export we can read.",
+    )
+
+
+def import_too_large() -> ProblemError:
+    """413: the upload is bigger than any real export.
+
+    Checked against the declared length first and against the bytes as they arrive
+    second, because a ``Content-Length`` is a claim and the body is the fact.
+    """
+    return ProblemError(
+        HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+        "import_too_large",
+        "This file is larger than any export we accept.",
     )
 
 

@@ -21,6 +21,8 @@ from tindarr.core.net import normalize_public_url
 from tindarr.ports.llm import LlmProviderKind, ReasoningEffort
 from tindarr.ports.media_server import ConnectionCheck, ConnectorHealth, MediaServerKind
 from tindarr.ports.request_backend import SeasonPolicy
+from tindarr.ports.titles import MediaKind, TitleRef
+from tindarr.storage.imports import ImportRecord, ReviewCandidate, ReviewEntryRecord
 from tindarr.storage.pairings import Pairing, PairingState
 from tindarr.storage.sessions import Device, Session
 from tindarr.storage.settings import (
@@ -30,6 +32,8 @@ from tindarr.storage.settings import (
     StreamingRegion,
 )
 from tindarr.storage.users import DisabledReason, Role, User
+from tindarr.swipe.calibration import GridTick, GridTitle
+from tindarr.swipe.imports import IMPORT_FORMATS, ImportFormat
 
 #: A Plex PIN or Quick Connect handle, and the pairing code: 128 bits, base64url.
 Handle = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{22,64}$")]
@@ -831,3 +835,197 @@ class CompletePairingInput(BaseModel):
 
     code: PairingCode
     code_verifier: CodeVerifier
+
+
+# --- what the household has already watched (roadmap 4.4) -----------------------------
+
+
+class TitleRefInput(BaseModel):
+    """Contract schema ``TitleRef``: one film or series, by TMDb id."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    media_type: MediaKind
+    tmdb_id: Annotated[int, Field(gt=0)]
+
+    @property
+    def ref(self) -> TitleRef:
+        """The title this names."""
+        return TitleRef(self.media_type, self.tmdb_id)
+
+
+class ImportResponse(BaseModel):
+    """Contract schema ``Import``: one uploaded file, and what became of it."""
+
+    id: str
+    format: ImportFormat
+    status: Literal["running", "complete", "failed"]
+    created_at: datetime
+    finished_at: datetime | None = None
+    titles: int = 0
+    matched: int = 0
+    queued: int = 0
+    skipped: Mapping[str, int] = {}
+    error_code: str | None = None
+
+    @classmethod
+    def of(cls, record: ImportRecord) -> "ImportResponse":
+        """Build the answer from a stored import.
+
+        The row's own columns and nothing else: no file, no file name, and no words from
+        whatever failed — ``error_code`` is a code the console has a sentence for.
+        """
+        status: Literal["running", "complete", "failed"] = "running"
+        if record.status in ("complete", "failed"):
+            status = record.status
+        source: ImportFormat = "netflix"
+        for kind in IMPORT_FORMATS:
+            if kind == record.source:
+                source = kind
+        return cls(
+            id=record.id,
+            format=source,
+            status=status,
+            created_at=record.created_at,
+            finished_at=record.finished_at,
+            titles=record.rows_read,
+            matched=record.matched,
+            queued=record.queued,
+            skipped=record.skipped,
+            error_code=record.error_code,
+        )
+
+
+class ImportListResponse(BaseModel):
+    """Answer of ``GET /swipe/imports``."""
+
+    imports: list[ImportResponse]
+
+
+class ImportCandidateResponse(BaseModel):
+    """Contract schema ``ImportCandidate``: one title offered for an unsettled row."""
+
+    media_type: MediaKind
+    tmdb_id: int
+    title: str
+    year: int | None = None
+    poster_path: str | None = None
+    similarity: float = 0.0
+
+    @classmethod
+    def of(cls, candidate: ReviewCandidate) -> "ImportCandidateResponse":
+        """Build one candidate from its stored form."""
+        return cls(
+            media_type=candidate.kind,
+            tmdb_id=candidate.tmdb_id,
+            title=candidate.title,
+            year=candidate.year,
+            poster_path=candidate.poster_path,
+            similarity=candidate.similarity,
+        )
+
+
+class ImportReviewEntryResponse(BaseModel):
+    """Contract schema ``ImportReviewEntry``: one row nobody has answered yet."""
+
+    id: str
+    query: str
+    media_type: MediaKind | None = None
+    episodes: int = 0
+    rating: float | None = None
+    last_watched_at: datetime | None = None
+    candidates: list[ImportCandidateResponse] = []
+
+    @classmethod
+    def of(cls, entry: ReviewEntryRecord) -> "ImportReviewEntryResponse":
+        """Build one queue entry from its stored row."""
+        return cls(
+            id=entry.id,
+            query=entry.query,
+            media_type=entry.hint,
+            episodes=entry.episodes,
+            rating=entry.rating,
+            last_watched_at=entry.last_watched_at,
+            candidates=[ImportCandidateResponse.of(found) for found in entry.offered],
+        )
+
+
+class ImportReviewListResponse(BaseModel):
+    """Answer of ``GET /swipe/imports/{import_id}/review``."""
+
+    entries: list[ImportReviewEntryResponse]
+    pending: int
+
+
+class ImportReviewDecisionInput(BaseModel):
+    """Contract schema ``ImportReviewDecision``: the answer to one queued row."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["accept", "reject"]
+    #: Required for ``accept``, and it must be one of the entry's own candidates.
+    title: TitleRefInput | None = None
+
+    @model_validator(mode="after")
+    def _accept_names_a_title(self) -> "ImportReviewDecisionInput":
+        if self.decision == "accept" and self.title is None:
+            msg = "title: accepting a row needs the title it is"
+            raise ValueError(msg)
+        return self
+
+
+class GridTitleResponse(BaseModel):
+    """Contract schema ``GridTitle``: one poster on the calibration wall."""
+
+    media_type: MediaKind
+    tmdb_id: int
+    title: str
+    year: int | None = None
+    poster_path: str | None = None
+
+    @classmethod
+    def of(cls, found: GridTitle) -> "GridTitleResponse":
+        """Build one poster from what the grid returned."""
+        return cls(
+            media_type=found.ref.kind,
+            tmdb_id=found.ref.tmdb_id,
+            title=found.title,
+            year=found.year,
+            poster_path=found.poster_path,
+        )
+
+
+class GridResponse(BaseModel):
+    """Answer of ``GET /swipe/calibration/grid``."""
+
+    page: int
+    titles: list[GridTitleResponse]
+
+
+class GridAnswerInput(BaseModel):
+    """Contract schema ``GridAnswer``: one poster, and whether it was watched."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    media_type: MediaKind
+    tmdb_id: Annotated[int, Field(gt=0)]
+    seen: bool
+
+    @property
+    def tick(self) -> GridTick:
+        """The domain's own answer value."""
+        return GridTick(TitleRef(self.media_type, self.tmdb_id), seen=self.seen)
+
+
+class GridSubmitInput(BaseModel):
+    """Body of ``POST /swipe/calibration/grid``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    answers: Annotated[list[GridAnswerInput], Field(min_length=1, max_length=200)]
+
+
+class GridSubmitResponse(BaseModel):
+    """Answer of ``POST /swipe/calibration/grid``."""
+
+    recorded: int

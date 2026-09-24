@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from tindarr.api.v1 import admin, auth, me, pairing, server, setup
+from tindarr.api.v1 import admin, auth, imports, me, pairing, server, setup
 
 API_PREFIX = "/api/v1"
 
@@ -13,4 +13,5 @@ router.include_router(auth.router)
 router.include_router(pairing.app_router)
 router.include_router(pairing.router)
 router.include_router(me.router)
+router.include_router(imports.router)
 router.include_router(admin.router, prefix="/admin")

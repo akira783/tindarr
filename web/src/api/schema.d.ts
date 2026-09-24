@@ -895,6 +895,142 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/swipe/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's file imports, most recent first */
+        get: operations["listImports"];
+        put?: never;
+        /**
+         * Upload a Netflix, IMDb or Letterboxd export
+         * @description The body is the file itself, not a form: a Netflix `NetflixViewingHistory.csv`,
+         *     an IMDb `ratings.csv`, a Letterboxd export (the ZIP, or its `watched.csv` or
+         *     `ratings.csv`). **The format is detected**, never asked for, and the answer says
+         *     which one was found.
+         *
+         *     The file is read in the request that carried it and is never stored; neither is
+         *     its name. What is kept is the titles that could be identified and the rows that
+         *     could not — those land in a review queue rather than being guessed at, because
+         *     taking the first search result is how an import writes down the wrong film.
+         *
+         *     Identifying the titles costs one TMDb request each and happens in the
+         *     background: this answers `202` with a `running` import, and `GET
+         *     /api/v1/swipe/imports/{import_id}` says when it is done. One import at a time
+         *     per user.
+         *
+         *     What an import produces is **history, never votes**: it is excluded from the
+         *     deck and read as engagement, and it changes no statistic.
+         */
+        post: operations["startImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/swipe/imports/{import_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One import, and what it produced */
+        get: operations["getImport"];
+        put?: never;
+        post?: never;
+        /**
+         * Forget an import and everything that source told us
+         * @description Per source and per user: forgetting a Netflix import leaves the IMDb ratings and
+         *     the calibration answers standing. It is the undo the console offers, and it is
+         *     what somebody who regrets uploading a file needs.
+         */
+        delete: operations["deleteImport"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/swipe/imports/{import_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The rows this import refused to guess at
+         * @description Each entry carries the text the file held and what TMDb offered for it, best
+         *     first. An entry with no candidate at all means TMDb knew nothing resembling the
+         *     row; there is still something to say about it, which is why it is shown.
+         */
+        get: operations["listImportReview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/swipe/imports/{import_id}/review/{entry_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer one row the import could not settle
+         * @description `accept` writes the history row the import would have written, with the
+         *     engagement it would have derived; `reject` writes nothing. Only a title the
+         *     entry itself offered may be accepted. An entry answers once: answering it again
+         *     is a `404`, because it is no longer in the queue.
+         */
+        post: operations["decideImportReview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/swipe/calibration/grid": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A wall of famous posters to tick
+         * @description The cheapest way to tell this server what somebody has already watched: posters,
+         *     one tap each. Ranked by how many people ever voted on a title rather than by
+         *     this week's popularity, spread across five decades and across what is famous in
+         *     the household's own language, and never showing a title the caller has already
+         *     answered about — a poster they said "no" to included.
+         */
+        get: operations["getCalibrationGrid"];
+        put?: never;
+        /**
+         * Record what the caller ticked on a wall
+         * @description `seen` is history: the deck stops offering it. `seen: false` is recorded too, so
+         *     the next wall asks something else — and the title stays a perfectly good
+         *     candidate for the deck. **Neither is a vote**: nothing here reaches the
+         *     statistics, the vote count or the calibration progress the deck reports.
+         */
+        post: operations["submitCalibrationGrid"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/connectors": {
         parameters: {
             query?: never;
@@ -1178,7 +1314,9 @@ export interface components {
              *       llm_auth_failed, llm_quota, llm_model_not_found, llm_unreachable,
              *       llm_invalid_output, daily_limit_reached, requests_not_configured,
              *       no_backend_user, title_not_offered, request_not_allowed,
-             *       quota_exceeded, request_backend_error.
+             *       quota_exceeded, request_backend_error;
+             *     - imports and the calibration grid: import_unreadable, import_too_large,
+             *       import_in_progress.
              * @example llm_quota
              */
             code: string;
@@ -1523,6 +1661,87 @@ export interface components {
         RequestStatus: "queued" | "awaiting_approval" | "already_requested" | "already_available";
         /** @enum {string} */
         Availability: "none" | "requested" | "processing" | "partially_available" | "available";
+        /**
+         * @description Which export a file turned out to be. Detected, never asked for.
+         * @enum {string}
+         */
+        ImportFormat: "netflix" | "imdb" | "letterboxd";
+        /**
+         * @description One uploaded file, and what became of it. The file and its name are not stored:
+         *     only counts, the detected format, and the rows nobody could identify.
+         */
+        Import: {
+            id: string;
+            format: components["schemas"]["ImportFormat"];
+            /** @enum {string} */
+            status: "running" | "complete" | "failed";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            finished_at?: string | null;
+            /** @description Distinct titles the file held. */
+            titles: number;
+            /** @description Titles written into the history. */
+            matched: number;
+            /** @description Rows waiting for an answer. */
+            queued: number;
+            /**
+             * @description Rows read and deliberately dropped, by reason: `supplemental` (trailers and
+             *     recaps), `empty`, `not_a_title`, `no_id`, `over_limit`.
+             */
+            skipped: {
+                [key: string]: number;
+            };
+            /**
+             * @description Why a `failed` import stopped: `metadata_unreachable`, `interrupted` (a
+             *     restart), `internal_error`. Never a parser's words and never a line of the
+             *     file.
+             */
+            error_code?: string | null;
+        };
+        /** @description One title TMDb offered for a row nobody has confirmed yet. */
+        ImportCandidate: {
+            media_type: components["schemas"]["MediaType"];
+            tmdb_id: number;
+            title: string;
+            year?: number | null;
+            poster_path?: string | null;
+            similarity: number;
+        };
+        /**
+         * @description One row the import refused to guess at. `query` is the text the file held, shown
+         *     so the person can recognise their own line.
+         */
+        ImportReviewEntry: {
+            id: string;
+            query: string;
+            media_type?: components["schemas"]["MediaType"];
+            /** @description Distinct episodes the file recorded for this row. */
+            episodes: number;
+            rating?: number | null;
+            /** Format: date-time */
+            last_watched_at?: string | null;
+            candidates: components["schemas"]["ImportCandidate"][];
+        };
+        ImportReviewDecision: {
+            /** @enum {string} */
+            decision: "accept" | "reject";
+            /** @description Required for `accept`, and it must be one of the entry's candidates. */
+            title?: components["schemas"]["TitleRef"];
+        };
+        /** @description One poster on the calibration wall. */
+        GridTitle: {
+            media_type: components["schemas"]["MediaType"];
+            tmdb_id: number;
+            title: string;
+            year?: number | null;
+            poster_path?: string | null;
+        };
+        GridAnswer: {
+            media_type: components["schemas"]["MediaType"];
+            tmdb_id: number;
+            seen: boolean;
+        };
         TitleRef: {
             media_type: components["schemas"]["MediaType"];
             tmdb_id: number;
@@ -2004,6 +2223,8 @@ export interface components {
         TmdbIdPath: number;
         PairingId: string;
         ConnectorKind: components["schemas"]["ConnectorKind"];
+        ImportId: string;
+        ReviewEntryId: string;
     };
     requestBodies: never;
     headers: {
@@ -3771,6 +3992,283 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Stats"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listImports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Imports. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        imports: components["schemas"]["Import"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    startImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+                "text/csv": string;
+                "application/zip": string;
+            };
+        };
+        responses: {
+            /** @description Accepted; the titles are being identified. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Import"];
+                };
+            };
+            /** @description `import_unreadable`: not an export this server can read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description `import_in_progress` or `tmdb_not_configured`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description `import_too_large`: the upload is past the size an export needs. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                import_id: components["parameters"]["ImportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The import. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Import"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                import_id: components["parameters"]["ImportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Forgotten. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listImportReview: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                import_id: components["parameters"]["ImportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The queue. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        entries: components["schemas"]["ImportReviewEntry"][];
+                        pending: number;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    decideImportReview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                import_id: components["parameters"]["ImportId"];
+                entry_id: components["parameters"]["ReviewEntryId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportReviewDecision"];
+            };
+        };
+        responses: {
+            /** @description Answered. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `validation_error`, including a title the entry never offered. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `tmdb_not_configured`: accepting needs TMDb to count the episodes. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getCalibrationGrid: {
+        parameters: {
+            query?: {
+                page?: number;
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The wall. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        page: number;
+                        titles: components["schemas"]["GridTitle"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description `tmdb_not_configured`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    submitCalibrationGrid: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    answers: components["schemas"]["GridAnswer"][];
+                };
+            };
+        };
+        responses: {
+            /** @description Recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        recorded: number;
+                    };
                 };
             };
             400: components["responses"]["BadRequest"];

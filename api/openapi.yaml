@@ -1658,6 +1658,281 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  # ------------------------------------------------- what the household already saw
+  /api/v1/swipe/imports:
+    get:
+      tags: [swipe]
+      summary: The caller's file imports, most recent first
+      operationId: listImports
+      security:
+        - bearer: []
+        - cookieSession: []
+      responses:
+        "200":
+          description: Imports.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [imports]
+                properties:
+                  imports:
+                    type: array
+                    items: { $ref: "#/components/schemas/Import" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [swipe, console]
+      summary: Upload a Netflix, IMDb or Letterboxd export
+      description: |
+        The body is the file itself, not a form: a Netflix `NetflixViewingHistory.csv`,
+        an IMDb `ratings.csv`, a Letterboxd export (the ZIP, or its `watched.csv` or
+        `ratings.csv`). **The format is detected**, never asked for, and the answer says
+        which one was found.
+
+        The file is read in the request that carried it and is never stored; neither is
+        its name. What is kept is the titles that could be identified and the rows that
+        could not — those land in a review queue rather than being guessed at, because
+        taking the first search result is how an import writes down the wrong film.
+
+        Identifying the titles costs one TMDb request each and happens in the
+        background: this answers `202` with a `running` import, and `GET
+        /api/v1/swipe/imports/{import_id}` says when it is done. One import at a time
+        per user.
+
+        What an import produces is **history, never votes**: it is excluded from the
+        deck and read as engagement, and it changes no statistic.
+      operationId: startImport
+      security:
+        - cookieSession: []
+          csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+          text/csv:
+            schema: { type: string, format: binary }
+          application/zip:
+            schema: { type: string, format: binary }
+      responses:
+        "202":
+          description: Accepted; the titles are being identified.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Import" }
+        "400":
+          description: "`import_unreadable`: not an export this server can read."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: "`import_in_progress` or `tmdb_not_configured`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "413":
+          description: "`import_too_large`: the upload is past the size an export needs."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/v1/swipe/imports/{import_id}:
+    get:
+      tags: [swipe]
+      summary: One import, and what it produced
+      operationId: getImport
+      security:
+        - bearer: []
+        - cookieSession: []
+      parameters:
+        - $ref: "#/components/parameters/ImportId"
+      responses:
+        "200":
+          description: The import.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Import" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [swipe, console]
+      summary: Forget an import and everything that source told us
+      description: |
+        Per source and per user: forgetting a Netflix import leaves the IMDb ratings and
+        the calibration answers standing. It is the undo the console offers, and it is
+        what somebody who regrets uploading a file needs.
+      operationId: deleteImport
+      security:
+        - cookieSession: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/ImportId"
+      responses:
+        "204": { description: Forgotten. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/swipe/imports/{import_id}/review:
+    get:
+      tags: [swipe]
+      summary: The rows this import refused to guess at
+      description: |
+        Each entry carries the text the file held and what TMDb offered for it, best
+        first. An entry with no candidate at all means TMDb knew nothing resembling the
+        row; there is still something to say about it, which is why it is shown.
+      operationId: listImportReview
+      security:
+        - bearer: []
+        - cookieSession: []
+      parameters:
+        - $ref: "#/components/parameters/ImportId"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: The queue.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries, pending]
+                properties:
+                  entries:
+                    type: array
+                    items: { $ref: "#/components/schemas/ImportReviewEntry" }
+                  pending: { type: integer, minimum: 0 }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/swipe/imports/{import_id}/review/{entry_id}:
+    post:
+      tags: [swipe, console]
+      summary: Answer one row the import could not settle
+      description: |
+        `accept` writes the history row the import would have written, with the
+        engagement it would have derived; `reject` writes nothing. Only a title the
+        entry itself offered may be accepted. An entry answers once: answering it again
+        is a `404`, because it is no longer in the queue.
+      operationId: decideImportReview
+      security:
+        - cookieSession: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/ImportId"
+        - $ref: "#/components/parameters/ReviewEntryId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImportReviewDecision" }
+      responses:
+        "204": { description: Answered. }
+        "400":
+          description: "`validation_error`, including a title the entry never offered."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`tmdb_not_configured`: accepting needs TMDb to count the episodes."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /api/v1/swipe/calibration/grid:
+    get:
+      tags: [swipe]
+      summary: A wall of famous posters to tick
+      description: |
+        The cheapest way to tell this server what somebody has already watched: posters,
+        one tap each. Ranked by how many people ever voted on a title rather than by
+        this week's popularity, spread across five decades and across what is famous in
+        the household's own language, and never showing a title the caller has already
+        answered about — a poster they said "no" to included.
+      operationId: getCalibrationGrid
+      security:
+        - bearer: []
+          cookieSession: []
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 10, default: 1 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 60, default: 40 }
+      responses:
+        "200":
+          description: The wall.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [page, titles]
+                properties:
+                  page: { type: integer, minimum: 1 }
+                  titles:
+                    type: array
+                    items: { $ref: "#/components/schemas/GridTitle" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: "`tmdb_not_configured`."
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+    post:
+      tags: [swipe]
+      summary: Record what the caller ticked on a wall
+      description: |
+        `seen` is history: the deck stops offering it. `seen: false` is recorded too, so
+        the next wall asks something else — and the title stays a perfectly good
+        candidate for the deck. **Neither is a vote**: nothing here reaches the
+        statistics, the vote count or the calibration progress the deck reports.
+      operationId: submitCalibrationGrid
+      security:
+        - bearer: []
+        - cookieSession: []
+          csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [answers]
+              properties:
+                answers:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items: { $ref: "#/components/schemas/GridAnswer" }
+      responses:
+        "200":
+          description: Recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recorded]
+                properties:
+                  recorded: { type: integer, minimum: 0 }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
   # ---------------------------------------------------------------- admin
   /api/v1/admin/connectors:
     get:
@@ -2157,6 +2432,16 @@ components:
       in: path
       required: true
       schema: { $ref: "#/components/schemas/ConnectorKind" }
+    ImportId:
+      name: import_id
+      in: path
+      required: true
+      schema: { type: string, maxLength: 64 }
+    ReviewEntryId:
+      name: entry_id
+      in: path
+      required: true
+      schema: { type: string, maxLength: 64 }
 
   headers:
     SetSessionCookie:
@@ -2279,7 +2564,9 @@ components:
               llm_auth_failed, llm_quota, llm_model_not_found, llm_unreachable,
               llm_invalid_output, daily_limit_reached, requests_not_configured,
               no_backend_user, title_not_offered, request_not_allowed,
-              quota_exceeded, request_backend_error.
+              quota_exceeded, request_backend_error;
+            - imports and the calibration grid: import_unreadable, import_too_large,
+              import_in_progress.
           examples: [llm_quota]
         retry_after_ms:
           type: integer
@@ -2736,6 +3023,100 @@ components:
     Availability:
       type: string
       enum: [none, requested, processing, partially_available, available]
+
+    ImportFormat:
+      type: string
+      enum: [netflix, imdb, letterboxd]
+      description: Which export a file turned out to be. Detected, never asked for.
+
+    Import:
+      type: object
+      required: [id, format, status, created_at, titles, matched, queued, skipped]
+      description: |
+        One uploaded file, and what became of it. The file and its name are not stored:
+        only counts, the detected format, and the rows nobody could identify.
+      properties:
+        id: { type: string }
+        format: { $ref: "#/components/schemas/ImportFormat" }
+        status: { type: string, enum: [running, complete, failed] }
+        created_at: { type: string, format: date-time }
+        finished_at: { type: [string, "null"], format: date-time }
+        titles: { type: integer, minimum: 0, description: Distinct titles the file held. }
+        matched: { type: integer, minimum: 0, description: Titles written into the history. }
+        queued: { type: integer, minimum: 0, description: Rows waiting for an answer. }
+        skipped:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+          description: |
+            Rows read and deliberately dropped, by reason: `supplemental` (trailers and
+            recaps), `empty`, `not_a_title`, `no_id`, `over_limit`.
+        error_code:
+          type: [string, "null"]
+          description: |
+            Why a `failed` import stopped: `metadata_unreachable`, `interrupted` (a
+            restart), `internal_error`. Never a parser's words and never a line of the
+            file.
+
+    ImportCandidate:
+      type: object
+      required: [media_type, tmdb_id, title, similarity]
+      description: One title TMDb offered for a row nobody has confirmed yet.
+      properties:
+        media_type: { $ref: "#/components/schemas/MediaType" }
+        tmdb_id: { type: integer, minimum: 1 }
+        title: { type: string }
+        year: { type: [integer, "null"] }
+        poster_path: { type: [string, "null"] }
+        similarity: { type: number, minimum: 0, maximum: 1 }
+
+    ImportReviewEntry:
+      type: object
+      required: [id, query, episodes, candidates]
+      description: |
+        One row the import refused to guess at. `query` is the text the file held, shown
+        so the person can recognise their own line.
+      properties:
+        id: { type: string }
+        query: { type: string }
+        media_type: { $ref: "#/components/schemas/MediaType" }
+        episodes:
+          type: integer
+          minimum: 0
+          description: Distinct episodes the file recorded for this row.
+        rating: { type: [number, "null"], minimum: 0, maximum: 10 }
+        last_watched_at: { type: [string, "null"], format: date-time }
+        candidates:
+          type: array
+          items: { $ref: "#/components/schemas/ImportCandidate" }
+
+    ImportReviewDecision:
+      type: object
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [accept, reject] }
+        title:
+          allOf:
+            - $ref: "#/components/schemas/TitleRef"
+          description: Required for `accept`, and it must be one of the entry's candidates.
+
+    GridTitle:
+      type: object
+      required: [media_type, tmdb_id, title]
+      description: One poster on the calibration wall.
+      properties:
+        media_type: { $ref: "#/components/schemas/MediaType" }
+        tmdb_id: { type: integer, minimum: 1 }
+        title: { type: string }
+        year: { type: [integer, "null"] }
+        poster_path: { type: [string, "null"] }
+
+    GridAnswer:
+      type: object
+      required: [media_type, tmdb_id, seen]
+      properties:
+        media_type: { $ref: "#/components/schemas/MediaType" }
+        tmdb_id: { type: integer, minimum: 1 }
+        seen: { type: boolean }
 
     TitleRef:
       type: object

@@ -91,6 +91,14 @@ class FakeTmdb:
         default_factory=dict[tuple[str, int], list[dict[str, Any]]]
     )
     region_providers: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+    #: What ``/discover/{kind}`` answers. Keyed by ``(kind, page)``; ``discovered``
+    #: answers whatever a key does not.
+    discover: dict[tuple[str, int], list[dict[str, Any]]] = field(
+        default_factory=dict[tuple[str, int], list[dict[str, Any]]]
+    )
+    discovered: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+    #: What ``/find/{external_id}`` answers, by id.
+    external: dict[str, dict[str, Any]] = field(default_factory=dict[str, dict[str, Any]])
     genres: dict[str, list[dict[str, Any]]] = field(
         default_factory=lambda: {
             "movie": [
@@ -144,6 +152,10 @@ class FakeTmdb:
             return _json({"images": {"secure_base_url": "https://image.tmdb.org/t/p/"}})
         if path.startswith("/search/"):
             return self._search(path.removeprefix("/search/"), query)
+        if path.startswith("/discover/"):
+            return self._discover(path.removeprefix("/discover/"), query)
+        if path.startswith("/find/"):
+            return _json(self.external.get(path.removeprefix("/find/"), {}))
         if path.startswith("/genre/") and path.endswith("/list"):
             kind = path.removeprefix("/genre/").removesuffix("/list")
             return _json({"genres": self.genres.get(kind, [])})
@@ -165,6 +177,12 @@ class FakeTmdb:
             date_key = "release_date" if kind == "movie" else "first_air_date"
             results = [row for row in results if str(row.get(date_key, ""))[:4] == year[0]]
         return _json({"page": 1, "results": results, "total_results": len(results)})
+
+    def _discover(self, kind: str, query: Mapping[str, list[str]]) -> httpx2.Response:
+        page = int(query.get("page", ["1"])[0])
+        found = self.discover.get((kind, page))
+        results = list(found if found is not None else self.discovered)
+        return _json({"page": page, "results": results, "total_results": len(results)})
 
     def _title(self, path: str, query: Mapping[str, list[str]]) -> httpx2.Response:
         parts = path.strip("/").split("/")

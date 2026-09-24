@@ -78,6 +78,18 @@ class ImportRunner:
             with contextlib.suppress(Exception):
                 await self._service.run_failed(record)
 
+    async def drain(self) -> None:
+        """Wait for the running imports to finish rather than cancelling them.
+
+        Shutdown cancels instead: an upload nobody is waiting for is not worth delaying
+        a stop for, and the row it leaves behind is closed at the next startup. This is
+        here for the tests, which need the background half of an upload to have happened
+        before they can assert anything about it.
+        """
+        for task in list(self._tasks):
+            with contextlib.suppress(Exception):
+                await task
+
     async def stop(self) -> None:
         """Cancel every running import and wait for them."""
         tasks, self._tasks = set(self._tasks), set()
