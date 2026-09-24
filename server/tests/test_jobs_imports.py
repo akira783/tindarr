@@ -81,12 +81,16 @@ class TestRunner:
     async def test_a_server_already_full_of_imports_refuses_another(self) -> None:
         service = SlowService()
         runner = ImportRunner(service)  # pyright: ignore[reportArgumentType]
+        assert runner.has_capacity()
         for index in range(MAX_CONCURRENT_IMPORTS):
             runner.submit(record(index), PARSED)
+        # The upload path asks this *before* it creates a row; `submit` is the backstop.
+        assert not runner.has_capacity()
         with pytest.raises(ProblemError) as failure:
             runner.submit(record(99), PARSED)
         assert failure.value.code == "import_in_progress"
         await runner.stop()
+        assert runner.has_capacity()
 
     async def test_a_task_that_dies_still_closes_its_row(self) -> None:
         service = ExplodingService()

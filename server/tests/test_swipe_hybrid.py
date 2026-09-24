@@ -199,7 +199,10 @@ def test_the_prompt_carries_the_evidence_the_fork_carried() -> None:
 
     assert "TASTE PROFILE" in text
     assert "slow science fiction" in text
-    assert "WHAT THE USER ACTUALLY WATCHED" in text
+    # The section names both places the evidence can come from: since lot 4c it also
+    # carries what a file import said, and telling the model otherwise is telling it
+    # something false about provenance.
+    assert "WHAT THE USER HAS ALREADY WATCHED, on their media server or in a history" in text
     assert "Eight (tv): watched (26/26 episodes)" in text
     assert "Weigh this evidence by effort" in text
     assert "RECENT VOTES" in text

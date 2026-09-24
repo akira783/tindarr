@@ -408,7 +408,8 @@ def _evidence(context: StrategyContext) -> str:
     watched = _engagement_lines(context.engagement)
     if watched:
         sections.append(
-            "WHAT THE USER ACTUALLY WATCHED on their media server (strongest signals "
+            "WHAT THE USER HAS ALREADY WATCHED, on their media server or in a history "
+            "they imported (strongest signals "
             f"first):\n{watched}\n{_ENGAGEMENT_NOTE}"
         )
     votes = _vote_lines(context.history)

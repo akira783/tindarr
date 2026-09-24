@@ -25,10 +25,12 @@ reach a console, a log line and a backup.
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from typing import Final
 
+import anyio.to_thread
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tindarr.connectors import ConnectorService
@@ -166,16 +168,25 @@ class ImportService:
             raise tmdb_not_configured()
         return found
 
-    async def start(self, user_id: str, payload: bytes) -> tuple[ImportRecord, ParsedFile]:
+    async def start(
+        self, user_id: str, payload: bytes, has_capacity: Callable[[], bool] | None = None
+    ) -> tuple[ImportRecord, ParsedFile]:
         """Parse an upload and open an import for it, or refuse before anything is stored.
 
         The file is read **before** the row is created, so a file nobody can read leaves
         nothing behind, and the caller is told what it is rather than being handed a
-        failed job to poll.
+        failed job to poll. ``has_capacity`` is asked in the same breath as the
+        one-at-a-time rule and for the same reason: a row opened for work nobody will
+        run stays ``running`` until the next restart and refuses every later upload by
+        that user.
+
+        Parsing is CPU work on bytes somebody else's computer wrote, so it happens in a
+        worker thread. On the event loop, one archive would stall every other request
+        the server is serving, the health check included.
         """
         await self.metadata()
         try:
-            parsed = detect_and_parse(payload)
+            parsed = await anyio.to_thread.run_sync(detect_and_parse, payload)
         except UnreadableImportError:
             # The parser's own words say how far it got; the caller gets none of them.
             logger.info("an upload was not an export we recognise")
@@ -183,6 +194,8 @@ class ImportService:
         now = self._clock.now()
         async with write_transaction(self._engine) as connection:
             if await import_repository.running_for_user(connection, user_id) is not None:
+                raise import_in_progress()
+            if has_capacity is not None and not has_capacity():
                 raise import_in_progress()
             record = await import_repository.create(connection, user_id, parsed.format, now=now)
         logger.info(
@@ -202,7 +215,11 @@ class ImportService:
             metadata = await self.metadata()
             place = await household(self._settings)
             outcome = await resolve_import(
-                parsed, metadata, language=place.language, now=self._clock.now()
+                parsed,
+                metadata,
+                language=place.language,
+                now=self._clock.now(),
+                import_id=record.id,
             )
         except MetadataDownError:
             await self._fail(record, "metadata_unreachable")
@@ -265,7 +282,7 @@ class ImportService:
         )
 
     async def accept(
-        self, user_id: str, entry_id: str, ref: TitleRef, import_id: str | None = None
+        self, user_id: str, entry_id: str, ref: TitleRef, import_id: str
     ) -> WatchedTitle:
         """Answer one open question with one of the titles it offered.
 
@@ -282,7 +299,10 @@ class ImportService:
         if chosen is None:
             raise _not_offered()
         source = await self._source_of(user_id, entry.import_id)
-        totals = await episode_totals(await self.metadata(), [ref]) if ref.kind == "tv" else {}
+        # Asked for whatever the media type is, so the 409 the contract documents is
+        # true of every answer and not only of the ones that happen to be series.
+        metadata = await self.metadata()
+        totals = await episode_totals(metadata, [ref]) if ref.kind == "tv" else {}
         row = watched_title(
             ref=ref,
             source=source,
@@ -292,6 +312,7 @@ class ImportService:
             episodes_total=totals.get(ref),
             rating=entry.rating,
             last_watched_at=entry.last_watched_at,
+            import_id=entry.import_id,
             now=now,
         )
         async with write_transaction(self._engine) as connection:
@@ -302,7 +323,7 @@ class ImportService:
             await history_repository.record(connection, user_id, [row], now=now)
         return row
 
-    async def reject(self, user_id: str, entry_id: str, import_id: str | None = None) -> None:
+    async def reject(self, user_id: str, entry_id: str, import_id: str) -> None:
         """Answer one open question with "none of these"."""
         async with write_transaction(self._engine) as connection:
             if not await import_repository.decide(
@@ -316,24 +337,19 @@ class ImportService:
                 raise _no_such_entry()
 
     async def forget(self, user_id: str, import_id: str) -> None:
-        """Delete an import and everything that source told us about this user.
+        """Delete an import and everything **it** told us about this user.
 
-        Per source and per user: forgetting a Netflix import leaves the IMDb ratings and
-        the calibration answers standing. It is the undo the console offers, and it is
-        also what somebody who regrets uploading a file needs.
+        Per import and per user: forgetting one Netflix export leaves a second one, the
+        IMDb ratings and the calibration answers standing, so the counts the console
+        still shows stay true. It is the undo the console offers, and it is what
+        somebody who regrets uploading a file needs.
         """
         async with write_transaction(self._engine) as connection:
             record = await import_repository.get(connection, user_id, import_id)
             if record is None:
                 raise _no_such_import()
-            source = history_source_of(record)
-            if source is not None:
-                await history_repository.delete_source(connection, user_id, source)
-            await connection.execute(
-                import_repository.imports.delete()
-                .where(import_repository.imports.c.id == import_id)
-                .where(import_repository.imports.c.user_id == user_id)
-            )
+            await history_repository.delete_import(connection, user_id, import_id)
+            await import_repository.delete(connection, user_id, import_id)
 
     async def _source_of(self, user_id: str, import_id: str) -> HistorySource:
         async with self._engine.connect() as connection:

@@ -878,10 +878,14 @@ class ImportResponse(BaseModel):
         status: Literal["running", "complete", "failed"] = "running"
         if record.status in ("complete", "failed"):
             status = record.status
-        source: ImportFormat = "netflix"
-        for kind in IMPORT_FORMATS:
-            if kind == record.source:
-                source = kind
+        source: ImportFormat | None = next(
+            (kind for kind in IMPORT_FORMATS if kind == record.source), None
+        )
+        if source is None:  # pragma: no cover - a CHECK constraint already forbids it
+            # Naming a *wrong* format would hide a migration bug behind a plausible
+            # answer; a row that violates its own constraint is worth a 500.
+            msg = "an import row carries a format this version does not know"
+            raise ValueError(msg)
         return cls(
             id=record.id,
             format=source,
@@ -907,7 +911,7 @@ class ImportCandidateResponse(BaseModel):
 
     media_type: MediaKind
     tmdb_id: int
-    title: str
+    title: Annotated[str, Field(max_length=300)]
     year: int | None = None
     poster_path: str | None = None
     similarity: float = 0.0
@@ -929,7 +933,9 @@ class ImportReviewEntryResponse(BaseModel):
     """Contract schema ``ImportReviewEntry``: one row nobody has answered yet."""
 
     id: str
-    query: str
+    #: Capped on the way out as well as on the way in: the column is written truncated,
+    #: and a database is a file an operator can edit.
+    query: Annotated[str, Field(max_length=300)]
     media_type: MediaKind | None = None
     episodes: int = 0
     rating: float | None = None

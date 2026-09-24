@@ -41,6 +41,7 @@ const SKIPPED = {
   not_a_title: "imports.skipped.not_a_title",
   no_id: "imports.skipped.no_id",
   over_limit: "imports.skipped.over_limit",
+  rows_over_limit: "imports.skipped.rows_over_limit",
 } as const;
 
 function failureKey(code: string): (typeof FAILURES)[keyof typeof FAILURES] | "imports.failure.unknown" {

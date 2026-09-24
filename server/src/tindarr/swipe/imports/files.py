@@ -17,23 +17,31 @@ A ZIP is opened and its members are offered the same test, which is what makes
 "Letterboxd export" mean the archive the site hands you rather than one file out of it.
 
 **Everything is bounded before it is read**, because an upload is the one input here
-that somebody else's computer wrote. The bytes are capped by the caller, the row count,
-the field length and the number of distinct titles are capped here, and an archive is
-checked against its own declared sizes *and* against the running total as it inflates,
-so neither a zip bomb nor a lying header gets past. Nothing is written to disk: an
-import is somebody's viewing history, and the only copy of it this server keeps is the
-titles it managed to identify.
+that somebody else's computer wrote. The bytes are capped by the caller, and the row
+count, the field length and the number of distinct titles are capped here.
+
+An archive is bounded by a **running total across every member it reads**, not by what
+it says about itself. Its central directory declares each member's inflated size, and
+that number is the uploader's: ``zipfile`` does not check it until the member is read to
+its end, which a reader that stops at a cap never does. So the declared sizes are used
+only as a cheap early refusal, and the number that actually stops a bomb is the count of
+bytes this module has inflated so far — one budget for the whole archive, so two hundred
+members cannot each spend it.
+
+Nothing is written to disk: an import is somebody's viewing history, and the only copy
+of it this server keeps is the titles it managed to identify.
 """
 
 import csv
 import io
 import logging
+import math
 import zipfile
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Final
 
 from tindarr.ports.titles import MediaKind
-from tindarr.swipe.imports.netflix import NetflixRow, netflix_items, read_date
+from tindarr.swipe.imports.netflix import NetflixRow, netflix_items, normalized, read_date
 from tindarr.swipe.imports.records import (
     MAX_FIELD_LENGTH,
     MAX_ROWS,
@@ -49,11 +57,18 @@ __all__ = ["LETTERBOXD_MEMBERS", "detect_and_parse"]
 
 logger = logging.getLogger(__name__)
 
-#: The members of a Letterboxd archive worth reading, best first. ``ratings`` carries an
-#: opinion as well as a viewing, so it wins where both list the same film.
-LETTERBOXD_MEMBERS: Final = ("ratings.csv", "watched.csv", "diary.csv")
-#: A ZIP with more members than this is not somebody's film diary.
-_MAX_ZIP_MEMBERS: Final = 200
+#: The members of a Letterboxd archive worth reading, **best last**: they are merged in
+#: this order and a later one wins, so the file carrying an opinion as well as a viewing
+#: is the one whose row survives. A real export ships all three, which is why reading
+#: only the first would silently drop every film somebody watched and did not rate.
+LETTERBOXD_MEMBERS: Final = ("watched.csv", "diary.csv", "ratings.csv")
+#: A ZIP with more members than this is not somebody's film diary: Letterboxd ships
+#: about eight files, and a number that looks generous is a number an attacker gets to
+#: multiply the work by.
+_MAX_ZIP_MEMBERS: Final = 25
+#: How many members may fail to parse before the archive is refused. A real export has
+#: one or two files we cannot read; a hundred is somebody looking for a parser bug.
+_MAX_FAILED_MEMBERS: Final = 5
 #: IMDb's ``Title Type``, mapped onto the two kinds a card can be. Anything absent from
 #: this table — a video game, a podcast episode — is dropped rather than guessed at.
 _IMDB_KINDS: Final[Mapping[str, MediaKind]] = {
@@ -90,45 +105,103 @@ def detect_and_parse(payload: bytes) -> ParsedFile:
 
 
 def _parse_zip(payload: bytes) -> ParsedFile:
-    """Read the first recognisable member of an archive, bounded twice over."""
+    """Read a Letterboxd archive, or the first other member that parses.
+
+    The three Letterboxd exports are **merged**, best source last so it wins: a real
+    archive ships `ratings.csv` beside `watched.csv`, and reading only the first would
+    silently drop every film somebody watched and did not rate.
+    """
+    budget = _Budget()
     try:
         with zipfile.ZipFile(io.BytesIO(payload)) as archive:
             members = archive.infolist()
             if len(members) > _MAX_ZIP_MEMBERS:
                 raise UnreadableImportError("this archive holds too many files")
-            declared = sum(member.file_size for member in members)
-            if declared > MAX_UNPACKED_BYTES:
+            if sum(member.file_size for member in members) > MAX_UNPACKED_BYTES:
+                # The uploader wrote these numbers, so this is only an early refusal.
                 raise UnreadableImportError("this archive expands to too much")
-            for name in LETTERBOXD_MEMBERS:
-                found = _member(archive, name)
-                if found is not None:
-                    return _parse_csv_bytes(found)
-            for member in members:
-                if member.is_dir() or not member.filename.lower().endswith(".csv"):
-                    continue
-                try:
-                    return _parse_csv_bytes(_read_member(archive, member))
-                except UnreadableImportError:
-                    continue
+            found = _letterboxd(archive, budget)
+            if found is not None:
+                return found
+            return _first_readable(archive, members, budget)
     except (zipfile.BadZipFile, OSError) as failure:
         raise UnreadableImportError("this file is not a readable archive") from failure
+
+
+class _Budget:
+    """How many inflated bytes this archive may still spend, across every member."""
+
+    __slots__ = ("left",)
+
+    def __init__(self, total: int = MAX_UNPACKED_BYTES) -> None:
+        self.left = total
+
+    def spend(self, size: int) -> None:
+        """Take ``size`` bytes out of the budget, or refuse the archive."""
+        self.left -= size
+        if self.left < 0:
+            raise UnreadableImportError("this archive expands to too much")
+
+
+def _letterboxd(archive: zipfile.ZipFile, budget: _Budget) -> ParsedFile | None:
+    """Merge the Letterboxd members an archive holds, or return ``None`` if it has none."""
+    merged: dict[tuple[str, int | None], WatchedItem] = {}
+    skipped: dict[str, int] = {}
+    seen_one = False
+    for name in LETTERBOXD_MEMBERS:
+        raw = _member(archive, name, budget)
+        if raw is None:
+            continue
+        try:
+            parsed = _parse_csv_bytes(raw)
+        except UnreadableImportError:
+            # One unreadable member must not cost the archive: `ratings.csv` is always
+            # present and is the one most likely to be empty.
+            continue
+        if parsed.format != "letterboxd":
+            continue
+        seen_one = True
+        for reason, count in parsed.skipped.items():
+            skipped[reason] = skipped.get(reason, 0) + count
+        for item in parsed.items:
+            # Later members win on a tie, and LETTERBOXD_MEMBERS is ordered so that the
+            # one carrying an opinion is read last.
+            merged[(normalized(item.query), item.year)] = item
+    if not seen_one:
+        return None
+    return _capped("letterboxd", tuple(merged.values()), skipped)
+
+
+def _first_readable(
+    archive: zipfile.ZipFile, members: Sequence[zipfile.ZipInfo], budget: _Budget
+) -> ParsedFile:
+    """Read the first CSV member that turns out to be an export we know."""
+    failed = 0
+    for member in members:
+        if member.is_dir() or not member.filename.lower().endswith(".csv"):
+            continue
+        try:
+            return _parse_csv_bytes(_read_member(archive, member, budget))
+        except UnreadableImportError:
+            failed += 1
+            if failed >= _MAX_FAILED_MEMBERS:
+                break
     raise UnreadableImportError("this archive holds no export we recognise")
 
 
-def _member(archive: zipfile.ZipFile, name: str) -> bytes | None:
+def _member(archive: zipfile.ZipFile, name: str, budget: _Budget) -> bytes | None:
     """Return one member by name, wherever it sits in the archive's directories."""
     for info in archive.infolist():
         if not info.is_dir() and info.filename.rsplit("/", 1)[-1].lower() == name:
-            return _read_member(archive, info)
+            return _read_member(archive, info, budget)
     return None
 
 
-def _read_member(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
-    """Read one member, stopping at the cap rather than trusting the declared size."""
+def _read_member(archive: zipfile.ZipFile, info: zipfile.ZipInfo, budget: _Budget) -> bytes:
+    """Read one member, against the archive's remaining budget rather than its claims."""
     with archive.open(info) as handle:
-        data = handle.read(MAX_UNPACKED_BYTES + 1)
-    if len(data) > MAX_UNPACKED_BYTES:
-        raise UnreadableImportError("this archive expands to too much")
+        data = handle.read(budget.left + 1)
+    budget.spend(len(data))
     return data
 
 
@@ -149,10 +222,25 @@ def _parse_csv_bytes(payload: bytes) -> ParsedFile:
     parse = _reader_for(columns)
     if parse is None:
         raise UnreadableImportError("this file is not an export we recognise")
+    cut: list[int] = []
     try:
-        return parse(_rows(reader))
-    except csv.Error as failure:
+        return _with_truncation(parse(_rows(reader, cut)), cut)
+    except (csv.Error, ValueError) as failure:
+        # A ValueError here is a field this parser could not read at all. It is the
+        # file's fault, not the server's, and the caller gets the one sentence every
+        # other refusal gets rather than a 500 and a traceback.
         raise UnreadableImportError("this file is not a readable CSV") from failure
+
+
+def _with_truncation(parsed: ParsedFile, cut: Sequence[int]) -> ParsedFile:
+    """Record the rows the cap dropped, so a cut file never looks like a whole one."""
+    if not cut:
+        return parsed
+    return ParsedFile(
+        format=parsed.format,
+        items=parsed.items,
+        skipped=dict(parsed.skipped) | {"rows_over_limit": cut[0]},
+    )
 
 
 def _decode(payload: bytes) -> str:
@@ -189,10 +277,15 @@ def _reader_for(
     return None
 
 
-def _rows(reader: csv.DictReader[str]) -> Iterator[Mapping[str, str]]:
-    """Yield the rows, capped, with every key folded and every value cut to length."""
+def _rows(reader: csv.DictReader[str], cut: list[int]) -> Iterator[Mapping[str, str]]:
+    """Yield the rows, capped, with every key folded and every value cut to length.
+
+    ``cut`` is filled with how many rows were dropped, because a file quietly cut in
+    half is exactly the failure the ``skipped`` map exists to make visible.
+    """
     for count, row in enumerate(reader):
         if count >= MAX_ROWS:
+            cut.append(sum(1 for _ in reader) + 1)
             logger.info("an imported file was longer than the cap and was cut")
             return
         yield {
@@ -295,14 +388,30 @@ def _capped(
 
 
 def _year(value: str) -> int | None:
+    """Read a year, or ``None``.
+
+    ``isdecimal`` and not ``isdigit``: the second is true of superscripts, for which
+    ``int()`` raises — and a one-line CSV that crashes a parser is a 500 somebody can
+    send on purpose.
+    """
     text = value.strip()[:4]
-    return int(text) if text.isdigit() else None
+    return int(text) if text.isdecimal() else None
 
 
 def _rating(value: str, *, scale: float) -> float | None:
-    """Return a score on TMDb's 0-10 scale, or ``None`` when the row carried none."""
+    """Return a score on TMDb's 0-10 scale, or ``None`` when the row carried none.
+
+    ``nan`` and ``inf`` parse as floats and survive every comparison in a clamp, so they
+    are refused by name. Nothing here is currently rendered from them, and the reason to
+    stop them anyway is that the only thing between ``nan`` and a permanently
+    unreadable review queue is SQLite quietly storing it as ``NULL``.
+    """
     try:
         score = float(value.strip())
     except ValueError:
         return None
-    return min(max(score * scale, 0.0), _MAX_RATING) or None
+    if not math.isfinite(score):
+        return None
+    clamped = min(max(score * scale, 0.0), _MAX_RATING)
+    # A score of zero is "they rated it zero", not "they did not rate it".
+    return None if clamped <= 0.0 else clamped

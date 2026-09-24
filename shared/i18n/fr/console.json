@@ -341,7 +341,9 @@
       "over_limit": "{{count}} ligne au-delà de la limite écartée",
       "over_limit_other": "{{count}} lignes au-delà de la limite écartées",
       "other": "{{count}} ligne écartée",
-      "other_other": "{{count}} lignes écartées"
+      "other_other": "{{count}} lignes écartées",
+      "rows_over_limit": "{{count}} ligne au-delà de la taille maximale écartée",
+      "rows_over_limit_other": "{{count}} lignes au-delà de la taille maximale écartées"
     },
     "mediaType": {
       "movie": "Film",

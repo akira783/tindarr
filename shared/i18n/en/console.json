@@ -341,7 +341,9 @@
       "over_limit": "{{count}} row past the limit dropped",
       "over_limit_other": "{{count}} rows past the limit dropped",
       "other": "{{count}} row dropped",
-      "other_other": "{{count}} rows dropped"
+      "other_other": "{{count}} rows dropped",
+      "rows_over_limit": "{{count}} row past the file size limit dropped",
+      "rows_over_limit_other": "{{count}} rows past the file size limit dropped"
     },
     "mediaType": {
       "movie": "Film",

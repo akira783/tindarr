@@ -24,8 +24,12 @@ one of which everybody has heard of.
 
 **Three spellings are tried, not one.** The row as written, the part before a French
 `` : `` subtitle, and the row with its colons flattened to spaces. A search that comes
-back with an exact match stops the rest, the other media type included: TMDb is free but
-it is not ours.
+back **confident** stops the rest, the other media type included — the bar is the same
+one that decides whether a row is written down at all, so nothing that would have been
+queued stops early. And the whole import has a **budget**: three searches per row it
+holds, after which the remaining rows go to the review queue unsearched. TMDb is free
+and it is not ours, and a file of two thousand titles nobody can match would otherwise
+cost twelve thousand requests for one upload.
 
 **The household's content filters are deliberately not applied here.** A filter says what
 the deck may *offer*, and it is applied to the candidate pool where that decision lives.
@@ -48,7 +52,7 @@ from tindarr.core.errors import ProblemError
 from tindarr.ports.metadata import Metadata, SearchQuery, Title
 from tindarr.ports.titles import MediaKind, TitleRef
 from tindarr.swipe.imports.netflix import normalized
-from tindarr.swipe.imports.records import WatchedItem
+from tindarr.swipe.imports.records import MAX_FIELD_LENGTH, WatchedItem
 
 __all__ = [
     "CONFIDENT_SIMILARITY",
@@ -64,8 +68,6 @@ logger = logging.getLogger(__name__)
 #: on a real five-month Netflix export: at 0.85, every wrong match in that file lands in
 #: the review queue and every right one goes straight through.
 CONFIDENT_SIMILARITY: Final = 0.85
-#: A match this close is the answer; the remaining spellings are not searched for.
-_EXACT_ENOUGH: Final = 0.99
 #: How deep into one search's answers a candidate can be. Past ten, TMDb is listing
 #: things that share a word.
 _SEARCH_DEPTH: Final = 10
@@ -76,6 +78,12 @@ MAX_ALTERNATIVES: Final = 4
 #: title; five in a row means the service is down and the rest of the file would be
 #: review entries about nothing.
 _MAX_CONSECUTIVE_FAILURES: Final = 5
+#: How many searches one import may make per row it holds, counting the retries a
+#: spelling costs. Without it a file of two thousand titles TMDb has never heard of
+#: costs six searches each — twelve thousand requests to a free service, for one
+#: upload. Past the budget the remaining rows are handed to the review queue unresolved,
+#: which is what this module does with everything it cannot settle.
+SEARCHES_PER_TITLE: Final = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,11 +142,18 @@ class TitleResolver:
     can carry one person's file into another's results.
     """
 
-    def __init__(self, metadata: Metadata, language: str) -> None:
+    def __init__(self, metadata: Metadata, language: str, titles: int = 1) -> None:
+        """Build a resolver for ``titles`` rows, which is what its budget is made of."""
         self._metadata = metadata
         self._language = language
         self._searches: dict[tuple[str, str], tuple[Title, ...]] = {}
         self._failures = 0
+        self._budget = max(titles, 1) * SEARCHES_PER_TITLE
+
+    @property
+    def budget_left(self) -> int:
+        """How many searches this import may still make."""
+        return self._budget
 
     async def resolve(self, item: WatchedItem) -> Resolution:
         """Identify one row, or hand it to the review queue.
@@ -166,7 +181,7 @@ class TitleResolver:
             return Resolution(item=item)
         candidate = Candidate(
             ref=found.ref,
-            title=found.title,
+            title=clean_title(found.title),
             year=found.year,
             poster_path=found.poster_path,
             similarity=1.0,
@@ -186,8 +201,10 @@ class TitleResolver:
                 if _settled(found):
                     break
             if _settled(found):
-                # An exact answer settles the row: the other media type and the other
-                # spellings would only cost requests to confirm it.
+                # A confident answer settles the row: the other media type and the
+                # other spellings would only cost requests to confirm it. The bar is
+                # the same one that decides whether a row is written down at all, so
+                # nothing that would have gone to the review queue stops early.
                 break
         if not found:
             return Resolution(item=item)
@@ -202,7 +219,7 @@ class TitleResolver:
         return [
             Candidate(
                 ref=title.ref,
-                title=title.title,
+                title=clean_title(title.title),
                 year=title.year,
                 poster_path=title.poster_path,
                 similarity=_similarity(wanted, title),
@@ -216,6 +233,11 @@ class TitleResolver:
         cached = self._searches.get(key)
         if cached is not None:
             return cached
+        if self._budget <= 0:
+            # Out of budget: the row is not searched for and joins the review queue
+            # like any other the matcher would not settle.
+            return ()
+        self._budget -= 1
         query = SearchQuery(
             title=spelling,
             kind=kind,
@@ -239,9 +261,22 @@ class TitleResolver:
             raise MetadataDownError
 
 
+def clean_title(value: str) -> str:
+    """Return a TMDb title reduced to one bounded line of printable text.
+
+    TMDb's titles are community-editable, and from here one travels into a database
+    column, a console, and the engagement lines of a model's prompt. Nothing here can
+    stop a title being odd; what it stops is a title that is four kilobytes long or
+    that carries the newlines a prompt's section headers are made of — the same
+    treatment ``tindarr.swipe.hybrid`` gives the mood, for the same reason.
+    """
+    printable = "".join(character if character.isprintable() else " " for character in value)
+    return " ".join(printable.split())[:MAX_FIELD_LENGTH].strip()
+
+
 def _settled(found: Sequence[Candidate]) -> bool:
     """Whether one of the candidates is close enough to stop looking."""
-    return any(candidate.similarity >= _EXACT_ENOUGH for candidate in found)
+    return any(candidate.confident for candidate in found)
 
 
 def _kinds(hint: MediaKind | None) -> tuple[MediaKind, ...]:

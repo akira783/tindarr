@@ -38,6 +38,7 @@ __all__ = [
     "count_pending",
     "create",
     "decide",
+    "delete",
     "finish",
     "get",
     "get_review",
@@ -55,6 +56,9 @@ type ReviewStatus = Literal["pending", "accepted", "rejected"]
 MAX_STORED_CANDIDATES: Final = 5
 #: Longest stored row text. The parser already cuts a field; this is the backstop.
 _MAX_QUERY_LENGTH: Final = 300
+#: Rows per INSERT. SQLite binds one parameter per column per row and refuses past
+#: 32 766 of them, which twelve columns reach at about 2 700 rows.
+_INSERT_CHUNK: Final = 500
 
 
 class ReviewCandidate(BaseModel):
@@ -143,7 +147,11 @@ class ReviewEntryRecord:
         if not isinstance(rows, list):  # pragma: no cover - same
             return ()
         found: list[ReviewCandidate] = []
-        for row in cast("list[object]", rows):
+        # Capped on the way out as well as on the way in. The write caps the list at
+        # five; this column is a string an operator can edit, and a review queue that
+        # renders fifty thousand posters because somebody widened a JSON array is a
+        # console nobody can open.
+        for row in cast("list[object]", rows)[:MAX_STORED_CANDIDATES]:
             try:
                 found.append(ReviewCandidate.model_validate(row))
             except ValidationError:
@@ -228,6 +236,14 @@ async def finish(  # noqa: PLR0913 - one keyword per column an outcome fills in
     )
 
 
+async def delete(connection: AsyncConnection, user_id: str, import_id: str) -> bool:
+    """Remove one of **this user's** imports, and with it its review queue."""
+    result = await connection.execute(
+        imports.delete().where(imports.c.id == import_id).where(imports.c.user_id == user_id)
+    )
+    return result.rowcount == 1
+
+
 async def get(connection: AsyncConnection, user_id: str, import_id: str) -> ImportRecord | None:
     """Return one of **this user's** imports, or ``None``."""
     statement = (
@@ -299,7 +315,12 @@ async def queue_reviews(
     ]
     if not values:
         return 0
-    await connection.execute(import_reviews.insert().values(values))
+    # Chunked: SQLite binds every column of every row as a parameter and refuses past
+    # 32 766 of them. Two thousand entries of twelve columns is within that today and
+    # would not be after one more column.
+    for start in range(0, len(values), _INSERT_CHUNK):
+        chunk = values[start : start + _INSERT_CHUNK]
+        await connection.execute(import_reviews.insert().values(chunk))
     return len(values)
 
 
@@ -337,21 +358,20 @@ async def count_pending(connection: AsyncConnection, user_id: str, import_id: st
 
 
 async def get_review(
-    connection: AsyncConnection, user_id: str, entry_id: str, import_id: str | None = None
+    connection: AsyncConnection, user_id: str, entry_id: str, import_id: str
 ) -> ReviewEntryRecord | None:
-    """Return one of **this user's** review entries, or ``None``.
+    """Return one of **this user's** review entries, in that import, or ``None``.
 
-    ``import_id`` is the path the client asked through. It is checked rather than
-    trusted: the entry id already scopes to its owner, and an entry answered under
-    another import's path is a client that has lost track of which queue it is in.
+    Both scopes are required rather than defaulted. The entry id alone already keeps
+    accounts apart, and a security predicate with a default is a check that the next
+    caller silently skips.
     """
     statement = (
         import_reviews.select()
         .where(import_reviews.c.id == entry_id)
         .where(import_reviews.c.user_id == user_id)
+        .where(import_reviews.c.import_id == import_id)
     )
-    if import_id is not None:
-        statement = statement.where(import_reviews.c.import_id == import_id)
     row = (await connection.execute(statement)).one_or_none()
     return None if row is None else _to_review(row)
 
@@ -363,7 +383,7 @@ async def decide(  # noqa: PLR0913 - a compare-and-set names every part of itsel
     *,
     status: ReviewStatus,
     now: datetime,
-    import_id: str | None = None,
+    import_id: str,
 ) -> bool:
     """Answer one pending entry, once. Says whether it was still open.
 
@@ -374,10 +394,9 @@ async def decide(  # noqa: PLR0913 - a compare-and-set names every part of itsel
         update(import_reviews)
         .where(import_reviews.c.id == entry_id)
         .where(import_reviews.c.user_id == user_id)
+        .where(import_reviews.c.import_id == import_id)
         .where(import_reviews.c.status == "pending")
     )
-    if import_id is not None:
-        statement = statement.where(import_reviews.c.import_id == import_id)
     result = await connection.execute(statement.values(status=status, decided_at=now))
     return result.rowcount == 1
 

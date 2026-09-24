@@ -29,6 +29,7 @@ from tindarr.storage.tables import watch_history
 
 __all__ = [
     "answered_refs",
+    "delete_import",
     "delete_source",
     "engagements",
     "list_for_user",
@@ -72,6 +73,7 @@ async def record(
             "episodes_total": row.episodes_total,
             "rating": row.rating,
             "last_watched_at": row.last_watched_at,
+            "import_id": row.import_id,
             "created_at": now,
         }
         for row in rows
@@ -94,6 +96,7 @@ async def record(
                     "episodes_total",
                     "rating",
                     "last_watched_at",
+                    "import_id",
                 )
             },
         )
@@ -149,11 +152,26 @@ async def engagements(connection: AsyncConnection, user_id: str) -> tuple[Engage
     return tuple(engagement for engagement in found if engagement is not None)
 
 
+async def delete_import(connection: AsyncConnection, user_id: str, import_id: str) -> int:
+    """Forget the rows **one upload** wrote for this user; return how many went.
+
+    Per import and per user, not per format. A household that imported two Netflix
+    exports and deletes the first must keep the second's work, and a row both of them
+    mention belongs to whichever wrote it last — the upsert says so, and this follows it.
+    """
+    result = await connection.execute(
+        delete(watch_history)
+        .where(watch_history.c.user_id == user_id)
+        .where(watch_history.c.import_id == import_id)
+    )
+    return result.rowcount
+
+
 async def delete_source(connection: AsyncConnection, user_id: str, source: HistorySource) -> int:
     """Forget everything one source told us about this user; return how many rows went.
 
-    This is what undoing an import means. It is deliberately per source and per user:
-    removing a Netflix import leaves the calibration answers and the IMDb ratings alone.
+    For the rows no upload owns — the calibration grid's — and for anything written
+    before an import stamped its own id on what it wrote.
     """
     result = await connection.execute(
         delete(watch_history)
@@ -186,6 +204,7 @@ def _to_row(row: Row[tuple[Any, ...]]) -> WatchedTitle | None:
         episodes_total=row.episodes_total,
         rating=row.rating,
         last_watched_at=row.last_watched_at,
+        import_id=row.import_id,
     )
 
 

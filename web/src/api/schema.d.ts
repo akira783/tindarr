@@ -1687,7 +1687,8 @@ export interface components {
             queued: number;
             /**
              * @description Rows read and deliberately dropped, by reason: `supplemental` (trailers and
-             *     recaps), `empty`, `not_a_title`, `no_id`, `over_limit`.
+             *     recaps), `empty`, `not_a_title`, `no_id`, `over_limit` (past the titles one
+             *     import may cost), `rows_over_limit` (past the rows one file may hold).
              */
             skipped: {
                 [key: string]: number;

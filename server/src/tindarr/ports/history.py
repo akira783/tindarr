@@ -97,6 +97,11 @@ class WatchedTitle:
     #: Letterboxd do; a viewing history does not.
     rating: float | None = None
     last_watched_at: datetime | None = None
+    #: Which upload wrote this row. ``None`` for a calibration tick, which came from no
+    #: file. It is what makes forgetting **one** import possible: without it the undo
+    #: would have to delete every row of that format and would take a second import's
+    #: work with it.
+    import_id: str | None = None
 
     def as_engagement(self) -> Engagement | None:
         """Return this row as the engine's ``Engagement``, or ``None`` when it is not one.

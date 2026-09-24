@@ -6,8 +6,10 @@ vote, and an upload is never kept.
 """
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tests.support import FakeClock
@@ -25,8 +27,8 @@ from tindarr.storage import imports as import_repository
 from tindarr.storage import users as user_repository
 from tindarr.storage.db import write_transaction
 from tindarr.storage.settings import SettingsStore
+from tindarr.storage.tables import metadata as schema
 from tindarr.swipe.calibration import GridTick
-from tindarr.swipe.votes import VOTE_VALUES
 from tindarr.swipe.watched import GridService, ImportService, household
 
 pytestmark = pytest.mark.anyio
@@ -37,6 +39,34 @@ NETFLIX = (
     b'"Heroes: Saison 1: Genesis","9/10/26"\n'
     b'"Heroes: Saison 1: Don\'t Look Back","9/11/26"\n'
 )
+#: One row whose episode name exists nowhere but in the file.
+NAMED_EPISODE = b'Title,Date\n"Heroes: Saison 1: Genesis","9/10/26"\n'
+
+
+def _files(root: Path) -> set[str]:
+    """Every file under the data directory, by name."""
+    return {path.name for path in root.rglob("*") if path.is_file()}
+
+
+async def _row_counts(engine: AsyncEngine) -> dict[str, int]:
+    """How many rows every table holds, so a test can say which ones an action moved."""
+    async with engine.connect() as connection:
+        return {
+            table.name: (
+                await connection.execute(select(func.count()).select_from(table))
+            ).scalar_one()
+            for table in schema.sorted_tables
+        }
+
+
+async def _dump_everything(engine: AsyncEngine) -> str:
+    """Every value in every table, as one string. What "it is not stored" is checked on."""
+    parts: list[str] = []
+    async with engine.connect() as connection:
+        for table in schema.sorted_tables:
+            for row in (await connection.execute(table.select())).all():
+                parts.extend(str(value) for value in row)
+    return "\n".join(parts)
 
 
 def _famous(tmdb_id: int) -> Title:
@@ -234,7 +264,7 @@ class TestOneUserOnly:
             )
         assert entries
         with pytest.raises(ProblemError) as failure:
-            await imports.reject(other_user, entries[0].id)
+            await imports.reject(other_user, entries[0].id, entries[0].import_id)
         assert failure.value.code == "not_found"
 
 
@@ -257,20 +287,19 @@ class TestRunningAnImport:
             (TitleRef("tv", 1639), 2, 78)
         ]
 
-    async def test_nothing_it_writes_is_a_vote(
+    async def test_nothing_it_writes_touches_any_table_but_its_own(
         self, engine: AsyncEngine, imports: ImportService, user: str
     ) -> None:
+        # The claim is not "no value looks like a vote" — a type checker proves that.
+        # It is that an import writes into three tables and no others, so nothing it
+        # does can reach a statistic, a vote count or the deck's calibration progress.
+        before = await _row_counts(engine)
         await run_import(imports, user)
+        after = await _row_counts(engine)
+        touched = {name for name, count in after.items() if count != before.get(name)}
+        assert touched == {"watch_history", "imports"}
         async with engine.connect() as connection:
-            rows = await history_repository.list_for_user(connection, user)
-            engagements = await history_repository.engagements(connection, user)
-        # An import produces history and engagement, and no vote vocabulary at all: no
-        # value here is one of the five a person can say to a card, so nothing it wrote
-        # can be counted by a stat or replayed by a strategy.
-        assert rows
-        assert engagements
-        said = {row.state for row in rows} | {row.source for row in rows}
-        assert said.isdisjoint(VOTE_VALUES)
+            assert await history_repository.engagements(connection, user)
 
     async def test_a_file_nobody_can_read_leaves_no_row(
         self, engine: AsyncEngine, imports: ImportService, user: str
@@ -280,6 +309,21 @@ class TestRunningAnImport:
         assert failure.value.code == "import_unreadable"
         async with engine.connect() as connection:
             assert await import_repository.list_for_user(connection, user) == []
+
+    async def test_a_server_with_no_capacity_leaves_no_row_behind(
+        self, engine: AsyncEngine, imports: ImportService, user: str
+    ) -> None:
+        # A row opened for work nobody will run stays `running` until the next restart
+        # and refuses every later upload by that user, so the capacity is reserved in
+        # the same transaction as the one-at-a-time rule.
+        with pytest.raises(ProblemError) as failure:
+            await imports.start(user, NETFLIX, lambda: False)
+        assert failure.value.code == "import_in_progress"
+        async with engine.connect() as connection:
+            assert await import_repository.list_for_user(connection, user) == []
+        # And the user can still upload once the server is free again.
+        record, _ = await imports.start(user, NETFLIX, lambda: True)
+        assert record.status == "running"
 
     async def test_only_one_import_at_a_time_per_user(
         self, imports: ImportService, user: str
@@ -334,17 +378,21 @@ class TestRunningAnImport:
         assert found is not None
         assert found.error_code == "internal_error"
 
-    async def test_the_upload_is_never_stored(
-        self, engine: AsyncEngine, imports: ImportService, user: str
+    async def test_the_file_and_its_name_are_never_written_anywhere(
+        self, engine: AsyncEngine, data_dir: Path, imports: ImportService, user: str
     ) -> None:
-        import_id = await run_import(imports, user)
-        async with engine.connect() as connection:
-            record = await import_repository.get(connection, user, import_id)
-        assert record is not None
-        # The row holds counts and a format. Not the bytes, not a name, not a line.
-        stored = " ".join(str(value) for value in (record.source, record.rows_skipped))
-        assert "Heroes" not in stored
-        assert "Genesis" not in stored
+        # Asserted against every column of every table rather than against the two a
+        # bug would have had to pick, and against the data directory: a parse that
+        # spooled the upload to disk is exactly what this is here to catch.
+        files_before = _files(data_dir)
+        await run_import(imports, user, NAMED_EPISODE)
+        dumped = await _dump_everything(engine)
+        # The series title survives — it is what was identified — but the episode name,
+        # which only the file held, does not, and neither does the file name.
+        assert "Heroes" in dumped
+        assert "Genesis" not in dumped
+        assert "history.csv" not in dumped
+        assert _files(data_dir) - files_before <= {"tindarr.db-wal", "tindarr.db-shm"}
 
 
 class TestReviewQueue:
@@ -377,7 +425,7 @@ class TestReviewQueue:
         )
         async with engine.connect() as connection:
             entry = (await import_repository.list_reviews(connection, user, import_id))[0]
-        row = await imports.accept(user, entry.id, TitleRef("tv", 94664))
+        row = await imports.accept(user, entry.id, TitleRef("tv", 94664), import_id)
         assert row.source == "netflix"
         assert row.episodes_played == 1
         assert row.episodes_total == 23
@@ -399,7 +447,7 @@ class TestReviewQueue:
         async with engine.connect() as connection:
             entry = (await import_repository.list_reviews(connection, user, import_id))[0]
         with pytest.raises(ProblemError) as failure:
-            await imports.accept(user, entry.id, TitleRef("movie", 999))
+            await imports.accept(user, entry.id, TitleRef("movie", 999), import_id)
         assert failure.value.code == "validation_error"
 
     async def test_rejecting_writes_nothing(
@@ -410,7 +458,7 @@ class TestReviewQueue:
         )
         async with engine.connect() as connection:
             entry = (await import_repository.list_reviews(connection, user, import_id))[0]
-        await imports.reject(user, entry.id)
+        await imports.reject(user, entry.id, import_id)
         async with engine.connect() as connection:
             assert await history_repository.list_for_user(connection, user) == []
             assert await import_repository.count_pending(connection, user, import_id) == 0
@@ -423,13 +471,13 @@ class TestReviewQueue:
         )
         async with engine.connect() as connection:
             entry = (await import_repository.list_reviews(connection, user, import_id))[0]
-        await imports.reject(user, entry.id)
+        await imports.reject(user, entry.id, import_id)
         with pytest.raises(ProblemError):
-            await imports.reject(user, entry.id)
+            await imports.reject(user, entry.id, import_id)
 
     async def test_an_entry_that_does_not_exist(self, imports: ImportService, user: str) -> None:
         with pytest.raises(ProblemError) as failure:
-            await imports.reject(user, "nope")
+            await imports.reject(user, "nope", "nope")
         assert failure.value.code == "not_found"
 
 
@@ -444,6 +492,26 @@ class TestForgetting:
         async with engine.connect() as connection:
             assert await history_repository.list_for_user(connection, user) == []
             assert await import_repository.get(connection, user, import_id) is None
+
+    async def test_it_leaves_a_second_import_of_the_same_format_standing(
+        self, engine: AsyncEngine, imports: ImportService, metadata: InMemoryMetadata, user: str
+    ) -> None:
+        # Two Netflix exports. Deleting the first must not take the second's work with
+        # it, or the counts the console shows for the one that remains become a lie.
+        metadata.search_results = {
+            **metadata.search_results,
+            "Dark": [title(70523, "Dark", kind="tv", popularity=30.0)],
+        }
+        metadata.episode_counts = {**metadata.episode_counts, TitleRef("tv", 70523): 26}
+        first = await run_import(imports, user)
+        second = await run_import(
+            imports, user, b'Title,Date\n"Dark: Saison 1: Geheimnisse","9/10/26"\n'
+        )
+        await imports.forget(user, first)
+        async with engine.connect() as connection:
+            rows = await history_repository.list_for_user(connection, user)
+            assert await import_repository.get(connection, user, second) is not None
+        assert [row.ref for row in rows] == [TitleRef("tv", 70523)]
 
     async def test_it_leaves_the_calibration_answers_standing(
         self, engine: AsyncEngine, imports: ImportService, user: str

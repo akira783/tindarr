@@ -108,6 +108,7 @@ async def resolve_import(
     *,
     language: str,
     now: datetime,
+    import_id: str | None = None,
 ) -> ImportOutcome:
     """Identify a parsed file against TMDb and turn it into history and questions.
 
@@ -115,7 +116,7 @@ async def resolve_import(
     rest of the file would become review entries about a service being down, which is a
     queue nobody can answer.
     """
-    resolver = TitleResolver(metadata, language)
+    resolver = TitleResolver(metadata, language, len(parsed.items))
     merged: dict[TitleRef, _Merged] = {}
     review: list[ReviewEntry] = []
     for item in parsed.items:
@@ -127,7 +128,9 @@ async def resolve_import(
         else:
             review.append(_review_entry(resolution))
     source = _source(parsed.format)
-    watched = await _history(metadata, list(merged.values()), source=source, now=now)
+    watched = await _history(
+        metadata, list(merged.values()), source=source, now=now, import_id=import_id
+    )
     return ImportOutcome(
         format=parsed.format,
         watched=watched,
@@ -163,6 +166,7 @@ async def _history(
     *,
     source: HistorySource,
     now: datetime,
+    import_id: str | None,
 ) -> tuple[WatchedTitle, ...]:
     entries = list(merged)
     totals = await episode_totals(
@@ -178,6 +182,7 @@ async def _history(
             episodes_total=totals.get(entry.ref),
             rating=entry.rating,
             last_watched_at=entry.last_watched_at,
+            import_id=import_id,
             now=now,
         )
         for entry in entries
@@ -215,6 +220,7 @@ def watched_title(  # noqa: PLR0913 - one keyword per fact a source can carry
     episodes_total: int | None = None,
     rating: float | None = None,
     last_watched_at: datetime | None = None,
+    import_id: str | None = None,
     now: datetime,
 ) -> WatchedTitle:
     """Build one history row, with the media server port's own engagement rules.
@@ -239,6 +245,7 @@ def watched_title(  # noqa: PLR0913 - one keyword per fact a source can carry
             episodes_total=episodes_total,
             rating=rating,
             last_watched_at=last_watched_at,
+            import_id=import_id,
         )
     if ref.kind == "tv":
         # A series the file mentions without naming an episode — one Netflix row, no
@@ -255,6 +262,7 @@ def watched_title(  # noqa: PLR0913 - one keyword per fact a source can carry
             year=year,
             rating=rating,
             last_watched_at=last_watched_at,
+            import_id=import_id,
         )
     # A film. The row itself is the evidence: a viewing history records one once
     # somebody has really watched it, and a rating is somebody saying they saw it.
@@ -267,6 +275,7 @@ def watched_title(  # noqa: PLR0913 - one keyword per fact a source can carry
         progress=1.0,
         rating=rating,
         last_watched_at=last_watched_at,
+        import_id=import_id,
     )
 
 

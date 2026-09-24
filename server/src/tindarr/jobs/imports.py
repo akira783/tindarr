@@ -58,9 +58,18 @@ class ImportRunner:
         """How many imports are being identified right now."""
         return len(self._tasks)
 
+    def has_capacity(self) -> bool:
+        """Whether the server could run another import right now.
+
+        Asked **before** the row is created, in the same transaction as the per-user
+        rule: a row opened for work nobody will run stays ``running`` until the next
+        restart and refuses every later upload by that user.
+        """
+        return len(self._tasks) < MAX_CONCURRENT_IMPORTS
+
     def submit(self, record: ImportRecord, parsed: ParsedFile) -> None:
         """Run one import in the background, or refuse because the server is busy."""
-        if len(self._tasks) >= MAX_CONCURRENT_IMPORTS:
+        if not self.has_capacity():
             raise import_in_progress()
         task = asyncio.create_task(self._run(record, parsed), name="tindarr.jobs.import")
         self._tasks.add(task)

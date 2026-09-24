@@ -279,14 +279,6 @@ export function listImports(): Promise<Import[]> {
   return unwrap(api.GET("/api/v1/swipe/imports")).then((result) => result.imports);
 }
 
-export function getImport(importId: string): Promise<Import> {
-  return unwrap(
-    api.GET("/api/v1/swipe/imports/{import_id}", {
-      params: { path: { import_id: importId } },
-    }),
-  );
-}
-
 export function deleteImport(importId: string): Promise<void> {
   return unwrap(
     api.DELETE("/api/v1/swipe/imports/{import_id}", {

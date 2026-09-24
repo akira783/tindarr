@@ -22,6 +22,7 @@ from tindarr.swipe.imports.netflix import (
 )
 from tindarr.swipe.imports.records import (
     MAX_FIELD_LENGTH,
+    MAX_ROWS,
     MAX_TITLES,
     MAX_UNPACKED_BYTES,
     UnreadableImportError,
@@ -221,18 +222,34 @@ class TestDetection:
         assert parsed.items[0].kind_hint == "movie"
         assert parsed.items[0].year == 2016
 
-    def test_a_letterboxd_archive_prefers_its_ratings(self) -> None:
+    def test_a_letterboxd_archive_merges_its_members_and_keeps_the_opinion(self) -> None:
+        # A real export ships all three. Reading only the first would drop every film
+        # somebody watched and did not rate, which is most of them.
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:
             archive.writestr(
-                "watched.csv", "Date,Name,Year,Letterboxd URI\n2026-01-01,Dune,2021,u\n"
+                "watched.csv",
+                "Date,Name,Year,Letterboxd URI\n2026-01-01,Dune,2021,u\n"
+                "2026-01-02,Arrival,2016,u\n",
             )
             archive.writestr(
-                "ratings.csv", "Date,Name,Year,Letterboxd URI,Rating\n2026-01-01,Arrival,2016,u,5\n"
+                "ratings.csv",
+                "Date,Name,Year,Letterboxd URI,Rating\n2026-01-01,Arrival,2016,u,5\n",
             )
         parsed = detect_and_parse(buffer.getvalue())
         assert parsed.format == "letterboxd"
-        assert [item.query for item in parsed.items] == ["Arrival"]
+        assert sorted(item.query for item in parsed.items) == ["Arrival", "Dune"]
+        rated = next(item for item in parsed.items if item.query == "Arrival")
+        assert rated.rating == 10.0
+
+    def test_an_unreadable_member_does_not_cost_the_archive(self) -> None:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("ratings.csv", "")
+            archive.writestr(
+                "watched.csv", "Date,Name,Year,Letterboxd URI\n2026-01-01,Dune,2021,u\n"
+            )
+        assert [item.query for item in detect_and_parse(buffer.getvalue()).items] == ["Dune"]
 
     def test_an_archive_with_the_export_in_a_folder(self) -> None:
         buffer = io.BytesIO()
@@ -285,6 +302,30 @@ class TestRefusals:
         with pytest.raises(UnreadableImportError):
             detect_and_parse(buffer.getvalue())
 
+    def test_a_zip_that_lies_about_how_big_it_is(self) -> None:
+        # The central directory's sizes are the uploader's, and a reader that stops at
+        # a cap never reaches the end where zipfile would check them. So the number
+        # that has to stop a bomb is the one this parser counts itself.
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("watched.csv", "0" * (MAX_UNPACKED_BYTES + 1))
+        payload = bytearray(buffer.getvalue())
+        honest = (MAX_UNPACKED_BYTES + 1).to_bytes(4, "little")
+        assert payload.count(honest) >= 1
+        payload = bytearray(bytes(payload).replace(honest, (100).to_bytes(4, "little")))
+        with pytest.raises(UnreadableImportError):
+            detect_and_parse(bytes(payload))
+
+    def test_one_budget_for_the_whole_archive_and_not_one_per_member(self) -> None:
+        # Each member is comfortably under the cap; together they are not.
+        half = "0" * (MAX_UNPACKED_BYTES // 2 + 1)
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for index in range(4):
+                archive.writestr(f"f{index}.csv", half)
+        with pytest.raises(UnreadableImportError):
+            detect_and_parse(buffer.getvalue())
+
     def test_an_archive_of_too_many_members(self) -> None:
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:
@@ -292,6 +333,35 @@ class TestRefusals:
                 archive.writestr(f"f{index}.csv", "a\n")
         with pytest.raises(UnreadableImportError):
             detect_and_parse(buffer.getvalue())
+
+    #: Superscripts and full-width digits: ``isdigit`` says yes, ``int`` raises.
+    FAKE_DIGITS = ("\u00b2\u00b2\u00b2\u00b2", "\uff12\uff10\uff11\uff16", "nan")
+
+    @pytest.mark.parametrize("year", FAKE_DIGITS)
+    def test_a_year_that_looks_like_digits_and_is_not_one(self, year: str) -> None:
+        # `str.isdigit()` is true of superscripts, and `int()` then raises: a one-line
+        # CSV must not be able to turn a parser into a 500.
+        payload = f"Date,Name,Year,Letterboxd URI\n2026-01-01,Film,{year},u\n".encode()
+        parsed = detect_and_parse(payload)
+        assert parsed.items[0].year is None or isinstance(parsed.items[0].year, int)
+
+    @pytest.mark.parametrize("rating", ["nan", "inf", "-inf"])
+    def test_a_rating_that_is_not_a_number(self, rating: str) -> None:
+        payload = (
+            f"Date,Name,Year,Letterboxd URI,Rating\n2026-01-01,Film,2016,u,{rating}\n"
+        ).encode()
+        assert detect_and_parse(payload).items[0].rating is None
+
+    def test_a_rating_of_zero_is_a_rating(self) -> None:
+        payload = b"Const,Your Rating,Title,Title Type,Year\ntt1,0,Film,movie,2016\n"
+        # Zero out of ten is an opinion; it just is not one this scale can carry, so it
+        # is dropped rather than read as "no rating" somewhere downstream.
+        assert detect_and_parse(payload).items[0].rating is None
+
+    def test_a_file_cut_at_the_row_cap_says_so(self) -> None:
+        rows = "\n".join(f'"Film {index}","9/10/26"' for index in range(MAX_ROWS + 30))
+        parsed = detect_and_parse(f"Title,Date\n{rows}\n".encode())
+        assert parsed.skipped["rows_over_limit"] == 30
 
     def test_a_file_of_more_titles_than_an_import_may_cost(self) -> None:
         rows = "\n".join(f'"Film {index}","9/10/26"' for index in range(MAX_TITLES + 25))

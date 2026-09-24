@@ -23,8 +23,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Path, Query, Request, status
 
+from tindarr.api.context import RequestContext
 from tindarr.api.deps import Services
-from tindarr.api.security import Context, SharedSession, WebSession
+from tindarr.api.security import Context, Credential, SharedSession, WebSession
 from tindarr.api.v1.models import (
     GridResponse,
     GridSubmitInput,
@@ -51,6 +52,18 @@ EntryId = Annotated[str, Path(description="The queued row.", max_length=64)]
 ReviewLimit = Annotated[int, Query(ge=1, le=100, description="How many entries to return.")]
 GridPage = Annotated[int, Query(ge=1, le=MAX_GRID_PAGE, description="Which wall.")]
 GridSize = Annotated[int, Query(ge=1, le=MAX_GRID_SIZE, description="How many posters.")]
+
+
+def _key(context: RequestContext, session: Credential) -> str:
+    """Return the bucket these two limits count in: the **account**, not the address.
+
+    Every other limit in this server is a pre-authentication one, where the client
+    address is all there is to count. These two are post-authentication writes, and
+    behind a reverse proxy or a NAT a whole household shares one address: keying them
+    by address would let one member spend everybody's budget, and would let a caller
+    who can vary their address spend nothing of their own.
+    """
+    return f"{session.signed_in_user.id}@{context.rate_limit_key}"
 
 
 async def read_upload(request: Request) -> bytes:
@@ -84,10 +97,13 @@ async def start_import(
     request: Request, services: Services, context: Context, session: WebSession
 ) -> ImportResponse:
     """Read an upload, open an import for it, and identify its titles in the background."""
-    services.limits.imports.hit(context.rate_limit_key)
+    services.limits.imports.hit(_key(context, session))
     payload = await read_upload(request)
-    record, parsed = await services.imports.start(session.signed_in_user.id, payload)
-    services.import_runner.submit(record, parsed)
+    runner = services.import_runner
+    record, parsed = await services.imports.start(
+        session.signed_in_user.id, payload, runner.has_capacity
+    )
+    runner.submit(record, parsed)
     return ImportResponse.of(record)
 
 
@@ -194,7 +210,7 @@ async def submit_calibration_grid(
     body: GridSubmitInput, services: Services, context: Context, session: SharedSession
 ) -> GridSubmitResponse:
     """Write the answers as history. Neither answer is a vote."""
-    services.limits.calibration.hit(context.rate_limit_key)
+    services.limits.calibration.hit(_key(context, session))
     ticks = [answer.tick for answer in body.answers]
     recorded = await services.grid.submit(session.signed_in_user.id, ticks)
     return GridSubmitResponse(recorded=recorded)

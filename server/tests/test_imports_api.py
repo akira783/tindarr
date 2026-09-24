@@ -5,6 +5,7 @@ is read, and that nothing in this pair of features can be reached across account
 console-only where it changes something, the caller's own rows where it reads.
 """
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -128,6 +129,23 @@ class TestUploading:
                 | UPLOAD_HEADERS
                 | {"Content-Length": str(MAX_UPLOAD_BYTES + 1)},
             )
+            assert_is_problem(response, 413, "import_too_large")
+
+    def test_a_body_that_never_declared_its_length(self, app: FastAPI) -> None:
+        # The interesting direction: no Content-Length at all (chunked), and a body
+        # past the cap. Only the counter on the stream can stop this one.
+        def chunks() -> Iterator[bytes]:
+            row = b'"Film","9/10/26"\n'
+            yield b"Title,Date\n"
+            for _ in range(MAX_UPLOAD_BYTES // len(row) + 32):
+                yield row
+
+        with console_client(app) as client:
+            csrf = with_tmdb(client, app)
+            response = client.post(
+                IMPORTS, content=chunks(), headers=console_headers(csrf) | UPLOAD_HEADERS
+            )
+            assert "content-length" not in {key.lower() for key in dict(response.request.headers)}
             assert_is_problem(response, 413, "import_too_large")
 
     def test_without_tmdb_nothing_can_be_identified(self, app: FastAPI) -> None:

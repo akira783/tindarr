@@ -192,6 +192,9 @@ novelty band and by a **calibration grid**. Both write the same rows
     server port's own `EngagementState`, with its own thresholds. A series a file
     mentions without naming an episode is recorded as seen and carries **no** state:
     "they watched something of it" is not "they finished it".
+- **Forgetting one.** Every history row names the upload that wrote it, so deleting an
+  import deletes what *it* said and leaves a second import of the same format, the other
+  sources and the grid's answers standing.
 - **The calibration grid** (`tindarr.swipe.calibration`). A wall of famous posters to
   tick, ranked by TMDb vote count rather than by this week's popularity, spread across
   five decades and across what is famous in the household's own language, and capped so

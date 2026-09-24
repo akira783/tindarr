@@ -160,6 +160,32 @@ pairings = Table(
     ),
 )
 
+#: One uploaded file, and what became of it. The file itself is never stored: an import
+#: is somebody's viewing history, and the only copy this server keeps is the titles it
+#: managed to identify. The uploaded name is not stored either — it is a string the
+#: user's own computer chose, it says nothing the format does not, and it would end up
+#: in a console, a log and a backup.
+imports = Table(
+    "imports",
+    metadata,
+    Column("id", Text, primary_key=True),
+    Column("user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("source", Text, nullable=False),
+    Column("status", Text, nullable=False),
+    # What the parser read, what it dropped and why, as JSON. Counts only.
+    Column("rows_read", Integer, nullable=False, server_default="0"),
+    Column("rows_skipped", Text, nullable=False, server_default="{}"),
+    Column("matched", Integer, nullable=False, server_default="0"),
+    Column("queued", Integer, nullable=False, server_default="0"),
+    # A problem code, never a message from a parser and never a line of the file.
+    Column("error_code", Text, nullable=True),
+    Column("created_at", UtcDateTime, nullable=False),
+    Column("finished_at", UtcDateTime, nullable=True),
+    CheckConstraint("source IN ('netflix', 'imdb', 'letterboxd')", name="source"),
+    CheckConstraint("status IN ('running', 'complete', 'failed')", name="status"),
+    CheckConstraint("(status = 'failed') = (error_code IS NOT NULL)", name="error_with_status"),
+)
+
 #: What a user has watched anywhere but this deck: a file import, a calibration grid
 #: tick. Never a vote — the stats and the strategies read ``swipe_votes``, not this —
 #: and never the library either, since nothing here is owned (docs/architecture.md).
@@ -172,6 +198,13 @@ watch_history = Table(
     Column("source", Text, primary_key=True),
     Column("kind", Text, primary_key=True),
     Column("tmdb_id", Integer, primary_key=True),
+    # Which upload wrote this row, so forgetting one import leaves the others standing.
+    # Null for a calibration tick, which came from no file. Not part of the key: two
+    # imports of the same format that mention the same title are one fact about one
+    # household, and the later one owns it.
+    Column(
+        "import_id", Text, ForeignKey("imports.id", ondelete="SET NULL"), nullable=True, index=True
+    ),
     # TMDb's own words about a public film, kept so the batch prompt can name what
     # somebody watched rather than list bare ids.
     Column("title", Text, nullable=False, server_default=""),
@@ -197,32 +230,6 @@ watch_history = Table(
         "'abandoned')",
         name="state",
     ),
-)
-
-#: One uploaded file, and what became of it. The file itself is never stored: an import
-#: is somebody's viewing history, and the only copy this server keeps is the titles it
-#: managed to identify. The uploaded name is not stored either — it is a string the
-#: user's own computer chose, it says nothing the format does not, and it would end up
-#: in a console, a log and a backup.
-imports = Table(
-    "imports",
-    metadata,
-    Column("id", Text, primary_key=True),
-    Column("user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
-    Column("source", Text, nullable=False),
-    Column("status", Text, nullable=False),
-    # What the parser read, what it dropped and why, as JSON. Counts only.
-    Column("rows_read", Integer, nullable=False, server_default="0"),
-    Column("rows_skipped", Text, nullable=False, server_default="{}"),
-    Column("matched", Integer, nullable=False, server_default="0"),
-    Column("queued", Integer, nullable=False, server_default="0"),
-    # A problem code, never a message from a parser and never a line of the file.
-    Column("error_code", Text, nullable=True),
-    Column("created_at", UtcDateTime, nullable=False),
-    Column("finished_at", UtcDateTime, nullable=True),
-    CheckConstraint("source IN ('netflix', 'imdb', 'letterboxd')", name="source"),
-    CheckConstraint("status IN ('running', 'complete', 'failed')", name="status"),
-    CheckConstraint("(status = 'failed') = (error_code IS NOT NULL)", name="error_with_status"),
 )
 
 #: The rows an import refused to guess at. ``query`` is the user's own text, kept so

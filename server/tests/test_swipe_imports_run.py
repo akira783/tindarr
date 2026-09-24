@@ -15,7 +15,12 @@ from tindarr.ports.media_server import ABANDONED_AFTER_DAYS, MOSTLY_WATCHED_RATI
 from tindarr.ports.metadata import ExternalMatch, SearchQuery, Title, TitleDetails
 from tindarr.ports.titles import TitleRef
 from tindarr.swipe.imports.records import ParsedFile, WatchedItem
-from tindarr.swipe.imports.resolve import CONFIDENT_SIMILARITY, MetadataDownError, TitleResolver
+from tindarr.swipe.imports.resolve import (
+    CONFIDENT_SIMILARITY,
+    SEARCHES_PER_TITLE,
+    MetadataDownError,
+    TitleResolver,
+)
 from tindarr.swipe.imports.run import ImportOutcome, resolve_import, watched_title
 
 pytestmark = pytest.mark.anyio
@@ -97,7 +102,7 @@ class TestRanking:
 
     async def test_the_same_search_is_never_paid_for_twice(self) -> None:
         metadata = InMemoryMetadata(search_results={"Heroes": [found(1, "Heroes")]})
-        resolver = TitleResolver(metadata, "en")
+        resolver = TitleResolver(metadata, "en", titles=2)
         await resolver.resolve(WatchedItem("Heroes", "tv"))
         await resolver.resolve(WatchedItem("Heroes", "tv"))
         assert metadata.calls.count("search:Heroes") == 1
@@ -189,6 +194,25 @@ class TestExternalIds:
         assert resolution.best is None
 
 
+class TestBudget:
+    """One upload may not spend a free service's whole afternoon."""
+
+    async def test_a_file_of_titles_tmdb_never_heard_of_stops_searching(self) -> None:
+        # Three searches a row, counting the spellings and the second media type. Past
+        # that the rest of the file is queued unresolved rather than searched for.
+        metadata = InMemoryMetadata()
+        resolver = TitleResolver(metadata, "en", titles=2)
+        for index in range(6):
+            await resolver.resolve(WatchedItem(f"Nothing like this {index}", "movie"))
+        assert len(metadata.calls) == 2 * SEARCHES_PER_TITLE
+        assert resolver.budget_left == 0
+
+    async def test_a_confident_answer_costs_one_search_and_not_six(self) -> None:
+        metadata = InMemoryMetadata(search_results={"Heroes": [found(1, "Heroes")]})
+        await TitleResolver(metadata, "en", titles=1).resolve(WatchedItem("Heroes", "tv"))
+        assert metadata.calls == ["search:Heroes"]
+
+
 class TestGivingUp:
     """A dead TMDb must not turn a file into a queue of questions about nothing."""
 
@@ -197,7 +221,7 @@ class TestGivingUp:
             async def search(self, query: SearchQuery) -> list[Title]:
                 raise ProblemError(502, "metadata_unreachable")
 
-        resolver = TitleResolver(Dead(), "en")
+        resolver = TitleResolver(Dead(), "en", titles=10)
 
         async def whole_file() -> None:
             for index in range(10):
@@ -216,7 +240,7 @@ class TestGivingUp:
                     raise ProblemError(502, "metadata_unreachable")
                 return [found(1, query.title)]
 
-        resolver = TitleResolver(Flaky(), "en")
+        resolver = TitleResolver(Flaky(), "en", titles=10)
         await resolver.resolve(WatchedItem("First", "movie"))
         assert (await resolver.resolve(WatchedItem("Second", "movie"))).confident
 

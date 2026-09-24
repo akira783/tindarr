@@ -132,12 +132,19 @@ The exact rules and numbers for this section are in
   it was served to that user or voted on by them.
 - **Cost abuse.** Each user has a daily generation cap, set by the admin, and one
   running generation at a time. Token usage is recorded in `llm_usage` and shown to the
-  admin. A **file import** is bounded four ways: five uploads an hour per client, eight
-  megabytes per upload (checked against the declared length *and* against the bytes as
-  they arrive), two hundred thousand rows and two thousand distinct titles per file, and
-  one running import per user with two for the whole server. An archive is refused on
-  its own declared sizes before a member is read and again on the running total as it
-  inflates, so a zip bomb never reaches a parser.
+  admin. A **file import** is bounded on every axis it has: five uploads an hour *per
+  account*, eight megabytes per upload (checked against the declared length **and**
+  against the bytes as they arrive, because the first is a claim and the second is the
+  fact), two hundred thousand rows and two thousand distinct titles per file, **three
+  TMDb searches per row** so that one upload cannot spend a free service's afternoon,
+  and one running import per user with two for the whole server — reserved before the
+  row exists, so a refusal leaves nothing behind. An archive is bounded by a running
+  total across **every member it reads**, not by the sizes it declares about itself:
+  those are the uploader's, and a reader that stops at a cap never reaches the point
+  where a ZIP's own checksum would catch the lie. Parsing runs in a worker thread, so
+  one archive cannot stall the requests every other user is making.
+  The calibration grid is rate limited the same way, per account, because it takes any
+  TMDb id and each answer is a row the database keeps.
 - **Imported history.** An import is a file somebody else's computer wrote, and every
   row it produces is keyed on the uploader: `watch_history`, `imports` and
   `import_reviews` are read and written through queries scoped to the session's user,
@@ -269,7 +276,14 @@ The exact rules and numbers for this section are in
   used as a URL, never executed and never allowed to choose tools.
 - **Prompt injection.** Text from TMDb or the user (overview, mood, profile) can steer
   a batch's content, but it cannot reach secrets or other users. The prompt contains
-  no key and no other user's data.
+  no key and no other user's data. The mood and the titles an import stores are reduced
+  to one bounded line of printable text before they are kept, so neither can carry the
+  newlines a forged section header would need.
+- **What the prompt now says about a person.** Since step 4.4 the "already watched"
+  lines also name titles a *file import* identified — "finished it", "gave up on it" —
+  which is a behavioural fact about a household leaving the server for the configured AI
+  provider. It is the point of the import (ADR 0013, point 4) and it is new, so it is
+  written down here rather than left to be discovered.
 - **Images and trailers.** Image URLs are built by the server from TMDb paths and an
   allow-listed base. Trailers are only built from YouTube keys, and the app opens them
   through `youtube-nocookie.com`.
@@ -361,8 +375,8 @@ URLs, and the server calls them. That is intended and restricted to admins.
   account's Tindarr data (console). An import can be forgotten on its own, which deletes
   everything that source told the server about that user and leaves the others standing.
 - **What an import keeps.** The uploaded file is read in the request that carried it and
-  is never written to disk; its **name is never sent**, because the body is the file and
-  not a form. What is stored is the titles that could be identified, the rows that could
+  is never written to disk — not even to a temporary one, because the body *is* the file
+  and no multipart parser is involved; its **name is never sent** for the same reason. What is stored is the titles that could be identified, the rows that could
   not (so somebody can come back and answer them), and counts. A failure is recorded as
   a problem code — never a parser's words and never a line of the file — and no log line
   carries a title, a query, a file name or a user id.
