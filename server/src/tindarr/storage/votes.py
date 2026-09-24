@@ -227,21 +227,27 @@ async def counts_by_user(connection: AsyncConnection) -> dict[str, int]:
 
 
 async def skipped_refs(
-    connection: AsyncConnection, user_id: str, *, now: datetime
+    connection: AsyncConnection, user_id: str, *, now: datetime | None = None
 ) -> frozenset[TitleRef]:
-    """Titles this user said "not now" to, inside the cool-down.
+    """Titles this user said "not now" to; inside the cool-down when ``now`` is given.
 
     Skips are kept out of the vote history — they teach nothing, so nothing should read
     them as an opinion — which means the only thing that can keep a skipped title out of
     the next batch is this set. Past the cool-down it stops being returned and the title
     becomes a candidate again, exactly as the architecture says.
+
+    Without ``now`` it answers the other half of the same question: *every* title this
+    user skipped, whatever its age. The context builder needs both, because a skipped
+    card keeps its row for ever and would otherwise stay in the "already shown" list
+    long after the cool-down let it back into the pool.
     """
     statement = (
         select(votes.c.kind, votes.c.tmdb_id)
         .where(votes.c.user_id == user_id)
         .where(votes.c.value == "skip")
-        .where(votes.c.voted_at > now - timedelta(days=SKIP_COOL_DOWN))
     )
+    if now is not None:
+        statement = statement.where(votes.c.voted_at > now - timedelta(days=SKIP_COOL_DOWN))
     return _refs(await connection.execute(statement))
 
 

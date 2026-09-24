@@ -176,6 +176,7 @@ def _per_user() -> None:
         "taste_profiles",
         sa.Column("user_id", sa.Text(), nullable=False),
         sa.Column("text", sa.Text(), nullable=False),
+        sa.Column("user_text", sa.Text(), server_default="", nullable=False),
         sa.Column("user_edited", sa.Boolean(), server_default=sa.text("0"), nullable=False),
         sa.Column("votes_at_update", sa.Integer(), server_default="0", nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),

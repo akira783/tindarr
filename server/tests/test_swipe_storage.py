@@ -334,8 +334,8 @@ async def test_likes_are_only_like_votes_and_can_be_filtered(engine: AsyncEngine
 async def test_resetting_votes_leaves_the_profile_standing(engine: AsyncEngine) -> None:
     user_id = await _user(engine)
     async with write_transaction(engine) as connection:
-        await profile_repository.save_profile(
-            connection, user_id, "Loves: heists", user_edited=True, votes_at_update=1, now=NOW
+        await profile_repository.save_user_text(
+            connection, user_id, "Loves: heists", votes_at_update=1, now=NOW
         )
         await vote_repository.record(
             connection,
@@ -422,19 +422,21 @@ async def test_finished_jobs_are_purged_and_running_ones_are_not(engine: AsyncEn
 # --- profiles and preferences ---------------------------------------------------------
 
 
-async def test_a_rewrite_never_clears_the_user_edited_flag(engine: AsyncEngine) -> None:
+async def test_a_rewrite_cannot_touch_what_the_user_wrote(engine: AsyncEngine) -> None:
     user_id = await _user(engine)
     async with write_transaction(engine) as connection:
-        await profile_repository.save_profile(
-            connection, user_id, "mine", user_edited=True, votes_at_update=3, now=NOW
+        await profile_repository.save_user_text(
+            connection, user_id, "mine", votes_at_update=3, now=NOW
         )
-        await profile_repository.save_profile(
-            connection, user_id, "the model's", user_edited=False, votes_at_update=9, now=NOW
+        await profile_repository.save_generated(
+            connection, user_id, "the model's", votes_at_update=9, now=NOW
         )
         profile = await profile_repository.read_profile(connection, user_id)
     assert profile is not None
     assert profile.user_edited is True
-    assert profile.text == "the model's"
+    assert profile.user_text == "mine"
+    assert profile.generated == "the model's"
+    assert profile.text == "mine\n\nthe model's"
     assert profile.votes_at_update == 9
 
 
@@ -445,8 +447,8 @@ async def test_a_refresh_error_is_recorded_without_inventing_a_profile(
     async with write_transaction(engine) as connection:
         await profile_repository.set_refresh_error(connection, user_id, "llm_quota", now=NOW)
         failed = await profile_repository.read_profile(connection, user_id)
-        await profile_repository.save_profile(
-            connection, user_id, "written", user_edited=False, votes_at_update=1, now=NOW
+        await profile_repository.save_generated(
+            connection, user_id, "written", votes_at_update=1, now=NOW
         )
         fixed = await profile_repository.read_profile(connection, user_id)
     assert failed is not None

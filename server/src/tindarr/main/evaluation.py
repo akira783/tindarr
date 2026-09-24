@@ -36,6 +36,7 @@ from tindarr.ports.llm import LlmConnection, LlmProvider
 from tindarr.ports.metadata import DiscoverQuery, Metadata
 from tindarr.ports.titles import TitleRef, as_media_kind
 from tindarr.swipe.baselines import PopularBaseline, RandomBaseline
+from tindarr.swipe.engine import build_strategy
 from tindarr.swipe.evaluation import (
     Baseline,
     BaselineError,
@@ -58,7 +59,6 @@ from tindarr.swipe.evaluation.dataset import CatalogEntry
 from tindarr.swipe.evaluation.gate import FLOOR_STRATEGIES
 from tindarr.swipe.evaluation.importing import ImportSummary, VoteImportError, import_votes
 from tindarr.swipe.evaluation.synthetic import SYNTHETIC_NAME, build_synthetic_dataset
-from tindarr.swipe.hybrid import HybridStrategy
 from tindarr.swipe.retrieval import NOVELTY_BANDS, POOL_SIZE, PoolSource, Retrieval
 from tindarr.swipe.strategy import Strategy
 
@@ -181,7 +181,7 @@ def hybrid_strategy(parts: Parts) -> Strategy:
     """Build the engine of ADR 0013: retrieval, then the model."""
     if parts.llm is None:  # pragma: no cover - the caller checks before it builds
         raise EvalError("the hybrid strategy needs an AI provider")
-    return HybridStrategy(parts.retrieval, parts.metadata, parts.llm)
+    return build_strategy(parts.metadata, parts.llm, parts.retrieval)
 
 
 STRATEGIES: Final[Mapping[str, StrategySpec]] = {

@@ -35,7 +35,8 @@ __all__ = [
     "clear_refresh_error",
     "read_preferences",
     "read_profile",
-    "save_profile",
+    "save_generated",
+    "save_user_text",
     "set_refresh_error",
     "update_preferences",
 ]
@@ -50,13 +51,26 @@ MAX_STREAMING_SERVICES: Final = 100
 
 @dataclass(frozen=True, slots=True)
 class TasteProfile:
-    """One row of ``taste_profiles``."""
+    """One row of ``taste_profiles``: what the person wrote, and what was written for them."""
 
-    text: str
+    #: The last rewrite's bullets. Empty until one has run.
+    generated: str
+    #: What the user typed. Nothing but a user edit ever writes it.
+    user_text: str
     user_edited: bool
     votes_at_update: int
     updated_at: datetime
     refresh_error: str | None = None
+
+    @property
+    def text(self) -> str:
+        """The whole profile, the person's own words first.
+
+        The order is the guarantee. A prompt reads this top to bottom, and what somebody
+        said about their own taste is the first thing it sees — and the only part a
+        later rewrite cannot touch, because it lives in another column.
+        """
+        return "\n\n".join(part for part in (self.user_text, self.generated) if part)
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,39 +108,61 @@ async def read_profile(connection: AsyncConnection, user_id: str) -> TasteProfil
     return None if row is None else _to_profile(row)
 
 
-async def save_profile(  # noqa: PLR0913 - one keyword per column a rewrite fills in
+async def save_generated(
+    connection: AsyncConnection, user_id: str, text: str, *, votes_at_update: int, now: datetime
+) -> None:
+    """Store what a rewrite produced, leaving the user's own words exactly as they are."""
+    await _write(
+        connection,
+        user_id,
+        values={"text": text[:MAX_PROFILE_CHARS], "votes_at_update": votes_at_update},
+        now=now,
+    )
+
+
+async def save_user_text(
+    connection: AsyncConnection, user_id: str, text: str, *, votes_at_update: int, now: datetime
+) -> None:
+    """Store what the user wrote about their own taste, and latch the edit.
+
+    ``user_edited`` only ever goes up, because the flag says "a person has had their say
+    here" — which stays true however many rewrites have since run beside it.
+    """
+    await _write(
+        connection,
+        user_id,
+        values={
+            "user_text": text[:MAX_PROFILE_CHARS],
+            "user_edited": True,
+            "votes_at_update": votes_at_update,
+        },
+        now=now,
+    )
+
+
+async def _write(
     connection: AsyncConnection,
     user_id: str,
-    text: str,
     *,
-    user_edited: bool,
-    votes_at_update: int,
+    values: dict[str, object],
     now: datetime,
 ) -> None:
-    """Write the profile, clearing any refresh error the previous attempt left.
-
-    ``user_edited`` only ever goes up: a rewrite passes ``False`` and the stored ``True``
-    stands, because the flag says "a person has had their say here", which stays true
-    however many times a model has since added to it.
-    """
-    statement = sqlite_insert(taste_profiles).values(
-        user_id=user_id,
-        text=text[:MAX_PROFILE_CHARS],
-        user_edited=user_edited,
-        votes_at_update=votes_at_update,
-        updated_at=now,
-        refresh_error=None,
-    )
+    """Upsert some columns of one profile, clearing the last failure."""
+    row: dict[str, object] = {
+        "user_id": user_id,
+        "text": "",
+        "user_text": "",
+        "user_edited": False,
+        "votes_at_update": 0,
+        "updated_at": now,
+        "refresh_error": None,
+    } | values
+    statement = sqlite_insert(taste_profiles).values(row)
     await connection.execute(
         statement.on_conflict_do_update(
             index_elements=["user_id"],
-            set_={
-                "text": statement.excluded.text,
-                "user_edited": taste_profiles.c.user_edited | statement.excluded.user_edited,
-                "votes_at_update": statement.excluded.votes_at_update,
-                "updated_at": statement.excluded.updated_at,
-                "refresh_error": None,
-            },
+            set_={name: statement.excluded[name] for name in values}
+            | {"updated_at": statement.excluded.updated_at, "refresh_error": None},
         )
     )
 
@@ -138,6 +174,7 @@ async def set_refresh_error(
     statement = sqlite_insert(taste_profiles).values(
         user_id=user_id,
         text="",
+        user_text="",
         user_edited=False,
         votes_at_update=0,
         updated_at=now,
@@ -222,7 +259,8 @@ def _services(given: Sequence[int] | None, current: tuple[int, ...]) -> tuple[in
 
 def _to_profile(row: Row[tuple[Any, ...]]) -> TasteProfile:
     return TasteProfile(
-        text=row.text or "",
+        generated=row.text or "",
+        user_text=row.user_text or "",
         user_edited=bool(row.user_edited),
         votes_at_update=int(row.votes_at_update or 0),
         updated_at=row.updated_at,

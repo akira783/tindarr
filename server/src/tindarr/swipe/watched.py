@@ -26,9 +26,7 @@ reach a console, a log line and a backup.
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from http import HTTPStatus
-from typing import Final
 
 import anyio.to_thread
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -37,13 +35,13 @@ from tindarr.connectors import ConnectorService
 from tindarr.core.clock import Clock
 from tindarr.core.errors import ProblemError
 from tindarr.ports.history import IMPORT_SOURCES, HistorySource, WatchedTitle, as_history_source
-from tindarr.ports.metadata import Metadata, TitleFilters
+from tindarr.ports.metadata import Metadata
 from tindarr.ports.titles import TitleRef
 from tindarr.storage import history as history_repository
 from tindarr.storage import imports as import_repository
 from tindarr.storage.db import write_transaction
 from tindarr.storage.imports import ImportRecord, NewReviewEntry, ReviewCandidate
-from tindarr.storage.settings import ContentFilters, SettingsStore
+from tindarr.storage.settings import SettingsStore
 from tindarr.swipe.calibration import (
     CalibrationGrid,
     GridRequest,
@@ -51,6 +49,7 @@ from tindarr.swipe.calibration import (
     GridTitle,
     grid_history,
 )
+from tindarr.swipe.engine import Household, household, tmdb_not_configured
 from tindarr.swipe.imports import (
     ImportOutcome,
     MetadataDownError,
@@ -74,16 +73,6 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
-
-#: The default region when the administrator has not set one. TMDb's own.
-_DEFAULT_REGION: Final = "US"
-
-
-def tmdb_not_configured() -> ProblemError:
-    """409: nothing can be identified without TMDb."""
-    return ProblemError(
-        HTTPStatus.CONFLICT, "tmdb_not_configured", "Configure the TMDb connector first."
-    )
 
 
 def import_unreadable() -> ProblemError:
@@ -116,33 +105,6 @@ def import_in_progress() -> ProblemError:
     """409: this user already has an import running, or the server has enough of them."""
     return ProblemError(
         HTTPStatus.CONFLICT, "import_in_progress", "An import is already running; wait for it."
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class Household:
-    """What the server's settings mean to the swipe engine. Read, never cached."""
-
-    language: str = "en"
-    region: str = _DEFAULT_REGION
-    filters: TitleFilters = field(default_factory=TitleFilters)
-
-
-async def household(settings: SettingsStore) -> Household:
-    """Read the language, the region and the content filters as the engine wants them."""
-    language = (await settings.get("language")).value
-    region = (await settings.get("streaming_region")).value
-    raw = (await settings.get("content_filters")).value
-    stored = ContentFilters.model_validate(raw) if isinstance(raw, dict) else ContentFilters()
-    return Household(
-        language=language if isinstance(language, str) and language else "en",
-        region=region if isinstance(region, str) and region else _DEFAULT_REGION,
-        filters=TitleFilters(
-            exclude_adult=stored.exclude_adult,
-            min_year=stored.min_year,
-            excluded_genres=frozenset(stored.excluded_genres),
-            excluded_original_languages=frozenset(stored.excluded_original_languages),
-        ),
     )
 
 

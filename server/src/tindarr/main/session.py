@@ -48,6 +48,7 @@ from tindarr.main.evaluation import (
 )
 from tindarr.ports.metadata import Metadata, Title
 from tindarr.ports.titles import TitleRef
+from tindarr.swipe.engine import build_strategy
 from tindarr.swipe.evaluation import (
     BatchOutcome,
     CostMeter,
@@ -70,9 +71,14 @@ from tindarr.swipe.evaluation.session import (
     catalog_entry,
     score,
 )
-from tindarr.swipe.hybrid import HybridStrategy
 from tindarr.swipe.retrieval import POOL_SIZE, CandidatePool, Retrieval
-from tindarr.swipe.strategy import CALIBRATION_TARGET, Candidate, Novelty, StrategyContext
+from tindarr.swipe.strategy import (
+    CALIBRATION_TARGET,
+    Candidate,
+    Novelty,
+    Strategy,
+    StrategyContext,
+)
 from tindarr.swipe.votes import Vote
 
 __all__ = ["SESSION_FIXTURES", "SessionOptions", "read_key", "run_session", "session_plan"]
@@ -281,7 +287,7 @@ async def run_session(
     metadata = CountingMetadata(TmdbMetadata(live_key(), transport=wire), meter)
     llm = CountingLlmProvider(llm_provider_factory(wire)(connection), meter)
     watcher = PoolWatcher()
-    strategy = HybridStrategy(watcher.watching(Retrieval(metadata, POOL_SIZE)), metadata, llm)
+    strategy = build_strategy(metadata, llm, watcher.watching(Retrieval(metadata, POOL_SIZE)))
     deck = _Deck(store, meter, watcher, seed=seed.votes if seed is not None else ())
     outcomes: list[BatchOutcome] = []
     try:
@@ -317,7 +323,7 @@ def _store(target: Path, options: SessionOptions, seed: _Seed | None) -> Session
 
 
 async def _deal(  # noqa: PLR0913, PLR0917 - the loop's six collaborators, at one call site
-    strategy: HybridStrategy,
+    strategy: Strategy,
     metadata: Metadata,
     deck: _Deck,
     options: SessionOptions,
@@ -360,7 +366,7 @@ async def _deal(  # noqa: PLR0913, PLR0917 - the loop's six collaborators, at on
 
 
 async def _batch(
-    strategy: HybridStrategy,
+    strategy: Strategy,
     deck: _Deck,
     options: SessionOptions,
     index: int,

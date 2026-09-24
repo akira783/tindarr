@@ -408,14 +408,20 @@ jobs = Table(
     CheckConstraint("(status = 'failed') = (error_code IS NOT NULL)", name="error_with_status"),
 )
 
-#: The "Loves / Avoids / Nuances" bullets, per user. ``user_edited`` is the flag a later
-#: rewrite reads and never overrules: what somebody wrote about their own taste is not
-#: something a model gets to contradict (roadmap 4.3).
+#: The "Loves / Avoids / Nuances" bullets, per user.
+#:
+#: Two columns rather than one, and that is what makes "a rewrite never contradicts what
+#: the user wrote" a mechanism instead of an instruction in a prompt. ``user_text`` is
+#: what the person typed and nothing else ever writes it; ``text`` is what the last
+#: rewrite produced. The profile the engine reads is the two of them, the person's
+#: first. A model that ignores its instructions can therefore produce a worse second
+#: half, never a rewritten first one.
 taste_profiles = Table(
     "taste_profiles",
     metadata,
     Column("user_id", Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
     Column("text", Text, nullable=False),
+    Column("user_text", Text, nullable=False, server_default=""),
     Column("user_edited", Boolean, nullable=False, server_default=false()),
     # How many votes the user had when this text was written, so the console can say
     # "twelve votes since the last rewrite" without counting anything twice.
