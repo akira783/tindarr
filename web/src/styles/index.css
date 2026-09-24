@@ -652,6 +652,14 @@ select:disabled {
   margin-block: var(--space);
 }
 
+/* The key on a button reads as the button does. On the primary one, the muted
+   grey of a plain badge is grey on blue, which is not a contrast. */
+.btn .badge {
+  color: inherit;
+  border-color: currentcolor;
+  opacity: 0.85;
+}
+
 .verdicts {
   gap: 0.5rem;
 }

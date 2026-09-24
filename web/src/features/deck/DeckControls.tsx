@@ -119,9 +119,9 @@ export function DeckControls({
             {t("deck.controls.calibrationProgress", {
               done: calibration.done,
               target: calibration.target,
-            })}{" "}
-            {t("deck.controls.calibrationHint")}
+            })}
           </p>
+          <p className="hint">{t("deck.controls.calibrationHint")}</p>
         </div>
       )}
     </section>

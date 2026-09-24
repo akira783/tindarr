@@ -53,7 +53,12 @@ const projects = KNOWN_TARGETS.filter((name) => env(`E2E_${name}_URL`) !== undef
     return {
       name: name.toLowerCase().replace("_", "-"),
       // Plex is set up and signed in to through plex.tv, not a password: its own file.
-      testMatch: options.mediaKind === "plex" ? "**/plex.spec.ts" : "**/console.spec.ts",
+      // The two files of the other targets are ordered by path, and that order is a
+      // dependency: `console.spec.ts` claims the server `deck.spec.ts` then swipes on.
+      testMatch:
+        options.mediaKind === "plex"
+          ? "**/plex.spec.ts"
+          : ["**/console.spec.ts", "**/deck.spec.ts"],
       use: { baseURL, ...options },
     };
   },

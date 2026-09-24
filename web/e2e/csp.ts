@@ -31,8 +31,16 @@ export const VIOLATIONS_KEY = "__tindarrCspViolations";
  */
 export const REPORT_BINDING = "__tindarrOnCspViolation";
 
-/** Injected before any page script runs: records what the browser refuses. */
+/**
+ * Injected before any page script runs: records what the browser refuses.
+ *
+ * Only in the top-level document. Playwright injects this into every frame, and
+ * the deck frames a third party's player (roadmap 4.6) whose own policy is its
+ * own business — a report from inside it says nothing about the console and
+ * would fail a test for somebody else's page.
+ */
 export const collectorScript = `(() => {
+  if (window.self !== window.top) return;
   const store = [];
   Object.defineProperty(window, ${JSON.stringify(VIOLATIONS_KEY)}, { value: store });
   document.addEventListener("securitypolicyviolation", (event) => {

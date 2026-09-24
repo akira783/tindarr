@@ -46,6 +46,10 @@ describe("the end-to-end CSP helper", () => {
     );
   });
 
+  it("stays out of a third party's frame, whose policy is not the console's", () => {
+    expect(collectorScript).toContain("window.self !== window.top");
+  });
+
   it("also hands each violation to the test process, so a navigation loses none", () => {
     // The per-document array dies with its document; the binding does not.
     expect(collectorScript).toContain(REPORT_BINDING);
