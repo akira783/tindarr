@@ -272,6 +272,14 @@ and concurrency, the region's streaming providers (TMDb, cached), the user's own
 and the `subscribed` flag on card providers. Console: AI usage page. *(The import and
 calibration screens shipped with 4.4.)*
 
+**4.6 A swipe page in the web console.** Decided on 2026-09-24, outside the original
+plan, which kept swiping for the app (steps 6–7). The console gets a deck: the four
+verdicts by keyboard and mouse, a "not now" button, provider and rating badges, the
+trailer, and the request dialog on a like. No touch gestures, no notifications — those
+stay with the app. Two reasons: the owner can swipe from a browser weeks before an APK
+exists, and every session grows the vote set the engine is judged on, which is the
+shortage ADR 0013's measurements ran into.
+
 **Check.**
 
 - ✅ The harness runs in CI on the fixture votes and prints its metrics; a strategy change
