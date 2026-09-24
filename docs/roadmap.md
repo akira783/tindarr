@@ -295,11 +295,21 @@ which needs the stored cards of 4.5 —
   is the state a retry loop is in.
 - Console: the AI usage page. *(The import and calibration screens shipped with 4.4.)*
 
-One thing moved in the contract: `GET /swipe/deck` gains a documented `503`. Its `502`
-lists the AI provider's failures, which is the case that almost never reaches it — a
-model that fails costs the rationales and not the batch, because the retrieved pool is
-served in its own order. What does stop a generation is TMDb refusing the genre list a
-content filter needs.
+Three things moved in the contract, all of them because the implementation found them
+wrong rather than because it wanted room:
+
+- `GET /swipe/deck` gains a documented **`503`**. Its `502` lists the AI provider's
+  failures, which is the case that almost never reaches it — a model that fails costs
+  the rationales and not the batch, because the retrieved pool is served in its own
+  order. What does stop a generation is TMDb refusing the genre list a content filter
+  needs, and that is a `metadata_unreachable`.
+- `GET /swipe/providers` answered **`503`** where the contract said `502`; the shared
+  `metadata_unreachable` has been a `503` since step 3, so it was the contract that was
+  out of step.
+- `Deck` gains **`exhausted`**. A blank deck can mean "no cards yet" or "the pool had
+  nothing", and a client that cannot tell them apart shows the same spinner for both.
+
+Everything else the contract already said is what shipped.
 
 **4.6 A swipe page in the web console.** ← next. Decided on 2026-09-24, outside the original
 plan, which kept swiping for the app (steps 6–7). The console gets a deck: the four
