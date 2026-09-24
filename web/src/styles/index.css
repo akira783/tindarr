@@ -563,6 +563,9 @@ input[aria-invalid="true"] {
   letter-spacing: 0.15em;
   margin: 0;
   color: var(--text);
+  /* A code is one word with no break in it, and it is set wide: on a narrow
+     screen it has to be allowed to break rather than push the page out. */
+  overflow-wrap: anywhere;
 }
 
 .code-label {
