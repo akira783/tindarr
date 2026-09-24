@@ -199,10 +199,20 @@ class ProfileService:
         await self._fail(user, job_id, code)
 
     async def _fail(self, user: User, job_id: str, code: str) -> None:
+        """Close a rewrite that produced nothing, and stop it being asked for again.
+
+        The debounce counter moves even though nothing was written. It counts *attempts*
+        per ten opinions, not successes: leaving it where it was makes every later vote
+        look like the tenth new one, so a provider that is down turns one swiping
+        session into one paid rewrite per swipe.
+        """
         now = self._clock.now()
         async with write_transaction(self._engine) as connection:
+            votes = await vote_repository.count(connection, user.id)
             await job_repository.fail(connection, job_id, code=code, now=now)
-            await profile_repository.set_refresh_error(connection, user.id, code, now=now)
+            await profile_repository.set_refresh_error(
+                connection, user.id, code, votes_at_update=votes, now=now
+            )
             await usage_repository.record_failure(connection, user.id, now=now)
         logger.info("a profile rewrite stopped early", extra={"reason": code})
 

@@ -9,6 +9,7 @@ than not at all, and the "not now" that has to come back in sixty days and not b
 
 import json
 import uuid
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -34,12 +35,18 @@ from tests.support.requests_backend import seerr_user
 from tests.support.upstream import ADMIN_ID
 from tests.test_contract import assert_is_problem, assert_matches_contract
 from tests.test_swipe_api import configure, generate, item, vote
+from tests.test_swipe_jobs import exclude_horror
 from tindarr.core.errors import PendingError
 from tindarr.storage import users as user_repository
 from tindarr.storage.usage import PROVIDER_CACHE_LIFETIME
 from tindarr.storage.users import User
 from tindarr.storage.votes import SKIP_COOL_DOWN
-from tindarr.swipe.deck import GENERATION_RETRY_MS, DeckService
+from tindarr.swipe.deck import (
+    EXHAUSTED_COOL_OFF,
+    FAILURE_COOL_OFF,
+    GENERATION_RETRY_MS,
+    DeckService,
+)
 from tindarr.swipe.engine import DECK_SIZE, DeckRequest
 from tindarr.swipe.generation import BatchGenerator
 
@@ -400,3 +407,166 @@ class TestTheBusyServer:
             # failure is silent on the next poll: the 500 already reported it once.
             after = client.get(DECK)
         assert after.status_code == 202
+
+
+class TestWhatTheReviewFound:
+    """The five ways the deck could spend or lose something, each pinned by a test.
+
+    Every one of these was found by an adversarial review of the lot rather than by a
+    failing test, which is why they are grouped: the shape they share is that the happy
+    path is untouched and the damage only shows on the second or the hundredth call.
+    """
+
+    def test_a_failing_provider_does_not_spend_the_day_in_half_a_minute(
+        self, app: FastAPI, clock: FakeClock, outside: FakeOutside
+    ) -> None:
+        with console_client(app) as client:
+            csrf = configure(client, app)
+            exclude_horror(client, csrf)
+            outside.tmdb.offline = True
+            for _ in range(6):
+                client.get(DECK)
+                run(client, services_of(app).batch_runner.drain)
+            spent = client.get(f"{API}/admin/usage").json()["days"]
+            clock.advance(FAILURE_COOL_OFF.total_seconds() + 1)
+            client.get(DECK)
+            run(client, services_of(app).batch_runner.drain)
+            after = client.get(f"{API}/admin/usage").json()["days"]
+        # Six polls, one generation: the rest met the cool-off. Past it, one more.
+        assert spent[0]["generations"] == 1
+        assert after[0]["generations"] == 2
+
+    def test_an_empty_first_batch_is_not_a_blank_deck_for_ever(
+        self, app: FastAPI, clock: FakeClock, outside: FakeOutside
+    ) -> None:
+        outside.tmdb.discover.clear()
+        outside.tmdb.discovered = []
+        with console_client(app) as client:
+            configure(client, app)
+            client.get(DECK)
+            run(client, services_of(app).batch_runner.drain)
+            blank = client.get(DECK)
+            clock.advance(EXHAUSTED_COOL_OFF.total_seconds() + 60)
+            assert web_login(client).status_code == 200
+            again = client.get(DECK)
+        assert blank.status_code == 200
+        assert blank.json()["cards"] == []
+        # The client is told *why* it is blank rather than left to guess.
+        assert blank.json()["exhausted"] is True
+        # And the deck tries again by itself: a pool is not empty for ever.
+        assert again.status_code == 202
+
+    def test_a_queued_vote_cannot_overwrite_a_newer_opinion(
+        self, app: FastAPI, clock: FakeClock
+    ) -> None:
+        with console_client(app) as client:
+            csrf = configure(client, app)
+            card = generate(client, app).json()["cards"][0]
+            served_at = clock.now()
+            clock.advance(3600)
+            fresh = client.post(
+                f"{API}/swipe/votes",
+                json={
+                    "votes": [
+                        {"client_vote_id": str(uuid.uuid4()), "card_id": card["id"], "vote": "like"}
+                    ]
+                },
+                headers=console_headers(csrf),
+            )
+            assert fresh.status_code == 200, fresh.text
+            # The same card, answered three weeks ago on a phone that was in a drawer.
+            late = client.post(
+                f"{API}/swipe/votes",
+                json={
+                    "votes": [
+                        {
+                            "client_vote_id": str(uuid.uuid4()),
+                            "card_id": card["id"],
+                            "vote": "dislike",
+                            # After the card was served, before the answer above.
+                            "voted_at": (served_at + timedelta(minutes=1)).isoformat(),
+                        }
+                    ]
+                },
+                headers=console_headers(csrf),
+            )
+            assert late.status_code == 200, late.text
+            stats = client.get(f"{API}/swipe/stats").json()
+        assert stats["likes"] == 1
+        assert stats["dislikes"] == 0
+
+    def test_a_backdated_skip_does_not_shorten_its_own_cool_down(
+        self, app: FastAPI, outside: FakeOutside
+    ) -> None:
+        with console_client(app) as client:
+            csrf = configure(client, app)
+            first = generate(client, app).json()["cards"]
+            skipped = {card["tmdb_id"] for card in first}
+            response = client.post(
+                f"{API}/swipe/votes",
+                json={
+                    "votes": [
+                        {
+                            "client_vote_id": str(uuid.uuid4()),
+                            "card_id": card["id"],
+                            "vote": "skip",
+                            # Long before the card existed, which is the whole point.
+                            "voted_at": "1970-01-01T00:00:00Z",
+                        }
+                        for card in first
+                    ]
+                },
+                headers=console_headers(csrf),
+            )
+            assert response.status_code == 200, response.text
+            outside.openai.answers = [_answer(FILMS[:10])]
+            outside.openai.calls = 0
+            client.get(DECK)
+            run(client, services_of(app).batch_runner.drain)
+            after = client.get(DECK).json()["cards"]
+        assert not skipped & {card["tmdb_id"] for card in after}
+
+    def test_one_queue_of_likes_pages_all_the_way_through(self, app: FastAPI) -> None:
+        with console_client(app) as client:
+            csrf = configure(client, app)
+            cards = generate(client, app).json()["cards"]
+            # One submission: every item is stored at the same instant, which is what
+            # a timestamp-only cursor cannot page past.
+            answer_all(client, csrf, cards, value="like")
+            seen: list[int] = []
+            cursor: str | None = None
+            for _ in range(5):
+                params: dict[str, Any] = {"limit": 4}
+                if cursor is not None:
+                    params["cursor"] = cursor
+                page = client.get(f"{API}/swipe/likes", params=params).json()
+                seen.extend(like["tmdb_id"] for like in page["likes"])
+                cursor = page["next_cursor"]
+                if cursor is None:
+                    break
+        assert len(seen) == len(set(seen)) == len(cards)
+
+    def test_a_model_outage_is_counted_even_though_the_deck_survives_it(
+        self, app: FastAPI, outside: FakeOutside
+    ) -> None:
+        outside.openai.fails = [(500, {"error": {"message": "no"}})] * 4
+        with console_client(app) as client:
+            configure(client, app)
+            client.get(DECK)
+            run(client, services_of(app).batch_runner.drain)
+            deck = client.get(DECK)
+            usage = client.get(f"{API}/admin/usage").json()["days"][0]
+        assert deck.status_code == 200
+        assert len(deck.json()["cards"]) == DECK_SIZE
+        # A full deck, and a failure an administrator can see on the usage page.
+        assert usage["failures"] == 1
+
+    def test_the_console_counts_votes_and_generations_per_user(self, app: FastAPI) -> None:
+        with console_client(app) as client:
+            csrf = configure(client, app)
+            card = generate(client, app).json()["cards"][0]
+            vote(client, csrf, item(card["id"], "like"))
+            users = client.get(f"{API}/admin/users").json()["users"]
+        me = next(user for user in users if user["votes"] > 0)
+        assert me["votes"] == 1
+        assert me["generations_today"] == 1

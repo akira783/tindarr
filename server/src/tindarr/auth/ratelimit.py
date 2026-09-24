@@ -406,3 +406,8 @@ class RateLimits:
         self.profile_refresh = SlidingWindow(
             Limit("swipe_profile_refresh", 5, timedelta(hours=1)), clock
         )
+        # The writes nobody does in a loop: undo, the vote reset, the profile text and
+        # the preferences. None of them costs a model call, but each takes the write
+        # lock, one of them deletes a whole history and one stores four thousand
+        # characters — and they were the only unmetered writes in the router.
+        self.swipe_writes = SlidingWindow(Limit("swipe_writes", 60, minute), clock)

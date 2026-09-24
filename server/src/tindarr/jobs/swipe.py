@@ -272,18 +272,27 @@ def _reason(failure: Exception) -> str:
 
 
 def swipe_purge_job(engine: AsyncEngine, clock: Clock) -> PeriodicJob:
-    """Build the daily sweep: unvoted expired cards, old job rows, stale receipts."""
+    """Build the daily sweep: stuck jobs, unvoted expired cards, old rows, stale receipts."""
 
     async def run() -> None:
         now = clock.now()
         async with write_transaction(engine) as connection:
+            # Before anything is deleted: a job that has claimed to be running for half
+            # an hour is holding that user's next generation, and only a restart would
+            # have released it.
+            stuck = await job_repository.close_stuck(connection, now=now)
             cards = await batch_repository.purge(connection, now=now)
             finished = await job_repository.purge(connection, now=now)
             receipts = await vote_repository.purge_receipts(connection, now=now)
-        if cards or finished or receipts:
+        if cards or finished or receipts or stuck:
             logger.info(
                 "purged old swipe rows",
-                extra={"cards": cards, "jobs": finished, "receipts": receipts},
+                extra={
+                    "cards": cards,
+                    "jobs": finished,
+                    "receipts": receipts,
+                    "stuck": len(stuck),
+                },
             )
 
     return PeriodicJob("swipe_purge", run, SWIPE_PURGE_INTERVAL, SWIPE_PURGE_FIRST_DELAY)

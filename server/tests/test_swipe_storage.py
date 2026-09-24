@@ -154,10 +154,9 @@ async def test_a_narrowed_filter_hides_the_other_kind_without_losing_the_batch(
     assert both == 2
 
 
-async def test_the_purge_keeps_voted_and_unserved_cards(engine: AsyncEngine) -> None:
+async def test_the_purge_keeps_the_card_a_vote_points_at(engine: AsyncEngine) -> None:
     user_id = await _user(engine)
     batch_id = await _batch(engine, user_id, _card(), _card(SERIES, "Dark"))
-    await _batch(engine, user_id, _card(TitleRef("movie", 603), "The Matrix"))
     async with write_transaction(engine) as connection:
         served = await batch_repository.serve_batch(connection, batch_id, user_id, now=NOW)
         await vote_repository.record(
@@ -177,8 +176,28 @@ async def test_the_purge_keeps_voted_and_unserved_cards(engine: AsyncEngine) -> 
             connection, now=NOW + CARD_RETENTION + timedelta(days=1)
         )
         left = await batch_repository.served_refs(connection, user_id)
+    # The unanswered one went; the answered one stays, because the vote points at it and
+    # its pick type is what a statistic is counted from.
     assert gone == 1
     assert left == {FILM}
+
+
+async def test_the_purge_reaps_a_batch_nobody_ever_asked_for(engine: AsyncEngine) -> None:
+    user_id = await _user(engine)
+    await _batch(engine, user_id, _card(TitleRef("movie", 603), "The Matrix"))
+    async with write_transaction(engine) as connection:
+        fresh = await batch_repository.purge(connection, now=NOW + timedelta(days=1))
+        still_there = await batch_repository.ready_batch(connection, user_id, "both")
+        stale = await batch_repository.purge(
+            connection, now=NOW + CARD_RETENTION + timedelta(days=1)
+        )
+        gone = await batch_repository.ready_batch(connection, user_id, "both")
+    # A batch waiting to be served is not stale; one nobody spent in a month is. It is
+    # reachable: narrowing the media type leaves a batch a wider request will not take.
+    assert fresh == 0
+    assert still_there is not None
+    assert stale == 1
+    assert gone is None
 
 
 async def test_a_stored_card_survives_a_row_an_operator_broke(engine: AsyncEngine) -> None:
@@ -445,7 +464,9 @@ async def test_a_refresh_error_is_recorded_without_inventing_a_profile(
 ) -> None:
     user_id = await _user(engine)
     async with write_transaction(engine) as connection:
-        await profile_repository.set_refresh_error(connection, user_id, "llm_quota", now=NOW)
+        await profile_repository.set_refresh_error(
+            connection, user_id, "llm_quota", votes_at_update=4, now=NOW
+        )
         failed = await profile_repository.read_profile(connection, user_id)
         await profile_repository.save_generated(
             connection, user_id, "written", votes_at_update=1, now=NOW
@@ -454,6 +475,8 @@ async def test_a_refresh_error_is_recorded_without_inventing_a_profile(
     assert failed is not None
     assert failed.text == ""
     assert failed.refresh_error == "llm_quota"
+    # The debounce counter moves on a failure too: a failed attempt is still an attempt.
+    assert failed.votes_at_update == 4
     assert fixed is not None
     assert fixed.refresh_error is None
 

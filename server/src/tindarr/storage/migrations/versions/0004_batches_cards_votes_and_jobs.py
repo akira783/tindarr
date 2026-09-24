@@ -131,6 +131,7 @@ def _votes() -> None:
         sa.PrimaryKeyConstraint("user_id", "kind", "tmdb_id", name="pk_votes"),
     )
     op.create_index("ix_votes_user_id_voted_at", "votes", ["user_id", "voted_at"])
+    op.create_index("ix_votes_card_id", "votes", ["card_id"])
     op.create_table(
         "vote_receipts",
         sa.Column("user_id", sa.Text(), nullable=False),
@@ -250,6 +251,7 @@ def downgrade() -> None:
     op.drop_index("ix_jobs_user_id_created_at", table_name="jobs")
     op.drop_table("jobs")
     op.drop_table("vote_receipts")
+    op.drop_index("ix_votes_card_id", table_name="votes")
     op.drop_index("ix_votes_user_id_voted_at", table_name="votes")
     op.drop_table("votes")
     op.drop_index("ix_cards_user_id_kind_tmdb_id", table_name="cards")

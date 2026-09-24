@@ -1818,6 +1818,13 @@ export interface components {
             calibration: components["schemas"]["Calibration"];
             /** @description Many recent cards were already seen; the app may suggest a bolder novelty. */
             seen_ratio_warning?: boolean;
+            /**
+             * @description `cards` is empty because the candidate pool had nothing left to offer, not
+             *     because a batch is on its way. Without it a client cannot tell "no cards
+             *     yet" from "no cards at all", and both look like a bug. The server tries
+             *     again by itself after an hour, or as soon as a vote changes the pool.
+             */
+            exhausted?: boolean;
         };
         Calibration: {
             done: number;

@@ -26,6 +26,7 @@ and a trailer key that is not a key would be an attacker's choice of YouTube pag
 """
 
 import json
+import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -57,6 +58,7 @@ __all__ = [
     "StoredProvider",
     "StoredRatings",
     "StoredTrailer",
+    "count_for_user",
     "count_pending",
     "create_batch",
     "get_card",
@@ -85,6 +87,7 @@ _MAX_TEXT = 500
 #: How many genre names one card keeps. TMDb rarely gives more than three.
 _MAX_GENRES = 20
 _POSTER_PATTERN = r"^/[A-Za-z0-9._-]{1,128}$"
+_POSTER: Final = re.compile(_POSTER_PATTERN)
 
 
 class StoredProvider(BaseModel):
@@ -275,7 +278,10 @@ async def store_cards(
             ],
         )
     await connection.execute(
-        update(batches).where(batches.c.id == batch_id).values(cards_count=len(new_cards))
+        update(batches)
+        .where(batches.c.id == batch_id)
+        .where(batches.c.user_id == user_id)
+        .values(cards_count=len(new_cards))
     )
     return ids
 
@@ -385,6 +391,18 @@ async def count_pending(
     return int((await connection.execute(statement)).scalar_one())
 
 
+async def count_for_user(connection: AsyncConnection, user_id: str) -> int:
+    """How many batches this user has had, ever.
+
+    It is the batch index a strategy is handed, and the only reason it is a count rather
+    than a zero: ``StrategyContext.seed`` is derived from it, so a constant would give
+    every batch of a user's life the same seed — invisible today, because only the
+    harness's baselines read the seed, and a trap for the first strategy that samples.
+    """
+    statement = select(func.count()).select_from(batches).where(batches.c.user_id == user_id)
+    return int((await connection.execute(statement)).scalar_one())
+
+
 async def get_card(connection: AsyncConnection, user_id: str, card_id: str) -> StoredCard | None:
     """Return one of **this user's** cards, whatever its age.
 
@@ -434,7 +452,16 @@ async def purge(connection: AsyncConnection, *, now: datetime) -> int:
         .where(cards.c.served_at < now - CARD_RETENTION)
         .where(cards.c.id.notin_(voted))
     )
-    return result.rowcount
+    # A batch nobody ever asked for is dead weight too, and it is reachable: narrowing
+    # the media type leaves a ``movie`` batch that a ``both`` request will not spend.
+    # Its cards go with it (the foreign key cascades), so this runs after the delete
+    # above and never takes a card a vote points at: that card's batch was served.
+    empty = await connection.execute(
+        delete(batches)
+        .where(batches.c.served_at.is_(None))
+        .where(batches.c.created_at < now - CARD_RETENTION)
+    )
+    return result.rowcount + empty.rowcount
 
 
 def _pending(user_id: str, now: datetime) -> Select[Any]:
@@ -513,8 +540,8 @@ def _to_card(row: Row[tuple[Any, ...]]) -> StoredCard | None:
         genres=_genres(row.genres),
         runtime_minutes=row.runtime_minutes,
         seasons=row.seasons,
-        poster_path=row.poster_path,
-        backdrop_path=row.backdrop_path,
+        poster_path=_image(row.poster_path),
+        backdrop_path=_image(row.backdrop_path),
         ratings=_model(StoredRatings, row.ratings) or StoredRatings(),
         providers=_providers(row.providers),
         trailer=None if row.trailer is None else _model(StoredTrailer, row.trailer),
@@ -523,6 +550,18 @@ def _to_card(row: Row[tuple[Any, ...]]) -> StoredCard | None:
         served_at=row.served_at,
         expires_at=row.expires_at,
     )
+
+
+def _image(raw: object) -> str | None:
+    """Return a stored image path, or ``None`` when it is not one.
+
+    The JSON columns are narrowed on the way out because "a database is a file an
+    operator can edit"; these two are plain columns and deserve the same sentence. The
+    console concatenates them onto TMDb's image base, so anything that is not a path is
+    a URL somebody else chose — and it travels further than a card, because a like
+    copies the poster onto the vote row.
+    """
+    return raw if isinstance(raw, str) and _POSTER.fullmatch(raw) else None
 
 
 def _genres(raw: object) -> tuple[str, ...]:

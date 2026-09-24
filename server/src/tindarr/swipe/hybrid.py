@@ -459,9 +459,13 @@ def _named(item: LibraryItem) -> str:
     a *fixture's* library does, and giving it a fallback here would change the prompt
     and therefore re-measure a committed baseline for a change nobody can show. It is
     the fixture that should carry its titles; roadmap 4.5 owns that side.
+
+    The name is flattened, like every other piece of remote text that reaches a prompt
+    (``_line``): a media server's library is somebody's folder names, and a title
+    holding a newline would otherwise write its own section header.
     """
     year = f", {item.year}" if item.year else ""
-    return f"{item.name} ({item.kind}{year})"
+    return f"{_line(item.name)} ({item.kind}{year})"
 
 
 def _detail(row: Engagement) -> str:

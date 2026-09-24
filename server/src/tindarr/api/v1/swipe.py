@@ -54,7 +54,8 @@ from tindarr.api.v1.models import (
 from tindarr.auth import errors
 from tindarr.core.errors import ProblemError
 from tindarr.ports.deck import MediaFilter, Novelty
-from tindarr.ports.titles import MediaKind, TitleRef
+from tindarr.ports.titles import MediaKind, TitleRef, as_media_kind
+from tindarr.storage.votes import LikeCursor, VoteRecord
 
 router = APIRouter(prefix="/swipe", tags=["swipe"])
 
@@ -135,10 +136,12 @@ async def submit_votes(
 @router.delete("/votes", operation_id="resetVotes", summary="Delete all of the caller's votes")
 async def reset_votes(
     services: Services,
+    context: Context,
     session: SharedSession,
     confirm: Annotated[Literal["reset-votes"], Query(description="Type the words to confirm.")],
 ) -> VoteResetResponse:
     """Delete this user's votes. The taste profile is deliberately left standing."""
+    services.limits.swipe_writes.hit(_key(context, session))
     return VoteResetResponse(deleted=await services.votes.reset(session.signed_in_user))
 
 
@@ -149,9 +152,14 @@ async def reset_votes(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def undo_vote(
-    media_type: MediaTypePath, tmdb_id: TmdbIdPath, services: Services, session: SharedSession
+    media_type: MediaTypePath,
+    tmdb_id: TmdbIdPath,
+    services: Services,
+    context: Context,
+    session: SharedSession,
 ) -> None:
     """Remove the caller's answer about one title, whatever it was."""
+    services.limits.swipe_writes.hit(_key(context, session))
     removed = await services.votes.undo(session.signed_in_user, TitleRef(media_type, tmdb_id))
     if not removed:
         raise errors.not_found("No vote on that title.")
@@ -177,16 +185,17 @@ async def list_likes(
 ) -> LikeListResponse:
     """Return the "to request" list, most recent first.
 
-    The cursor is the last like's timestamp, which is the column the list is ordered by:
-    a page boundary therefore cannot skip or repeat an entry when a vote is cast in
-    between, the way an offset would.
+    The cursor is the last like's **whole** ordering key — the time, the media type and
+    the id — so a page boundary cannot skip or repeat an entry the way an offset would.
+    The time alone is not enough: one offline-queue submission stores every item at the
+    same instant, so a queue of sixty likes would page past all but the first fifty.
     """
     found = await services.votes.likes(
         session.signed_in_user, status=status_filter, limit=limit, before=_cursor(cursor)
     )
     return LikeListResponse(
         likes=[LikeResponse.of(entry) for entry in found],
-        next_cursor=found[-1].vote.voted_at.isoformat() if len(found) == limit else None,
+        next_cursor=_next_cursor(found[-1].vote) if len(found) == limit else None,
     )
 
 
@@ -200,9 +209,10 @@ async def get_profile(services: Services, session: SharedSession) -> ProfileStat
     "/profile", operation_id="saveProfile", summary="Replace the profile with the user's own text"
 )
 async def save_profile(
-    body: ProfileSaveInput, services: Services, session: SharedSession
+    body: ProfileSaveInput, services: Services, context: Context, session: SharedSession
 ) -> ProfileStateResponse:
     """Store what the user wrote. A later rewrite adds to it and never replaces it."""
+    services.limits.swipe_writes.hit(_key(context, session))
     return ProfileStateResponse.of(await services.profiles.save(session.signed_in_user, body.text))
 
 
@@ -236,9 +246,10 @@ async def get_preferences(services: Services, session: SharedSession) -> Prefere
 
 @router.patch("/preferences", operation_id="updatePreferences", summary="Change some preferences")
 async def update_preferences(
-    body: PreferencesPatchInput, services: Services, session: SharedSession
+    body: PreferencesPatchInput, services: Services, context: Context, session: SharedSession
 ) -> PreferencesResponse:
     """Apply a partial change and return the whole of what the deck will now read."""
+    services.limits.swipe_writes.hit(_key(context, session))
     place = await services.swipe.household()
     updated = await services.deck.update_preferences(session.signed_in_user.id, body.as_patch())
     return PreferencesResponse.of(updated, place.language)
@@ -267,20 +278,35 @@ async def get_stats(services: Services, session: SharedSession) -> StatsResponse
     return StatsResponse.of(await services.votes.stats(session.signed_in_user))
 
 
-def _cursor(value: str | None) -> datetime | None:
-    """Read a likes cursor, refusing anything that is not one of ours.
+def _next_cursor(vote: VoteRecord) -> str:
+    """Where this page ended, as the whole ordering key."""
+    return f"{vote.voted_at.isoformat()}|{vote.ref.kind}|{vote.ref.tmdb_id}"
 
-    It is a timestamp this server wrote a moment ago. A caller may still send whatever
-    they like, so a value that is not a date is a ``400`` rather than a query built
-    around ``None`` that quietly returns the first page again.
+
+def _cursor(value: str | None) -> LikeCursor | None:
+    """Read a likes cursor, refusing anything that is not one this server issued.
+
+    A caller may send whatever they like, so a value that does not parse is a ``400``
+    rather than a query built around ``None`` that quietly returns the first page again
+    — which is the shape of bug that makes a client loop for ever.
     """
     if value is None:
         return None
+    at, _, rest = value.partition("|")
+    kind, _, tmdb_id = rest.partition("|")
     try:
-        return datetime.fromisoformat(value)
-    except ValueError:
+        return LikeCursor(datetime.fromisoformat(at), TitleRef(_kind(kind), int(tmdb_id)))
+    except (ValueError, KeyError):
         raise ProblemError(
             HTTPStatus.BAD_REQUEST,
             "validation_error",
             "cursor: not a cursor this server issued",
         ) from None
+
+
+def _kind(value: str) -> MediaKind:
+    """Narrow a cursor's media type, raising the way a bad number in it would."""
+    found = as_media_kind(value)
+    if found is None:
+        raise KeyError(value)
+    return found

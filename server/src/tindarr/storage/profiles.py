@@ -168,21 +168,31 @@ async def _write(
 
 
 async def set_refresh_error(
-    connection: AsyncConnection, user_id: str, code: str, *, now: datetime
+    connection: AsyncConnection, user_id: str, code: str, *, votes_at_update: int, now: datetime
 ) -> None:
-    """Record why the last rewrite failed, without touching the text it did not write."""
+    """Record why the last rewrite failed, without touching the text it did not write.
+
+    ``votes_at_update`` moves even though nothing was written, and that is the point: it
+    is the debounce counter, and a failed attempt is still an attempt. Leaving it where
+    it was makes every later vote look like the tenth new one, so a provider that is
+    down turns one swiping session into one paid rewrite per vote.
+    """
     statement = sqlite_insert(taste_profiles).values(
         user_id=user_id,
         text="",
         user_text="",
         user_edited=False,
-        votes_at_update=0,
+        votes_at_update=votes_at_update,
         updated_at=now,
         refresh_error=code,
     )
     await connection.execute(
         statement.on_conflict_do_update(
-            index_elements=["user_id"], set_={"refresh_error": statement.excluded.refresh_error}
+            index_elements=["user_id"],
+            set_={
+                "refresh_error": statement.excluded.refresh_error,
+                "votes_at_update": statement.excluded.votes_at_update,
+            },
         )
     )
 

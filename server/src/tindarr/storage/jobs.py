@@ -31,6 +31,7 @@ from tindarr.storage.tables import jobs
 __all__ = [
     "ACTIVE_STATUSES",
     "JOB_KINDS",
+    "JOB_MAX_RUNTIME",
     "JOB_RETENTION",
     "JobKind",
     "JobRecord",
@@ -39,6 +40,7 @@ __all__ = [
     "active_users",
     "claim",
     "close_abandoned",
+    "close_stuck",
     "fail",
     "finish",
     "get",
@@ -58,6 +60,15 @@ ACTIVE_STATUSES: Final[tuple[JobStatus, ...]] = ("pending", "running")
 #: How long a finished job row is kept, in days. Long enough for a console to explain
 #: last night's failure, short enough that the table stays a queue and not a log.
 JOB_RETENTION: Final = 14
+#: How long a job may claim to be running before the purge stops believing it.
+#:
+#: A job's task dies with the process, and ``close_abandoned`` catches that at startup.
+#: This catches the other shape: a task that is still alive and stuck — an HTTP call
+#: that never times out, a provider holding a connection open. Without it, one hung call
+#: is a permanent ``202`` for that user until somebody restarts the server. Generous,
+#: because a real batch is a TMDb pool and a model call and may legitimately take a
+#: minute on a slow reasoning model.
+JOB_MAX_RUNTIME: Final = timedelta(minutes=30)
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,13 +213,30 @@ async def close_abandoned(connection: AsyncConnection, *, now: datetime) -> list
 
 
 async def purge(connection: AsyncConnection, *, now: datetime) -> int:
-    """Delete finished job rows older than the retention window."""
+    """Delete finished job rows older than the retention window; return how many."""
     result = await connection.execute(
         delete(jobs)
         .where(jobs.c.status.in_(("done", "failed")))
         .where(jobs.c.finished_at < now - timedelta(days=JOB_RETENTION))
     )
     return result.rowcount
+
+
+async def close_stuck(connection: AsyncConnection, *, now: datetime) -> list[JobRecord]:
+    """Fail every job that has claimed to be running for too long; return them.
+
+    The companion of ``close_abandoned``, for the task that did not die but did not
+    finish either. Both release the same thing: that user's next generation.
+    """
+    statement = (
+        jobs.select()
+        .where(jobs.c.status.in_(ACTIVE_STATUSES))
+        .where(jobs.c.created_at < now - JOB_MAX_RUNTIME)
+    )
+    stuck = _to_jobs(await connection.execute(statement))
+    for job in stuck:
+        await fail(connection, job.id, code="interrupted", now=now)
+    return stuck
 
 
 async def active_users(connection: AsyncConnection, kind: JobKind) -> frozenset[str]:

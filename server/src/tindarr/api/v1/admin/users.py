@@ -27,6 +27,8 @@ from tindarr.auth.users import (
     require_may_act_on,
     update_user,
 )
+from tindarr.storage import usage as usage_repository
+from tindarr.storage import votes as vote_repository
 from tindarr.storage.users import Role
 
 router = APIRouter(prefix="/users", tags=["admin", "console"])
@@ -77,9 +79,22 @@ class AdminUserPatchInput(BaseModel):
 
 @router.get("", operation_id="listUsers", summary="Users who signed in at least once")
 async def list_users(services: Services, session: AdminSession) -> AdminUserListResponse:
-    """Return every user, oldest first."""
+    """Return every user, oldest first, with what the swipe engine has counted for them.
+
+    Two aggregates rather than two queries per user: the vote totals and today's
+    generations are read once for the whole household and matched up here, so a list of
+    twenty accounts is three statements and not forty-one.
+    """
     users = await list_admin_users(services.engine)
-    return AdminUserListResponse(users=[AdminUserResponse.of(user) for user in users])
+    async with services.engine.connect() as connection:
+        votes = await vote_repository.counts_by_user(connection)
+        today = await usage_repository.usage_today(connection, now=services.clock.now())
+    return AdminUserListResponse(
+        users=[
+            AdminUserResponse.of(user, votes.get(user.id, 0), today.get(user.id, 0))
+            for user in users
+        ]
+    )
 
 
 @router.patch(

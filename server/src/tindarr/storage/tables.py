@@ -480,6 +480,10 @@ Index("ix_cards_user_id_created_at", cards.c.user_id, cards.c.created_at)
 Index("ix_cards_user_id_kind_tmdb_id", cards.c.user_id, cards.c.kind, cards.c.tmdb_id)
 #: The user's votes in the order they were cast: the prompt's history and the stats.
 Index("ix_votes_user_id_voted_at", votes.c.user_id, votes.c.voted_at)
+#: ``votes.card_id`` is a ``SET NULL`` foreign key, so every card the daily purge
+#: deletes makes SQLite look for the votes pointing at it. Without this it is a scan of
+#: ``votes`` per deleted card.
+Index("ix_votes_card_id", votes.c.card_id)
 #: The jobs of one user, newest first: the one-at-a-time rule and the deck's polling.
 Index("ix_jobs_user_id_created_at", jobs.c.user_id, jobs.c.created_at)
 #: The usage page reads whole days across every user.

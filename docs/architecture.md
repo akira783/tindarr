@@ -211,6 +211,15 @@ Neither is a **vote**. They are read as `StrategyContext.known` (excluded from t
 and as `engagement` (taste); the statistics, the vote count and the deck's calibration
 progress never see them.
 
+**When a vote happened.** A queued vote carries the moment it was cast, which is the
+honest timestamp and the one the skip cool-down runs from — but it is a value the client
+chooses, so it is clamped at both ends: never after now (a drifting clock would park a
+vote at the top of every ordering), and never before the card was served (a vote cannot
+predate the card it is about, and a backdated `skip` would otherwise be a way to ask for
+its own cool-down to be over). The stored answer is then the newest **swipe**, not the
+newest packet: a queue a phone held for three weeks cannot overwrite an opinion changed
+since from a browser.
+
 **Votes.** Five values:
 
 | Vote | Gesture | Meaning | Used by |
@@ -270,8 +279,16 @@ the queue.
   **not** refunded when the call fails: "it failed" is exactly the state a retry loop is
   in, and a refund there turns one bad minute at a provider into an unbounded number of
   paid attempts.
-- **Swipe purge** (from step 4.5). Daily: served cards nobody voted on a month later,
-  finished job rows, and the vote receipts of queues no phone can still be holding.
+- **Swipe purge** (from step 4.5). Daily: jobs that have claimed to be running for half
+  an hour (the companion of the startup sweep, for a task that hung rather than died),
+  served cards nobody voted on a month later, batches nobody ever spent, finished job
+  rows, and the vote receipts of queues no phone can still be holding.
+
+**Two cool-offs decide when the deck pays again.** After a failed generation it waits
+five minutes, because a deck is polled every two and a half seconds and a provider
+refusing a key would otherwise spend a day's cap in thirty of them. After a batch that
+came back **empty** it waits an hour, or until a vote changes the pool — and the deck
+says `exhausted` so the client can tell "no cards yet" from "no cards at all".
 - **Media server user sync** (from step 2). 60 s after startup, then hourly: disables
   users removed or disabled on the media server, clears lost admin flags, checks the
   server's identity ([auth reference](auth.md#periodic-sync)).

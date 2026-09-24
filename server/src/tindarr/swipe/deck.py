@@ -24,7 +24,7 @@ already holding shows today's answer, which is what the contract promises.
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from typing import Final, Protocol
 
@@ -80,6 +80,21 @@ GENERATION_RETRY_MS: Final = 2500
 #: How long to wait when the server is busy with other people's generations. Longer,
 #: because what the client is waiting for is not its own work.
 BUSY_RETRY_MS: Final = 5000
+#: How long the deck waits after a failed generation before paying for another.
+#:
+#: Without it a provider that is refusing a key spends the whole day's cap in half a
+#: minute: a deck is polled every 2.5 s, nothing about the failure is remembered between
+#: polls, and each poll is a fresh generation. The cap was meant to be a day's budget,
+#: not thirty seconds of one. A household that fixes the key waits at most this long.
+FAILURE_COOL_OFF: Final = timedelta(minutes=5)
+#: How long an empty pool is believed before the deck tries again.
+#:
+#: A batch that came back with no cards means the pool had nothing, and asking again
+#: immediately would produce the same nothing at the same price. But "nothing changed"
+#: cannot be judged on votes alone — there are no cards to vote on — so without a clock
+#: an account whose *first* batch was empty would have a blank deck for ever, with no
+#: error and nothing an administrator would think to look at.
+EXHAUSTED_COOL_OFF: Final = timedelta(hours=1)
 
 
 def daily_limit_reached(limit: int) -> ProblemError:
@@ -142,6 +157,10 @@ class DeckView:
     cards: tuple[ServedCard, ...]
     calibration: Calibration
     seen_ratio_warning: bool = False
+    #: The deck is empty because the pool had nothing to offer, not because a batch is
+    #: on its way. Without it a client cannot tell "no cards yet" from "no cards at all",
+    #: and both look like a bug.
+    exhausted: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,6 +246,19 @@ class DeckService:
             return await self._view(user, request, pending)
         return await self._next_batch(user, request, now)
 
+    async def _cooling_off(self, user: User, now: datetime) -> int:
+        """Milliseconds left of the pause after a failed generation, or zero.
+
+        Read before anything is claimed, so a provider that is down costs one generation
+        every five minutes rather than one every poll.
+        """
+        async with self._engine.connect() as connection:
+            last = await job_repository.last_finished(connection, user.id, "batch")
+        if last is None or last.status != "failed" or last.finished_at is None:
+            return 0
+        left = (last.finished_at + FAILURE_COOL_OFF) - now
+        return max(int(left.total_seconds() * 1000), 0)
+
     async def _next_batch(self, user: User, request: DeckRequest, now: datetime) -> DeckView:
         async with write_transaction(self._engine) as connection:
             ready = await batch_repository.ready_batch(connection, user.id, request.media_filter)
@@ -239,10 +271,11 @@ class DeckService:
             logger.info("a batch was served", extra={"cards": len(served)})
             return await self._view(user, request, served)
         await self._report_failure(user)
-        if await self._exhausted(user, request):
+        if await self._exhausted(user, request, now):
             # A finished batch that came back empty. Starting another one would produce
-            # the same empty pool and bill for it, so the deck says so and stops.
-            return await self._view(user, request, [])
+            # the same empty pool and bill for it, so the deck says so and stops — until
+            # the cool-off, because a pool is not empty for ever.
+            return await self._view(user, request, [], exhausted=True)
         await self._start(user, request)
         raise PendingError(GENERATION_RETRY_MS)
 
@@ -260,13 +293,21 @@ class DeckService:
                 return
         try:
             await self._start(user, request)
-        except (ProblemError, DailyLimitReachedError):
+        except Exception:  # noqa: BLE001 - nothing here may fail a request being answered
+            # The caller is being handed cards it already had. Whatever stopped the
+            # *next* batch — a cap, a cool-off, a busy server, a scheduler that could
+            # not take the job — is not news for this request.
             logger.info("the deck could not prepare the next batch yet")
 
     async def _start(self, user: User, request: DeckRequest) -> None:
         """Claim a generation for this user and hand it to the scheduler."""
         await self._swipe.metadata()
         await self._swipe.llm()
+        cooling = await self._cooling_off(user, self._clock.now())
+        if cooling:
+            # The last one failed a moment ago. Paying for another now is how a bad key
+            # spends a day's budget in half a minute.
+            raise PendingError(cooling)
         if not self._scheduler.has_capacity():
             raise PendingError(BUSY_RETRY_MS)
         try:
@@ -296,16 +337,21 @@ class DeckService:
         if told and problem is not None:
             raise problem
 
-    async def _exhausted(self, user: User, request: DeckRequest) -> bool:
+    async def _exhausted(self, user: User, request: DeckRequest, now: datetime) -> bool:
         """Whether the last batch came back empty and nothing has changed since.
 
-        "Nothing has changed" is a vote: a pool that offered nothing yesterday will
-        offer nothing today, but a vote moves the seeds the pool is built from, so it is
-        worth paying for another one.
+        Two things count as a change, and the second one is what stops a blank deck
+        being permanent. A **vote** moves the seeds the pool is built from, so it is
+        worth paying for another batch — but an account whose first batch was empty has
+        no cards to vote on, and would otherwise be stuck for ever. So **time** counts
+        too: TMDb gains titles, a content filter gets relaxed, a region changes. After
+        the cool-off the deck tries once more.
         """
         async with self._engine.connect() as connection:
             last = await batch_repository.latest_batch(connection, user.id, request.media_filter)
             if last is None or last.cards_count > 0:
+                return False
+            if now - last.created_at >= EXHAUSTED_COOL_OFF:
                 return False
             recent = await vote_repository.list_for_user(connection, user.id)
         return not any(vote.voted_at > last.created_at for vote in recent)
@@ -313,7 +359,12 @@ class DeckService:
     # --- turning stored cards into what is shown --------------------------------------
 
     async def _view(
-        self, user: User, request: DeckRequest, cards: Sequence[StoredCard]
+        self,
+        user: User,
+        request: DeckRequest,
+        cards: Sequence[StoredCard],
+        *,
+        exhausted: bool = False,
     ) -> DeckView:
         preferences = await self.preferences(user.id)
         async with self._engine.connect() as connection:
@@ -334,6 +385,7 @@ class DeckService:
             ),
             calibration=Calibration(done=min(counted, CALIBRATION_TARGET)),
             seen_ratio_warning=_seen_ratio_warning(stored),
+            exhausted=exhausted,
         )
 
     async def _availability(self, refs: Sequence[TitleRef]) -> dict[TitleRef, Availability]:

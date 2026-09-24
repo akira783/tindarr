@@ -23,18 +23,20 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Final
 
-from sqlalchemy import Row, Select, delete, func, select
+from sqlalchemy import Row, Select, delete, func, literal, select, tuple_
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tindarr.ports.deck import PickKind, VoteValue, as_pick_kind, as_vote_value
 from tindarr.ports.request_backend import RequestStatus
 from tindarr.ports.titles import TitleRef, as_media_kind
+from tindarr.storage.db import UtcDateTime
 from tindarr.storage.tables import vote_receipts, votes
 
 __all__ = [
     "RECEIPT_RETENTION",
     "SKIP_COOL_DOWN",
+    "LikeCursor",
     "NewVote",
     "VoteRecord",
     "count",
@@ -58,6 +60,14 @@ SKIP_COOL_DOWN: Final = 60
 #: How long a ``client_vote_id`` is remembered, in days. Longer than any queue a phone
 #: could plausibly hold, and short enough that the table does not grow for ever.
 RECEIPT_RETENTION: Final = 90
+
+
+@dataclass(frozen=True, slots=True)
+class LikeCursor:
+    """Where a page of likes left off: the whole ordering key, not half of it."""
+
+    at: datetime
+    ref: TitleRef
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,10 +107,16 @@ class VoteRecord:
 
 async def record(
     connection: AsyncConnection, user_id: str, vote: NewVote, *, voted_at: datetime, now: datetime
-) -> None:
-    """Store one answer, replacing this user's previous answer about the same title.
+) -> bool:
+    """Store one answer, replacing this user's previous one about the same title.
 
-    ``requested_at`` is deliberately **not** reset by a later vote: a request that was
+    Returns whether it won. **The newest swipe wins, not the newest packet**: the update
+    is guarded on ``voted_at``, so a queue a phone held in a drawer for three weeks
+    cannot overwrite an opinion the user has since changed from their browser. Without
+    the guard, arrival order decides — and an offline queue is precisely the client
+    whose arrival order means nothing.
+
+    ``requested_at`` is deliberately **not** reset by a later vote either: a request
     really filed with the backend stays filed, and telling the user otherwise would be a
     lie about somebody else's queue.
     """
@@ -117,7 +133,7 @@ async def record(
         voted_at=voted_at,
         created_at=now,
     )
-    await connection.execute(
+    result = await connection.execute(
         statement.on_conflict_do_update(
             index_elements=["user_id", "kind", "tmdb_id"],
             set_={
@@ -125,8 +141,10 @@ async def record(
                 for name in ("value", "card_id", "pick_type", "title", "year", "poster_path")
             }
             | {"voted_at": statement.excluded["voted_at"]},
+            where=votes.c.voted_at <= statement.excluded["voted_at"],
         )
     )
+    return result.rowcount > 0
 
 
 async def remember_receipt(
@@ -257,19 +275,24 @@ async def list_likes(
     *,
     requested: bool | None = None,
     limit: int = 50,
-    before: datetime | None = None,
+    before: LikeCursor | None = None,
 ) -> list[VoteRecord]:
     """Return the titles whose current vote is ``like``, most recent first.
 
     ``seen_liked`` is not a like here, and that is the contract's wording as well as the
     architecture's: it is a title the person has already watched, so there is nothing to
     request; it feeds the taste profile and appears in no list.
+
+    The cursor is the **whole** sort key, not just the timestamp. One offline-queue
+    submission stores every one of its items at the same instant, so a timestamp alone
+    would page past all but the first of them: fifty likes flushed together, a page of
+    fifty, and the rest unreachable for ever.
     """
     statement = (
         votes.select()
         .where(votes.c.user_id == user_id)
         .where(votes.c.value == "like")
-        .order_by(votes.c.voted_at.desc(), votes.c.kind, votes.c.tmdb_id)
+        .order_by(votes.c.voted_at.desc(), votes.c.kind.desc(), votes.c.tmdb_id.desc())
         .limit(limit)
     )
     if requested is True:
@@ -277,7 +300,14 @@ async def list_likes(
     if requested is False:
         statement = statement.where(votes.c.requested_at.is_(None))
     if before is not None:
-        statement = statement.where(votes.c.voted_at < before)
+        statement = statement.where(
+            tuple_(votes.c.voted_at, votes.c.kind, votes.c.tmdb_id)
+            < tuple_(
+                literal(before.at, UtcDateTime),
+                literal(before.ref.kind),
+                literal(before.ref.tmdb_id),
+            )
+        )
     return _to_votes(await connection.execute(statement))
 
 

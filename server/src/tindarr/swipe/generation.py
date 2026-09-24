@@ -29,7 +29,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tindarr.core.clock import Clock
@@ -48,7 +48,10 @@ from tindarr.storage.users import User
 from tindarr.swipe.engine import DECK_SIZE, DeckRequest, Household, SwipeEngine, build_strategy
 from tindarr.swipe.strategy import Candidate, StrategyContext
 
-__all__ = ["BatchGenerator", "DeckMode", "GenerationOutcome", "enrich"]
+__all__ = ["FALLBACK_SUFFIX", "BatchGenerator", "DeckMode", "GenerationOutcome", "enrich"]
+
+#: What is appended to a batch's strategy name when the pool filled it, not the model.
+FALLBACK_SUFFIX: Final = "+fallback"
 
 #: What a batch is for, as ``batches.mode`` and the contract's ``Deck.mode`` spell it.
 type DeckMode = Literal["normal", "calibration"]
@@ -68,6 +71,8 @@ class GenerationOutcome:
     batch_id: str | None = None
     cards: int = 0
     error_code: str | None = None
+    #: Set when the model did not answer and the retrieved pool filled the batch.
+    fallback: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -129,7 +134,11 @@ class BatchGenerator:
         place = await self._swipe.household()
         async with self._engine.connect() as connection:
             preferences = await profile_repository.read_preferences(connection, user.id)
-        context = await self._swipe.build_context(user, request, place, preferences)
+        async with self._engine.connect() as connection:
+            index = await batch_repository.count_for_user(connection, user.id)
+        context = await self._swipe.build_context(
+            user, request, place, preferences, batch_index=index
+        )
         mode = _mode(context, request)
         metered = _MeteredProvider(llm)
         strategy = build_strategy(metadata, metered)
@@ -142,6 +151,9 @@ class BatchGenerator:
             language=context.language,
         )
         now = self._clock.now()
+        # A batch the pool filled because the model would not answer is not the same
+        # batch, and the column is what a later measurement will ask.
+        name = f"{strategy.name}{FALLBACK_SUFFIX}" if metered.failure else strategy.name
         async with write_transaction(self._engine) as connection:
             batch_id = await batch_repository.create_batch(
                 connection,
@@ -149,7 +161,7 @@ class BatchGenerator:
                 mode=mode,
                 novelty=request.novelty,
                 media_filter=request.media_filter,
-                strategy=strategy.name,
+                strategy=name,
                 mood=request.mood,
                 now=now,
             )
@@ -162,16 +174,22 @@ class BatchGenerator:
                 output_tokens=metered.output_tokens,
                 now=now,
             )
+            if metered.failure is not None:
+                # The batch is real and the cards are good; the provider still did not
+                # answer, and the usage page is where an administrator would see that.
+                await usage_repository.record_failure(connection, user.id, now=now)
         logger.info(
             "a batch was generated",
             extra={
                 "cards": len(built),
                 "mode": mode,
-                "strategy": strategy.name,
+                "strategy": name,
                 "tokens": metered.input_tokens + metered.output_tokens,
             },
         )
-        return GenerationOutcome(job_id=job_id, batch_id=batch_id, cards=len(built))
+        return GenerationOutcome(
+            job_id=job_id, batch_id=batch_id, cards=len(built), fallback=metered.failure
+        )
 
 
 def _limit_for(user: User, place: Household) -> int | None:
@@ -213,6 +231,8 @@ class _MeteredProvider:
         self.capabilities = inner.capabilities
         self.input_tokens = 0
         self.output_tokens = 0
+        #: The problem code of the last call that did not answer, if one did not.
+        self.failure: str | None = None
 
     async def test(self) -> ConnectionCheck:
         """Delegate the connection test."""
@@ -223,8 +243,18 @@ class _MeteredProvider:
         return await self._inner.list_models()
 
     async def generate[T: BaseModel](self, prompt: Prompt, schema: type[T]) -> Generation[T]:
-        """Delegate the call and add what it cost."""
-        answer = await self._inner.generate(prompt, schema)
+        """Delegate the call, add what it cost, and remember a refusal.
+
+        The strategy swallows a failure on purpose — a batch without sentences beats no
+        batch — so this is the only place that can tell the difference afterwards.
+        Without it, a household whose key was revoked reads a usage page saying zero
+        failures while every card it is served is unranked.
+        """
+        try:
+            answer = await self._inner.generate(prompt, schema)
+        except ProblemError as failure:
+            self.failure = failure.code
+            raise
         self.input_tokens += answer.usage.input_tokens
         self.output_tokens += answer.usage.output_tokens
         return answer
@@ -279,16 +309,28 @@ async def _providers(metadata: Metadata, ref: TitleRef, region: str) -> tuple[St
     except ProblemError as failure:
         logger.info("TMDb did not answer watch providers", extra={"reason": failure.code})
         return ()
-    return tuple(_as_provider(offer) for offer in offers)
+    built = (_as_provider(offer) for offer in offers)
+    return tuple(offer for offer in built if offer is not None)
 
 
-def _as_provider(offer: Provider) -> StoredProvider:
-    return StoredProvider(
-        provider_id=offer.provider_id,
-        name=offer.name,
-        offer=offer.offer,
-        logo_path=offer.logo_path,
-    )
+def _as_provider(offer: Provider) -> StoredProvider | None:
+    """One offer as a row, or ``None`` when TMDb answered something that is not one.
+
+    TMDb's catalogue is community-edited, so a provider name longer than the column or a
+    logo path that is not a path is a thing that happens. It must cost the logo and not
+    the batch: an unhandled validation error here aborts a generation that has already
+    been paid for, deterministically, for as long as that title is in the pool.
+    """
+    try:
+        return StoredProvider(
+            provider_id=offer.provider_id,
+            name=offer.name,
+            offer=offer.offer,
+            logo_path=offer.logo_path,
+        )
+    except ValidationError:
+        logger.info("TMDb listed a provider this card cannot show")
+        return None
 
 
 async def _trailer(metadata: Metadata, ref: TitleRef, language: str) -> StoredTrailer | None:
@@ -299,7 +341,12 @@ async def _trailer(metadata: Metadata, ref: TitleRef, language: str) -> StoredTr
         return None
     if found is None:
         return None
-    return StoredTrailer(key=found.key, name=found.name, language=found.language)
+    try:
+        return StoredTrailer(key=found.key, name=found.name, language=found.language)
+    except ValidationError:
+        # Same reasoning as a provider: a card with no trailer is a card.
+        logger.info("TMDb answered a trailer this card cannot show")
+        return None
 
 
 async def _ratings(details: TitleDetails, source: RatingsSource | None) -> StoredRatings:

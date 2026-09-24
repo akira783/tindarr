@@ -72,9 +72,9 @@ class UserResponse(BaseModel):
 class AdminUserResponse(UserResponse):
     """Contract schema ``AdminUser``: what the console's user list shows.
 
-    ``votes`` and ``generations_today`` are zero until the swipe engine counts them
-    (step 4), and ``request_backend_user_found`` is left out until step 3 brings the
-    request backend: the contract makes both optional for exactly that reason.
+    ``votes`` and ``generations_today`` are counted from step 4.5 and default to zero
+    for the endpoints that do not count them; ``request_backend_user_found`` is left out
+    until somebody asks for it, which is what makes it optional in the contract.
     """
 
     enabled: bool
@@ -89,9 +89,11 @@ class AdminUserResponse(UserResponse):
     generations_today: int = 0
 
     @classmethod
-    def of(cls, user: User) -> "AdminUserResponse":
-        """Build the response for a user row."""
+    def of(cls, user: User, votes: int = 0, generations_today: int = 0) -> "AdminUserResponse":
+        """Build the response for a user row, with what the swipe engine counted."""
         return cls(
+            votes=votes,
+            generations_today=generations_today,
             id=user.id,
             name=user.name,
             role=user.role,
@@ -701,7 +703,10 @@ class ServerSettingsPatchInput(BaseModel):
     name: Annotated[str, Field(max_length=60)] | None = None
     public_url: PublicUrlInput | None = None
     password_sign_in: PasswordSignIn | None = None
-    language: Annotated[str, Field(max_length=16)] | None = None
+    #: Patterned, not merely bounded: it is interpolated into the taste profile's
+    #: prompt ("in the language with ISO code …"), so sixteen free characters there
+    #: would be sixteen characters of instruction.
+    language: Annotated[str, Field(pattern=r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$")] | None = None
     streaming_region: StreamingRegion | None = None
     daily_generation_limit: Annotated[int, Field(ge=0)] | None = None
     warm_up_enabled: bool | None = None
@@ -1199,6 +1204,7 @@ class DeckResponse(BaseModel):
     cards: list[CardResponse]
     calibration: CalibrationResponse
     seen_ratio_warning: bool = False
+    exhausted: bool = False
 
     @classmethod
     def of(cls, view: DeckView) -> "DeckResponse":
@@ -1209,6 +1215,7 @@ class DeckResponse(BaseModel):
             cards=[CardResponse.of(card) for card in view.cards],
             calibration=CalibrationResponse.of(view.calibration),
             seen_ratio_warning=view.seen_ratio_warning,
+            exhausted=view.exhausted,
         )
 
 
@@ -1432,7 +1439,10 @@ class PreferencesPatchInput(BaseModel):
     media_type: MediaFilter | None = None
     novelty: Novelty | None = None
     auto_request: bool | None = None
-    language: Annotated[str, Field(max_length=16)] | None = None
+    #: Patterned, not merely bounded: it is interpolated into the taste profile's
+    #: prompt ("in the language with ISO code …"), so sixteen free characters there
+    #: would be sixteen characters of instruction.
+    language: Annotated[str, Field(pattern=r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$")] | None = None
     streaming_services: Annotated[list[int], Field(max_length=100)] | None = None
 
     @model_validator(mode="after")

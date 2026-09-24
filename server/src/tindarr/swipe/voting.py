@@ -35,9 +35,10 @@ from tindarr.ports.titles import TitleRef
 from tindarr.storage import batches as batch_repository
 from tindarr.storage import profiles as profile_repository
 from tindarr.storage import votes as vote_repository
+from tindarr.storage.batches import StoredCard
 from tindarr.storage.db import write_transaction
 from tindarr.storage.users import User
-from tindarr.storage.votes import NewVote, VoteRecord
+from tindarr.storage.votes import LikeCursor, NewVote, VoteRecord
 from tindarr.swipe.engine import SwipeEngine
 from tindarr.swipe.requesting import RequestService
 from tindarr.swipe.votes import OPINION_VOTES, POSITIVE_VOTES
@@ -199,7 +200,7 @@ class VoteService:
                         year=card.year,
                         poster_path=card.poster_path,
                     ),
-                    voted_at=_when(item.voted_at, now),
+                    voted_at=_when(item.voted_at, card, now),
                     now=now,
                 )
                 outcomes.append(VoteOutcome(item.client_vote_id, "stored"))
@@ -257,7 +258,7 @@ class VoteService:
         *,
         status: Literal["all", "to_request", "requested"] = "all",
         limit: int = 50,
-        before: datetime | None = None,
+        before: LikeCursor | None = None,
     ) -> list[LikeEntry]:
         """Return the "to request" list, with availability and a watch link if we own it."""
         wanted = {"all": None, "to_request": False, "requested": True}[status]
@@ -325,15 +326,24 @@ def _with_request(outcome: VoteOutcome, status: RequestStatus | None) -> VoteOut
     return VoteOutcome(outcome.client_vote_id, outcome.outcome, outcome.code, status)
 
 
-def _when(given: datetime | None, now: datetime) -> datetime:
-    """When the user voted: what the client said, unless that is in the future.
+def _when(given: datetime | None, card: StoredCard, now: datetime) -> datetime:
+    """When the user voted, bounded at both ends by facts this server already has.
 
     An offline queue carries the moment the swipe happened, which is the honest
-    timestamp and the one the 60-day skip cool-down should run from. A clock that is
-    ahead is not a reason to accept a vote from tomorrow, though: it would sit at the
-    top of every ordering for as long as the drift lasts.
+    timestamp and the one the 60-day skip cool-down runs from. But it is a value the
+    client chooses, so it is clamped:
+
+    - **not after now**, or a drifting clock parks a vote at the top of every ordering
+      for as long as the drift lasts;
+    - **not before the card was served**, because a vote cannot predate the card it is
+      about — and backdating a ``skip`` is otherwise a way to ask for the cool-down to
+      be over already, since a skip older than sixty days is a title the deck is free
+      to offer again.
     """
-    return now if given is None or given > now else given
+    floor = card.served_at or card.created_at
+    if given is None:
+        return now
+    return min(max(given, floor), now)
 
 
 #: A title no card can be: the "not a like" key of the per-item request lookup.
