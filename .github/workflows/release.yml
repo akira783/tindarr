@@ -191,7 +191,11 @@ jobs:
           file: server/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ steps.release.outputs.publish == 'true' }}
-          outputs: ${{ steps.release.outputs.publish == 'true' && '' || format('type=oci,dest={0}/tindarr-oci.tar', runner.temp) }}
+          # Written the negative way round on purpose: `cond && '' || x` is the trap
+          # where an empty string is falsy and the `||` branch wins anyway, which would
+          # export a tarball on a real release. The non-empty value has to be the one
+          # the `&&` yields.
+          outputs: ${{ steps.release.outputs.publish != 'true' && format('type=oci,dest={0}/tindarr-oci.tar', runner.temp) || '' }}
           tags: ${{ steps.meta.outputs.tags }}
           # Only the three labels that cannot be written in the Dockerfile. The title,
           # description, source and licence are already baked in there, and
