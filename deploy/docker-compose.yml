@@ -1,9 +1,12 @@
-# Example deployment of the Tindarr server.
+# Example deployment of the Tindarr server. The guide that explains every line is
+# ../docs/deployment.md.
 #
-# Until images are published (roadmap step 5), this builds the image from the
-# repository root (the image contains the web console, so the build needs web/,
-# shared/i18n/ and api/openapi.yaml):
+# No image is published yet (roadmap step 5), so this builds one from the repository
+# root — the image contains the web console, so the build needs web/, shared/i18n/,
+# shared/design/ and api/openapi.yaml:
 #   docker compose -f deploy/docker-compose.yml up -d --build
+# Once images land on GHCR, delete the `build:` block and uncomment the `image:` line
+# below: nothing else in this file changes.
 #
 # The first start generates /data/secret.key (mode 0600). Back up the volume and the key
 # separately: a database copy is useless without the key. To manage the key yourself,
@@ -12,10 +15,16 @@ name: tindarr
 
 services:
   tindarr:
+    # The path that works today. Building takes a Node stage and a uv stage; the
+    # runtime image has neither.
     build:
       context: ..
       dockerfile: server/Dockerfile
     image: tindarr-server:local
+    # After the first GHCR release, this replaces both lines above. Pin a version:
+    # `latest` turns every `docker compose pull` into an unreviewed upgrade, and this
+    # server holds your media server's admin key.
+    # image: ghcr.io/akira783/tindarr:0.1.0
     restart: unless-stopped
     ports:
       # Loopback only: Docker's published ports bypass host firewalls such as ufw.
@@ -49,8 +58,19 @@ services:
       - no-new-privileges:true
     user: "10001:10001"
     # Bounds a runaway process (fork loop, memory leak) instead of the whole host.
+    # Measured idle on a fresh install: 128 MiB and 4 processes.
     pids_limit: 256
     mem_limit: 512m
+    # JSON-lines logs on stdout, one line per request. Without a cap, a server that is
+    # scanned all night fills the host's disk and takes the media server with it.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # The image already declares HEALTHCHECK ["tindarr", "healthcheck"], which exits 0
+    # when /healthz answers; `docker compose ps` reports healthy about 20 s after
+    # start. Override it here only to change the intervals.
 
 volumes:
   tindarr-data:
