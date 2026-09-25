@@ -84,11 +84,16 @@ jobs:
         run: |
           set -euo pipefail
           project="$(python3 -c 'import tomllib; print(tomllib.load(open("server/pyproject.toml", "rb"))["project"]["version"])')"
+          # Only the release part of a project version is comparable with a git tag:
+          # SemVer writes a pre-release `1.2.3-rc.1`, PEP 440 writes it `1.2.3rc1`.
+          project_core="$(printf '%s' "$project" | sed -E 's/((a|b|rc)[0-9]+|\.(dev|post)[0-9]+)$//')"
           if [ "$EVENT" = "push" ]; then
             tag="$REF_NAME"
             publish=true
           else
-            tag="${INPUT_VERSION:-v$project}"
+            # Rehearsing a pre-release needs the input; the default is the plain
+            # version this working tree would release.
+            tag="${INPUT_VERSION:-v$project_core}"
             publish=false
           fi
           version="${tag#v}"
@@ -99,8 +104,9 @@ jobs:
           # The server reports its installed package version through
           # /api/v1/server/info, so a tag that disagrees with pyproject.toml would
           # publish an image that contradicts its own version label.
-          if [ "$version" != "$project" ]; then
-            echo "::error::tag $tag says $version but server/pyproject.toml says $project; bump the project version in the commit you tag"
+          core="${version%%-*}"
+          if [ "$core" != "$project_core" ]; then
+            echo "::error::tag $tag says $core but server/pyproject.toml says $project; bump the project version in the commit you tag"
             exit 1
           fi
           # `latest` only for a stable release: a pre-release must never become what a
