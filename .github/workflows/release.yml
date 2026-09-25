@@ -3,8 +3,15 @@ name: release
 # Publishes ghcr.io/akira783/tindarr (server + built console) for linux/amd64 and
 # linux/arm64, signed, with an SBOM and provenance. Nothing is ever published unless a
 # `v*` tag is pushed: `workflow_dispatch` runs the whole thing as a rehearsal that
-# builds both architectures, writes the result to a local OCI tarball, and neither logs
-# in to the registry nor pushes, signs or attests anything.
+# builds and runs both architectures, writes the result to a local OCI tarball, and
+# neither logs in to the registry nor pushes, signs or attests anything.
+#
+# The order matters more than the steps do. The index is pushed **by digest**, under no
+# tag at all; it is then signed, attested and verified; and only once that has passed do
+# `1.2.3`, `1.2` and `latest` get attached to it. Nothing is ever reachable by name
+# before it is verifiable: a run that dies between the push and the signature leaves an
+# untagged version in the registry that no `docker pull` can reach, which is the failure
+# we want.
 #
 # Verifying a published image, as a user, from the digest the registry serves:
 #
@@ -15,7 +22,7 @@ name: release
 #       '^https://github\.com/akira783/tindarr/\.github/workflows/release\.yml@refs/tags/v' \
 #     | jq .
 #
-# The signature is keyless: there is no private key anywhere: the certificate is issued
+# The signature is keyless: there is no private key anywhere; the certificate is issued
 # to this workflow's GitHub OIDC identity for the duration of the run and logged in
 # Rekor. The regexp above is what binds a signature to *this* workflow file on a tag of
 # *this* repository — verifying without `--certificate-identity*` and
@@ -24,9 +31,15 @@ name: release
 # The GitHub-signed build provenance (who built it, from which commit, with which
 # workflow) is checked with:
 #
-#   gh attestation verify oci://ghcr.io/akira783/tindarr:1.2.3 --repo akira783/tindarr
+#   gh attestation verify oci://ghcr.io/akira783/tindarr:1.2.3 \
+#     --repo akira783/tindarr \
+#     --signer-workflow akira783/tindarr/.github/workflows/release.yml
 #
-# and the SBOM that BuildKit attached to each architecture with:
+# `--repo` alone would accept an attestation from any workflow in the repository, which
+# is a much weaker statement than the cosign one above; `--signer-workflow` is what
+# makes the two say the same thing.
+#
+# And the SBOM BuildKit attached to each architecture:
 #
 #   docker buildx imagetools inspect ghcr.io/akira783/tindarr:1.2.3 --format '{{ json .SBOM }}'
 
@@ -45,22 +58,27 @@ on:
 permissions: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  # Deliberately not `cancel-in-progress: true`, unlike the other workflows in this
-  # repository: a release that is halfway through pushing a manifest is the one thing
-  # that must never be cancelled from under itself.
+  # The workflow name alone, with no ref: `github.ref` is `refs/tags/v1.2.3` here, so
+  # keying on it would put two tags in two groups and let them race — and both of them
+  # write `latest`. `git push origin v1.2.3 v1.2.4` is enough to do it. Releases are
+  # serialised repository-wide.
+  group: ${{ github.workflow }}
+  # And never cancelled: a release halfway through signing or tagging must be allowed
+  # to finish or to fail on its own.
   cancel-in-progress: false
 
 env:
   IMAGE: ghcr.io/akira783/tindarr
+  PLATFORMS: linux/amd64,linux/arm64
 
 jobs:
   release:
     name: Build, smoke test, publish and sign
     runs-on: ubuntu-24.04
-    # The arm64 half is built under QEMU, which is slow: uv installs and byte-compiles
-    # the whole dependency tree emulated.
-    timeout-minutes: 60
+    # The arm64 half is built *and run* under QEMU, which is slow: uv installs and
+    # byte-compiles the whole dependency tree emulated, then the smoke test starts the
+    # emulated server twice.
+    timeout-minutes: 90
     permissions:
       contents: read # checkout
       packages: write # push the image, and the provenance attached to it as a referrer
@@ -83,55 +101,18 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          project="$(python3 -c 'import tomllib; print(tomllib.load(open("server/pyproject.toml", "rb"))["project"]["version"])')"
-          # Only the release part of a project version is comparable with a git tag:
-          # SemVer writes a pre-release `1.2.3-rc.1`, PEP 440 writes it `1.2.3rc1`.
-          project_core="$(printf '%s' "$project" | sed -E 's/((a|b|rc)[0-9]+|\.(dev|post)[0-9]+)$//')"
-          if [ "$EVENT" = "push" ]; then
-            tag="$REF_NAME"
-            publish=true
-          else
-            # Rehearsing a pre-release needs the input; the default is the plain
-            # version this working tree would release.
-            tag="${INPUT_VERSION:-v$project_core}"
-            publish=false
-          fi
-          version="${tag#v}"
-          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
-            echo "::error::$tag is not vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-prerelease"
-            exit 1
-          fi
-          # The server reports its installed package version through
-          # /api/v1/server/info, so a tag that disagrees with pyproject.toml would
-          # publish an image that contradicts its own version label.
-          core="${version%%-*}"
-          if [ "$core" != "$project_core" ]; then
-            echo "::error::tag $tag says $core but server/pyproject.toml says $project; bump the project version in the commit you tag"
-            exit 1
-          fi
-          # `latest` only for a stable release: a pre-release must never become what a
-          # `:latest` deployment pulls next.
-          case "$version" in
-            *-*) latest=false ;;
-            *) latest=true ;;
-          esac
-          {
-            echo "tag=$tag"
-            echo "version=$version"
-            echo "publish=$publish"
-            echo "latest=$latest"
-            echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          } >>"$GITHUB_OUTPUT"
-          echo "$tag: publish=$publish latest=$latest"
+          python3 .github/scripts/release-version.py
 
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: ${{ env.PLATFORMS }}
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      # Built first, on its own, and only for the runner's own architecture, because the
-      # point is to *run* it. No registry cache is used anywhere in this job: the layers
-      # the multi-arch build reuses come from this builder, in this run, from this
-      # commit, and nothing signed here can be traced back to a cache another branch
-      # wrote. The amd64 half of the build below therefore costs nothing twice.
+      # One architecture at a time, loaded into the daemon, because the point is to
+      # *run* them. No registry cache is used anywhere in this job: the layers the
+      # publishing build reuses come from this builder, in this run, from this commit,
+      # and nothing signed here can be traced back to a cache another branch wrote. The
+      # build below therefore costs nothing twice.
       - name: Build the amd64 image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -139,23 +120,44 @@ jobs:
           file: server/Dockerfile
           platforms: linux/amd64
           load: true
-          tags: tindarr-server:smoke
+          tags: tindarr-server:smoke-amd64
           # `docker load` reads a single-platform image; attestations need an index.
+          provenance: false
+          sbom: false
+
+      - name: Build the arm64 image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: server/Dockerfile
+          platforms: linux/arm64
+          load: true
+          tags: tindarr-server:smoke-arm64
           provenance: false
           sbom: false
 
       # The same script server.yml runs on every push: read-only root filesystem, no
       # capabilities, fresh volume, restart on the same volume. An image that does not
       # start, or serves no console, stops the release here, before the registry.
-      - name: Smoke test it
-        run: .github/scripts/docker-smoke-test.sh tindarr-server:smoke
+      #
+      # Both architectures, because publishing one that was never started is publishing
+      # a guess: a dependency that has no aarch64 wheel and falls back to an sdist, or a
+      # base image that differs, is invisible to an index-shape check. The arm64
+      # container runs under QEMU through the binfmt handlers installed above.
+      - name: Smoke test amd64
+        run: .github/scripts/docker-smoke-test.sh tindarr-server:smoke-amd64
+
+      - name: Smoke test arm64, emulated
+        env:
+          SMOKE_PORT: "18788"
+        run: .github/scripts/docker-smoke-test.sh tindarr-server:smoke-arm64
 
       - name: Registry tags for this version
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE }}
-          # `latest` is decided above, on the version, not on the event.
+          # `latest` is decided in the step above, on the version, not on the event.
           flavor: latest=false
           tags: |
             type=semver,pattern={{version}},value=${{ steps.release.outputs.tag }}
@@ -170,10 +172,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # One step for both paths: a tag pushes the index to GHCR, a dispatch writes the
-      # very same index to a tarball. There is no login on the rehearsal path, so a push
-      # that slipped through the condition would fail on authentication rather than
-      # publish something.
+      # One step for both paths: a tag pushes the index to GHCR **by digest and under no
+      # tag**, a dispatch writes the very same index to a tarball. There is no login on
+      # the rehearsal path, so a push that slipped through the condition would fail on
+      # authentication rather than publish something.
       #
       # `sbom: true` and `provenance: mode=max` are BuildKit's own attestations, carried
       # inside the image index: an SPDX document per architecture, and the SLSA
@@ -183,20 +185,21 @@ jobs:
       # it is a Sigstore-signed statement by GitHub's own OIDC identity that this digest
       # came out of this workflow, at this commit, and it is what `gh attestation verify`
       # checks. Descriptive contents on one side, an attested origin on the other.
-      - name: Build linux/amd64 and linux/arm64
+      - name: Build both architectures
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: server/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: ${{ steps.release.outputs.publish == 'true' }}
-          # Written the negative way round on purpose: `cond && '' || x` is the trap
-          # where an empty string is falsy and the `||` branch wins anyway, which would
-          # export a tarball on a real release. The non-empty value has to be the one
-          # the `&&` yields.
-          outputs: ${{ steps.release.outputs.publish != 'true' && format('type=oci,dest={0}/tindarr-oci.tar', runner.temp) || '' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ env.PLATFORMS }}
+          # `tags:` is deliberately unset on both paths: the registry learns no name
+          # here. `push-by-digest` refuses a tag anyway, and the rehearsal must not
+          # take a different route through this action.
+          #
+          # Written the negative way round on purpose: `cond && a || b` is the trap
+          # where an empty or falsy `a` lets the `||` branch win anyway. The value that
+          # must never leak into the other path is the one the `&&` yields.
+          outputs: ${{ steps.release.outputs.publish != 'true' && format('type=oci,name={0},dest={1}/tindarr-oci.tar', env.IMAGE, runner.temp) || format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE) }}
           # Only the three labels that cannot be written in the Dockerfile. The title,
           # description, source and licence are already baked in there, and
           # `steps.meta.outputs.labels` is deliberately not used: it would quietly
@@ -209,8 +212,7 @@ jobs:
           provenance: mode=max
 
       # A rehearsal that only says "the build succeeded" proves nothing about what the
-      # build produced. This opens the tarball and checks the index really holds both
-      # architectures and their attestations.
+      # build produced. Same assertions as the published index is checked with below.
       - name: The rehearsal really produced a two-architecture, attested index
         if: steps.release.outputs.publish != 'true'
         env:
@@ -220,51 +222,25 @@ jobs:
           layout="$RUNNER_TEMP/oci"
           mkdir -p "$layout"
           tar -xf "$TARBALL" -C "$layout"
-          python3 - "$layout" <<'PY'
-          import json, pathlib, sys
-
-          root = pathlib.Path(sys.argv[1])
-
-          def blob(digest):
-              algo, hexdigest = digest.split(":")
-              return json.loads((root / "blobs" / algo / hexdigest).read_bytes())
-
-          index = json.loads((root / "index.json").read_text())
-          # The top level points at the image index the build produced.
-          top = index["manifests"][0]
-          if "index" not in top["mediaType"]:
-              raise SystemExit(f"expected an image index, got {top['mediaType']}")
-          manifests = blob(top["digest"])["manifests"]
-
-          platforms, attested = set(), set()
-          for manifest in manifests:
-              annotations = manifest.get("annotations") or {}
-              if annotations.get("vnd.docker.reference.type") == "attestation-manifest":
-                  attested.add(annotations["vnd.docker.reference.digest"])
-                  continue
-              platform = manifest["platform"]
-              platforms.add(f"{platform['os']}/{platform['architecture']}")
-
-          expected = {"linux/amd64", "linux/arm64"}
-          if platforms != expected:
-              raise SystemExit(f"expected {sorted(expected)}, got {sorted(platforms)}")
-          missing = {m["digest"] for m in manifests
-                     if not (m.get("annotations") or {}).get("vnd.docker.reference.type")} - attested
-          if missing:
-              raise SystemExit(f"no attestation manifest for: {sorted(missing)}")
-          print(f"index holds {sorted(platforms)}, each with its attestations")
-          PY
+          python3 .github/scripts/check-image-index.py --oci-layout "$layout" --expect "$PLATFORMS"
 
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         if: steps.release.outputs.publish == 'true'
 
-      # Signed on the digest, never on `:latest` or `:1.2`: a tag is a name that can be
-      # moved onto another image tomorrow, and a signature on a name would move with it.
-      - name: Sign the image, keyless
+      # `--recursive` signs the index *and* every manifest under it. Without it only the
+      # index carries a signature, and anything that resolves the platform first and
+      # verifies the digest it lands on — an admission controller, or a
+      # `crane digest --platform linux/arm64` followed by a verify — is told there are
+      # no matching signatures for a perfectly good image.
+      #
+      # On the digest, never on `1.2.3` or `latest`: a tag is a name that can be moved
+      # onto another image tomorrow, and a signature on a name would move with it. At
+      # this point in the run no tag exists yet anyway.
+      - name: Sign the image and every manifest in it, keyless
         if: steps.release.outputs.publish == 'true'
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
-        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+        run: cosign sign --yes --recursive "${IMAGE}@${DIGEST}"
 
       - name: Attest how it was built
         if: steps.release.outputs.publish == 'true'
@@ -273,6 +249,56 @@ jobs:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+
+      # Everything above is checked here, against the registry, exactly as a user would
+      # check it — and before any name points at it. If Fulcio was down, if the
+      # signature never reached the registry, or if the index that arrived is not the
+      # one we think we built, the release fails here with nothing published under a
+      # name anyone can pull.
+      - name: Verify what was pushed, as a stranger would
+        if: steps.release.outputs.publish == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # A repository name may contain a dot, which is a regexp metacharacter.
+          repo="$(printf '%s' "$GITHUB_REPOSITORY" | sed 's/\./\\./g')"
+          identity="^https://github\\.com/${repo}/\\.github/workflows/release\\.yml@refs/tags/v"
+          cosign verify "${IMAGE}@${DIGEST}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp "$identity" >/dev/null
+          echo "signature verified against $identity"
+          docker buildx imagetools inspect --raw "${IMAGE}@${DIGEST}" \
+            | python3 .github/scripts/check-image-index.py - --expect "$PLATFORMS"
+
+      # Only now does the image get a name. `imagetools create` copies the index the
+      # signature was made on, so every tag resolves to the digest that was verified
+      # above — which the loop then insists on, because a tag pointing anywhere else
+      # would make `cosign verify ghcr.io/akira783/tindarr:1.2.3` fail for users.
+      # The three tags are as close to atomic as a registry allows: one command, and
+      # nothing between them that can fail slowly.
+      - name: Attach the tags to the verified digest
+        if: steps.release.outputs.publish == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          targets=()
+          while IFS= read -r tag; do
+            [ -n "$tag" ] && targets+=(--tag "$tag")
+          done <<<"$TAGS"
+          [ "${#targets[@]}" -gt 0 ] || { echo "::error::no tag to attach"; exit 1; }
+          docker buildx imagetools create "${targets[@]}" "${IMAGE}@${DIGEST}"
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            resolved="$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$tag")"
+            if [ "$resolved" != "$DIGEST" ]; then
+              echo "::error::$tag resolves to $resolved, not the signed $DIGEST"
+              exit 1
+            fi
+            echo "$tag -> $resolved"
+          done <<<"$TAGS"
 
       - name: Say what was published, and how to check it
         if: steps.release.outputs.publish == 'true'
@@ -288,12 +314,14 @@ jobs:
             echo "$TAGS"
             echo '```'
             echo
-            echo 'Verify the signature:'
+            echo 'Verify it:'
             echo
             echo '```console'
             echo "\$ cosign verify ${IMAGE}@${DIGEST} \\"
             echo "    --certificate-oidc-issuer https://token.actions.githubusercontent.com \\"
             echo "    --certificate-identity-regexp '^https://github\\.com/${GITHUB_REPOSITORY}/\\.github/workflows/release\\.yml@refs/tags/v'"
-            echo "\$ gh attestation verify oci://${IMAGE}@${DIGEST} --repo ${GITHUB_REPOSITORY}"
+            echo "\$ gh attestation verify oci://${IMAGE}@${DIGEST} \\"
+            echo "    --repo ${GITHUB_REPOSITORY} \\"
+            echo "    --signer-workflow ${GITHUB_REPOSITORY}/.github/workflows/release.yml"
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
