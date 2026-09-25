@@ -2,8 +2,9 @@
 # ../docs/deployment.md.
 #
 # No image is published yet (roadmap step 5), so this builds one from the repository
-# root — the image contains the web console, so the build needs web/, shared/i18n/,
-# shared/design/ and api/openapi.yaml:
+# root — the image contains the web console, so the build needs web/, shared/i18n/ and
+# shared/design/ (not api/openapi.yaml: web/src/api/schema.d.ts is committed and
+# `npm run build` does not regenerate it, which is why .dockerignore never sends it):
 #   docker compose -f deploy/docker-compose.yml up -d --build
 # Once images land on GHCR, delete the `build:` block and uncomment the `image:` line
 # below: nothing else in this file changes.
