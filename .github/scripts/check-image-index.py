@@ -17,6 +17,7 @@ them is one nobody can check.
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import pathlib
 import sys
@@ -37,7 +38,7 @@ def load_from_layout(directory: pathlib.Path) -> dict:
     return json.loads((directory / "blobs" / algorithm / digest).read_bytes())
 
 
-def check(index: dict, expected: set[str]) -> None:
+def check(index: dict, expected: list[str]) -> None:
     if "index" not in index.get("mediaType", ""):
         raise SystemExit(f"expected an image index, got {index.get('mediaType')!r}")
 
@@ -52,9 +53,12 @@ def check(index: dict, expected: set[str]) -> None:
         name = f"{platform.get('os')}/{platform.get('architecture')}"
         platforms[manifest["digest"]] = name
 
-    found = set(platforms.values())
-    if found != expected:
-        raise SystemExit(f"expected {sorted(expected)}, got {sorted(found)}")
+    # Counted, not collected: two manifests claiming the same platform is an index a
+    # client resolves by luck, and a set would have said it was fine.
+    found = collections.Counter(platforms.values())
+    if found != collections.Counter(expected):
+        got = sorted(f"{name} x{count}" if count > 1 else name for name, count in found.items())
+        raise SystemExit(f"expected {sorted(expected)}, got {got}")
 
     unattested = sorted(name for digest, name in platforms.items() if digest not in attested)
     if unattested:
@@ -71,7 +75,12 @@ def main() -> None:
     parser.add_argument("--expect", default="linux/amd64,linux/arm64")
     args = parser.parse_args()
 
-    expected = {item.strip() for item in args.expect.split(",") if item.strip()}
+    expected = [item.strip() for item in args.expect.split(",") if item.strip()]
+    if not expected:
+        # An empty --expect would compare "no platform wanted" with "no platform
+        # found" and call an index holding nothing a success. `set -u` in the caller
+        # catches an unset PLATFORMS, not an empty one.
+        raise SystemExit("--expect names no platform; there is nothing to check")
     if args.oci_layout:
         index = load_from_layout(args.oci_layout)
     elif args.index == "-":

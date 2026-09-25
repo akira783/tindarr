@@ -41,23 +41,35 @@ CANONICAL_PRE = {
 }
 
 # What pyproject.toml may say: X.Y.Z, optionally a pre-release of it, in any of the
-# spellings PEP 440 allows for it.
+# spellings PEP 440 allows for it — including the leading zeros PEP 440 tolerates and
+# normalises away (`1.02.3` and `1.2.3rc01` are `1.2.3` and `1.2.3rc1`), which is why
+# every number here goes through int() before anything is compared.
 PROJECT = re.compile(
     rf"(?P<release>\d+\.\d+\.\d+)(?:[-_.]?(?P<pre>{PRE_SPELLINGS})[-_.]?(?P<number>\d+)?)?",
     re.IGNORECASE,
 )
-# What a git tag may say: the same versions, spelled the SemVer way.
+# What a git tag may say: the same versions, spelled the SemVer way — and SemVer
+# forbids a leading zero, so this one does too. It is not pedantry: node-semver refuses
+# `v1.02.3`, docker/metadata-action answers a refusal with `core.warning` and emits no
+# version tag at all, and the run stays green with `latest` pointing at an image that
+# has no version tag. Refusing the tag here is the first of the two guards against
+# that; `release.yml` checking the tag list it actually got is the one that matters.
+NUMBER = r"(?:0|[1-9]\d*)"
 TAG = re.compile(
-    rf"v(?P<release>\d+\.\d+\.\d+)(?:-(?P<pre>{PRE_SPELLINGS})[.-]?(?P<number>\d+)?)?"
+    rf"v(?P<release>{NUMBER}\.{NUMBER}\.{NUMBER})"
+    rf"(?:-(?P<pre>{PRE_SPELLINGS})[.-]?(?P<number>{NUMBER})?)?"
 )
 
 SUPPORTED = "this workflow releases X.Y.Z and pre-releases of it (1.2.3, 1.2.3rc1) and nothing else"
 
 
 def die(message: str) -> None:
-    # Anything user-supplied reaches this through repr(), so a newline in an input
-    # cannot close the annotation and start a workflow command of its own.
-    print(f"::error::{message}")
+    # The sanitising is done here rather than trusted to every call site: a newline in
+    # a message would close the annotation and let the rest start a workflow command of
+    # its own. Call sites pass user-supplied values through repr() as well, which is
+    # what makes the message readable; this is what makes it safe.
+    safe = message.replace("\r", "\\r").replace("\n", "\\n")
+    print(f"::error::{safe}")
     raise SystemExit(1)
 
 
@@ -73,24 +85,34 @@ def why_unsupported(raw: str) -> str:
         r"\d+(?:\.\d+)*-\d+", raw
     ):
         return "a post-release"
+    if re.search(r"(?:^|[v.])0\d", raw):
+        return "a number with a leading zero, which SemVer forbids and metadata-action drops silently"
     return ""
+
+
+def numbers(match: re.Match[str]) -> tuple[str, str, str]:
+    """The release, the pre-release letter and its number, all leading zeros gone.
+
+    PEP 440 normalises `1.02.3rc01` to `1.2.3rc1`, and the installed package therefore
+    answers `1.2.3rc1`; comparing the spellings rather than the numbers would refuse a
+    legitimate pair. An absent pre-release number is 0, again per PEP 440.
+    """
+    release = ".".join(str(int(part)) for part in match["release"].split("."))
+    if not match["pre"]:
+        return release, "", ""
+    return release, CANONICAL_PRE[match["pre"].lower()], str(int(match["number"] or 0))
 
 
 def canonical(match: re.Match[str]) -> str:
     """PEP 440's canonical spelling of a version this workflow accepts."""
-    release = match["release"]
-    if not match["pre"]:
-        return release
-    # PEP 440: an implicit pre-release number is 0, so `1.2.3rc` is `1.2.3rc0`.
-    return f"{release}{CANONICAL_PRE[match['pre'].lower()]}{match['number'] or '0'}"
+    release, pre, number = numbers(match)
+    return f"{release}{pre}{number}"
 
 
 def semver(match: re.Match[str]) -> str:
     """The same version, spelled the way a git tag spells it."""
-    release = match["release"]
-    if not match["pre"]:
-        return f"v{release}"
-    return f"v{release}-{CANONICAL_PRE[match['pre'].lower()]}.{match['number'] or '0'}"
+    release, pre, number = numbers(match)
+    return f"v{release}-{pre}.{number}" if pre else f"v{release}"
 
 
 def main() -> None:
