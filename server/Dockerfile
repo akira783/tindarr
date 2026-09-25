@@ -2,7 +2,8 @@
 
 # Tindarr server image, with the web console inside it.
 # - Build context: the REPOSITORY ROOT, because the console needs web/,
-#   shared/i18n/ and api/openapi.yaml:
+#   shared/i18n/ and shared/design/ (the contract is not read here: the generated
+#   client web/src/api/schema.d.ts is committed):
 #       docker build -f server/Dockerfile -t tindarr-server .
 #   The root .dockerignore says what the build may read.
 # - Runs as UID/GID 10001, works with a read-only root filesystem: state lives in the
