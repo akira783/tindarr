@@ -286,7 +286,9 @@ jobs:
           set -euo pipefail
           targets=()
           while IFS= read -r tag; do
-            [ -n "$tag" ] && targets+=(--tag "$tag")
+            # metadata-action's list may end with a blank line.
+            [ -n "$tag" ] || continue
+            targets+=(--tag "$tag")
           done <<<"$TAGS"
           [ "${#targets[@]}" -gt 0 ] || { echo "::error::no tag to attach"; exit 1; }
           docker buildx imagetools create "${targets[@]}" "${IMAGE}@${DIGEST}"
