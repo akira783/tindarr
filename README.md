@@ -68,6 +68,8 @@ cd server && TINDARR_WEB_DIR=../web/dist uv run tindarr serve   # http://127.0.0
 
 The first start prints the path to a one-time setup code (never the code itself: logs travel). Open the console, paste the code, and connect your media server. Over plain HTTP on a private network, add `TINDARR_ALLOW_HTTP_CONSOLE=true`; anywhere else, put it behind HTTPS. Every setting lives in [server/README.md](server/README.md).
 
+To run it properly — Docker, a reverse proxy, backups you can restore from — follow [the deployment guide](docs/deployment.md).
+
 ## Security
 
 Tindarr holds keys to your media server, your request queue and your AI provider's billing, so it is built accordingly: sessions revocable on the spot, rotating refresh tokens with reuse detection, secrets encrypted at rest and redacted from logs, strict CSP on the console, and rate limits that cannot be turned against you. The reasoning, the threat model and the parts that are deliberately not covered are in [docs/security.md](docs/security.md).
@@ -76,6 +78,7 @@ Found a hole? Report it privately through GitHub security advisories rather than
 
 ## Documentation
 
+- [Deployment](docs/deployment.md) — compose, reverse proxy, backups, updates, monitoring
 - [Architecture](docs/architecture.md) — layers, ports and adapters, storage, jobs
 - [Security model](docs/security.md) — assets, adversaries, mitigations
 - [Authentication, sessions and setup](docs/auth.md) — the reference the code follows

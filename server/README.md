@@ -107,3 +107,8 @@ The image runs as UID/GID 10001 and only writes to `/data` (a bind mount must be
 writable by that UID) and `/tmp`. The console is built by a Node stage and copied to
 `/app/web` (`TINDARR_WEB_DIR`); the runtime image has no Node. See [`../deploy/docker-compose.yml`](../deploy/docker-compose.yml).
 Back up the volume and the key separately.
+
+That `docker run` line is the shortest thing that starts: it publishes on every
+interface and speaks plain HTTP. A real installation — reverse proxy, allowed hosts,
+trusted proxies, backups, updates and monitoring — is
+[the deployment guide](../docs/deployment.md).
